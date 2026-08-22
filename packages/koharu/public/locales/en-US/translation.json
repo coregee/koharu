@@ -133,6 +133,12 @@
     "output": "Output",
     "pipelineStages": "Pipeline stages",
     "providerDefault": "Provider default",
+    "quickStage": {
+      "detection": "Detection",
+      "inpainting": "Inpaint",
+      "ocr": "OCR",
+      "translation": "Translate"
+    },
     "run": "Run",
     "runProcessing": "Run processing",
     "scope": "Scope",

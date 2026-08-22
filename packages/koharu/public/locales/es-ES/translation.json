@@ -133,6 +133,12 @@
     "output": "Salida",
     "pipelineStages": "Etapas del flujo",
     "providerDefault": "Predeterminado del proveedor",
+    "quickStage": {
+      "detection": "Detección",
+      "inpainting": "Rellenar",
+      "ocr": "OCR",
+      "translation": "Traducir"
+    },
     "run": "Ejecutar",
     "runProcessing": "Ejecutar procesamiento",
     "scope": "Ámbito",

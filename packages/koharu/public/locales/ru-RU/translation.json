@@ -133,6 +133,12 @@
     "output": "Результат",
     "pipelineStages": "Этапы конвейера",
     "providerDefault": "По умолчанию у провайдера",
+    "quickStage": {
+      "detection": "Обнаружение",
+      "inpainting": "Ретушь",
+      "ocr": "OCR",
+      "translation": "Перевести"
+    },
     "run": "Запустить",
     "runProcessing": "Запустить обработку",
     "scope": "Область",

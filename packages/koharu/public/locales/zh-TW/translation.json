@@ -133,6 +133,12 @@
     "output": "輸出",
     "pipelineStages": "處理流程階段",
     "providerDefault": "提供者預設值",
+    "quickStage": {
+      "detection": "偵測",
+      "inpainting": "修復",
+      "ocr": "OCR",
+      "translation": "翻譯"
+    },
     "run": "執行",
     "runProcessing": "執行處理",
     "scope": "範圍",

@@ -133,6 +133,12 @@
     "output": "Çıktı",
     "pipelineStages": "İşlem hattı aşamaları",
     "providerDefault": "Sağlayıcı varsayılanı",
+    "quickStage": {
+      "detection": "Algılama",
+      "inpainting": "Rötuşla",
+      "ocr": "OCR",
+      "translation": "Çevir"
+    },
     "run": "Çalıştır",
     "runProcessing": "İşlemeyi çalıştır",
     "scope": "Kapsam",

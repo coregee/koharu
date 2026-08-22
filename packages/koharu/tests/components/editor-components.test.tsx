@@ -844,6 +844,46 @@ describe('greenfield editor', () => {
     expect(useKoharuStore.getState().settingsOpen).toBe(true)
   })
 
+  it('runs one stage on the current page from each command bar shortcut', async () => {
+    installProject()
+    useKoharuStore.setState({
+      processingScope: 'project',
+      processingStages: ['detection', 'ocr'],
+    })
+    const run = vi.spyOn(commands, 'process').mockResolvedValue('job')
+    render(<CanvasCommandBar />)
+
+    for (const [label, stage] of [
+      ['Detection', 'detection'],
+      ['OCR', 'ocr'],
+      ['Translate', 'translation'],
+      ['Inpaint', 'inpainting'],
+    ] as const) {
+      const shortcut = screen.getByRole('button', { name: label })
+      expect(shortcut.querySelector('svg')).not.toBeNull()
+      fireEvent.click(shortcut)
+      await waitFor(() =>
+        expect(run).toHaveBeenLastCalledWith(
+          { scope: 'pages', value: ['page'] },
+          { operation: 'only', stage },
+        ),
+      )
+    }
+
+    expect(useKoharuStore.getState().processingScope).toBe('project')
+    expect(useKoharuStore.getState().processingStages).toEqual(['detection', 'ocr'])
+
+    const separator = screen.getByRole('separator')
+    const inpaint = screen.getByRole('button', { name: 'Inpaint' })
+    const selector = screen.getByRole('button', { name: 'Processing settings' })
+    expect(inpaint.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+      0,
+    )
+    expect(separator.compareDocumentPosition(selector) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+      0,
+    )
+  })
+
   it('configures translation output from the runtime selector', async () => {
     installProject()
     const user = userEvent.setup()

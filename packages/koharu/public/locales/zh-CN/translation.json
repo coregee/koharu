@@ -133,6 +133,12 @@
     "output": "输出",
     "pipelineStages": "处理流程阶段",
     "providerDefault": "提供商默认值",
+    "quickStage": {
+      "detection": "检测",
+      "inpainting": "修复",
+      "ocr": "OCR",
+      "translation": "翻译"
+    },
     "run": "运行",
     "runProcessing": "运行处理",
     "scope": "范围",

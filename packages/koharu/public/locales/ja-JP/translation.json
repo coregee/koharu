@@ -133,6 +133,12 @@
     "output": "出力",
     "pipelineStages": "パイプラインの工程",
     "providerDefault": "プロバイダーの既定値",
+    "quickStage": {
+      "detection": "検出",
+      "inpainting": "インペイント",
+      "ocr": "OCR",
+      "translation": "翻訳"
+    },
     "run": "実行",
     "runProcessing": "処理を実行",
     "scope": "範囲",
