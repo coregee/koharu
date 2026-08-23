@@ -4,8 +4,9 @@ import { useMemo, useRef } from 'react'
 
 import { SelectionControls } from '@/components/editor/SelectionControls'
 import { effectiveLayerVisibility, expandLayerSelection, isTextLayer } from '@/lib/document'
-import { controlFrame, cssFrame, selectableLayer, type Camera } from '@/lib/geometry'
+import { controlFrame, cssFrame, geometryFrame, selectableLayer, type Camera } from '@/lib/geometry'
 import type {
+  AnalysisRegion,
   EntityId,
   Frame,
   Geometry,
@@ -21,6 +22,7 @@ interface CanvasOverlayProps {
   hovered: EntityId | null
   frames: Readonly<Record<EntityId, Frame>>
   previews: Readonly<Record<EntityId, Frame>>
+  regionPreviews: Readonly<Record<EntityId, Frame>>
   draft: Frame | null
   cursor: Point | null
   brushSize: number
@@ -28,6 +30,9 @@ interface CanvasOverlayProps {
   onTransformStart: (elements: TransformFrame[]) => void
   onTransformFrame: (elements: TransformFrame[]) => void
   onTransformEnd: () => void
+  onRegionTransformStart: (elements: TransformFrame[]) => void
+  onRegionTransformFrame: (elements: TransformFrame[]) => void
+  onRegionTransformEnd: () => void
 }
 
 export function CanvasOverlay({
@@ -37,6 +42,7 @@ export function CanvasOverlay({
   hovered,
   frames,
   previews,
+  regionPreviews,
   draft,
   cursor,
   brushSize,
@@ -44,6 +50,9 @@ export function CanvasOverlay({
   onTransformStart,
   onTransformFrame,
   onTransformEnd,
+  onRegionTransformStart,
+  onRegionTransformFrame,
+  onRegionTransformEnd,
 }: CanvasOverlayProps) {
   const root = useRef<HTMLDivElement>(null)
   const expandedSelection = useMemo(
@@ -67,9 +76,16 @@ export function CanvasOverlay({
       ? page.layers.find((layer) => layer.id === expandedSelection[0])
       : undefined
   const selectedTextLayer = selectedLayer && isTextLayer(selectedLayer) ? selectedLayer : undefined
+  const sourceRegion = selectedTextLayer?.content.source_region
+    ? page.regions.find((region) => region.id === selectedTextLayer.content.source_region)
+    : undefined
   const automaticRegion = selectedTextLayer?.automatic_region
     ? page.regions.find((region) => region.id === selectedTextLayer.automatic_region)
     : undefined
+  const displayedRegion = sourceRegion ?? automaticRegion
+  const regionControlFrame = sourceRegion
+    ? (regionPreviews[sourceRegion.id] ?? geometryFrame(sourceRegion.geometry))
+    : null
   const selectionControl = multipleSelected
     ? undefined
     : layers.find(({ layer }) => selectedIds.has(layer.id) && selectableLayer(layer))
@@ -82,8 +98,12 @@ export function CanvasOverlay({
       className='pointer-events-none absolute inset-0 overflow-hidden'
       aria-hidden
     >
-      {automaticRegion && (
-        <AutomaticRegionOverlay geometry={automaticRegion.geometry} camera={camera} />
+      {displayedRegion && (
+        <AutomaticRegionOverlay
+          region={displayedRegion}
+          preview={regionPreviews[displayedRegion.id]}
+          camera={camera}
+        />
       )}
       {layers.map(({ layer, frame, opacity }) => {
         const position = cssFrame(frame, camera)
@@ -125,7 +145,19 @@ export function CanvasOverlay({
         />
       )}
 
-      {selectionControl && (
+      {sourceRegion && regionControlFrame ? (
+        <SelectionControls
+          container={root}
+          element={sourceRegion.id}
+          frame={regionControlFrame}
+          camera={camera}
+          edgesOnly={false}
+          rotatable={false}
+          onTransformStart={onRegionTransformStart}
+          onTransformFrame={onRegionTransformFrame}
+          onTransformEnd={onRegionTransformEnd}
+        />
+      ) : selectionControl ? (
         <SelectionControls
           container={root}
           element={selectionControl.layer.id}
@@ -136,45 +168,80 @@ export function CanvasOverlay({
           onTransformFrame={onTransformFrame}
           onTransformEnd={onTransformEnd}
         />
-      )}
+      ) : null}
     </div>
   )
 }
 
-function AutomaticRegionOverlay({ geometry, camera }: { geometry: Geometry; camera: Camera }) {
+function AutomaticRegionOverlay({
+  region,
+  preview,
+  camera,
+}: {
+  region: AnalysisRegion
+  preview?: Frame
+  camera: Camera
+}) {
   const dpr = window.devicePixelRatio
+  const frame = preview ?? geometryFrame(region.geometry)
+  const geometry = preview ? frameGeometry(preview) : region.geometry
   const points = geometry.points
     .map(
       (point) =>
         `${(point.x * camera.zoom + camera.translation[0]) / dpr},${(point.y * camera.zoom + camera.translation[1]) / dpr}`,
     )
     .join(' ')
-  if (!points) return null
+  if (!points || !frame) return null
+
+  const position = cssFrame(frame, camera)
+  const common = {
+    fill: 'none',
+    strokeDasharray: '10 6',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    vectorEffect: 'non-scaling-stroke' as const,
+  }
+  const shape = (stroke: string, strokeWidth: string) =>
+    region.shape === 'circular' ? (
+      <ellipse
+        cx={position.left + position.width / 2}
+        cy={position.top + position.height / 2}
+        rx={position.width / 2}
+        ry={position.height / 2}
+        transform={`rotate(${position.angle} ${position.left + position.width / 2} ${position.top + position.height / 2})`}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        {...common}
+      />
+    ) : (
+      <polygon points={points} stroke={stroke} strokeWidth={strokeWidth} {...common} />
+    )
 
   return (
     <svg className='absolute inset-0 size-full overflow-hidden' data-testid='text-fit-region'>
-      <polygon
-        points={points}
-        fill='none'
-        stroke='var(--canvas-region-contrast)'
-        strokeWidth='7'
-        strokeDasharray='10 6'
-        strokeLinecap='round'
-        strokeLinejoin='round'
-        vectorEffect='non-scaling-stroke'
-      />
-      <polygon
-        points={points}
-        fill='none'
-        stroke='var(--canvas-region-stroke)'
-        strokeWidth='3'
-        strokeDasharray='10 6'
-        strokeLinecap='round'
-        strokeLinejoin='round'
-        vectorEffect='non-scaling-stroke'
-      />
+      {shape('var(--canvas-region-contrast)', '7')}
+      {shape('var(--canvas-region-stroke)', '3')}
     </svg>
   )
+}
+
+function frameGeometry(frame: Frame): Geometry {
+  const center = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }
+  const angle = (frame.angle_degrees * Math.PI) / 180
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const corners: Array<[number, number]> = [
+    [-frame.width / 2, -frame.height / 2],
+    [frame.width / 2, -frame.height / 2],
+    [frame.width / 2, frame.height / 2],
+    [-frame.width / 2, frame.height / 2],
+  ]
+  return {
+    points: corners.map(([x, y]) => ({
+      x: center.x + x * cos - y * sin,
+      y: center.y + x * sin + y * cos,
+    })),
+  }
 }
 
 function DraftOverlay({ frame, camera }: { frame: Frame; camera: Camera }) {

@@ -2,8 +2,8 @@
 
 use crate::{
     At, DetectionAnalysis, Edit, EntityId, Geometry, Group, OcrAnalysis, Origin, PageRef, Presents,
-    Region, RegionSpec, Result, Snapshot, SourceText, TextContent, TextGroup, TextLayout, TextRole,
-    Translation, Typography, Visibility,
+    Region, RegionShape, RegionShapeKind, RegionSpec, Result, Snapshot, SourceText, TextContent,
+    TextGroup, TextLayout, TextRole, Translation, Typography, Visibility,
 };
 
 #[derive(Copy, Clone)]
@@ -175,6 +175,10 @@ impl AnalysisRegionRef<'_> {
     pub fn ocr(self) -> Result<Option<OcrAnalysis>> {
         self.snapshot.component(self.id)
     }
+
+    pub fn shape(self) -> Result<Option<RegionShape>> {
+        self.snapshot.component(self.id)
+    }
 }
 
 impl Snapshot {
@@ -268,6 +272,13 @@ impl Edit {
                 origin: Origin::User,
                 kind: R::kind(),
                 label,
+            },
+        )?;
+        self.set(
+            entity,
+            &RegionShape {
+                origin: Origin::User,
+                kind: RegionShapeKind::Rectangular,
             },
         )?;
         Ok(entity)

@@ -14,7 +14,8 @@ mod structure;
 mod text;
 
 pub use analysis::{
-    DetectionAnalysis, DetectionLabel, OcrAnalysis, Region, RegionKind, TextDirection,
+    DetectionAnalysis, DetectionLabel, OcrAnalysis, Region, RegionKind, RegionShape,
+    RegionShapeKind, TextDirection,
 };
 pub(crate) use assets::Assets;
 pub use assets::{Asset, AssetInput, AssetMetadata, AssetRole};

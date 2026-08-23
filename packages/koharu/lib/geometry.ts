@@ -1,4 +1,11 @@
-import type { EntityId, Frame, Layer, Point, TransformFrame } from '@koharu/bridge/protocol'
+import type {
+  EntityId,
+  Frame,
+  Geometry,
+  Layer,
+  Point,
+  TransformFrame,
+} from '@koharu/bridge/protocol'
 
 import { effectiveLayerVisibility, isTextLayer } from './document'
 
@@ -63,10 +70,15 @@ export function selectableLayer(layer: Layer): boolean {
 }
 
 export function layerFrame(layer: Layer): Frame | null {
-  const points =
+  const geometry =
     layer.type === 'text' || layer.type === 'image' || layer.type === 'artwork'
-      ? layer.geometry?.points
+      ? layer.geometry
       : null
+  return geometryFrame(geometry)
+}
+
+export function geometryFrame(geometry: Geometry | null | undefined): Frame | null {
+  const points = geometry?.points
   if (!points?.length || points.some((point) => !finite(point.x, point.y))) return null
   if (points.length === 4) {
     const [topLeft, topRight, bottomRight, bottomLeft] = points

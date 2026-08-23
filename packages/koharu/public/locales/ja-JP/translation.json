@@ -239,6 +239,22 @@
     "moveUp": "{{name}}を上へ移動",
     "opacityLabel": "{{name}}の不透明度",
     "originalArtwork": "元のアートワーク",
+    "regionShape": "形状",
+    "regionShapeLabel": "{{name}}の領域形状",
+    "regionShapes": {
+      "circular": "円形",
+      "rectangular": "長方形"
+    },
+    "regionType": "種類",
+    "regionTypeLabel": "{{name}}のテキスト種類",
+    "regionTypes": {
+      "narration": "ナレーション",
+      "notSet": "未設定",
+      "sfx": "効果音",
+      "speech": "セリフ"
+    },
+    "rerunOcr": "OCRを再実行",
+    "rerunOcrLabel": "{{name}}のOCRを再実行",
     "show": "{{name}}を表示",
     "sourceLabel": "{{name}}の原文",
     "textName": "テキスト {{index}}",

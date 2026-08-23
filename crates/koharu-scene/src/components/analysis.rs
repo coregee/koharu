@@ -99,6 +99,39 @@ pub struct Region {
     pub label: Option<String>,
 }
 
+#[revisioned(revision = 1)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionShapeKind {
+    Circular,
+    #[default]
+    Rectangular,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct RegionShape {
+    pub origin: Origin,
+    pub kind: RegionShapeKind,
+}
+
+impl Component for RegionShape {
+    const KIND: &'static str = "dev.koharu.analysis.region-shape";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        self.origin.validate()
+    }
+
+    fn origin(&self) -> Option<&Origin> {
+        Some(&self.origin)
+    }
+
+    fn set_origin(&mut self, origin: Origin) -> bool {
+        self.origin = origin;
+        true
+    }
+}
+
 impl Component for Region {
     const KIND: &'static str = "dev.koharu.analysis.region";
 

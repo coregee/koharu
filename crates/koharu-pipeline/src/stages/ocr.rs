@@ -270,7 +270,19 @@ fn crop(source: &DynamicImage, geometry: &Geometry) -> Result<DynamicImage> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_ocr_text;
+    use super::{crop, normalize_ocr_text};
+    use image::DynamicImage;
+    use koharu_scene::Geometry;
+
+    #[test]
+    fn crop_uses_the_current_region_geometry() {
+        let source = DynamicImage::new_rgba8(200, 100);
+        let edited = Geometry::rectangle(24.25, 11.5, 80.5, 42.25);
+
+        let cropped = crop(&source, &edited).expect("edited region should overlap the page");
+
+        assert_eq!((cropped.width(), cropped.height()), (81, 43));
+    }
 
     #[test]
     fn repeated_placeholder_glyphs_are_an_ellipsis() {

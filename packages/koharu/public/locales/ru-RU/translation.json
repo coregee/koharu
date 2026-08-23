@@ -239,6 +239,22 @@
     "moveUp": "Переместить {{name}} вверх",
     "opacityLabel": "Непрозрачность {{name}}",
     "originalArtwork": "Исходное изображение",
+    "regionShape": "Форма",
+    "regionShapeLabel": "Форма области {{name}}",
+    "regionShapes": {
+      "circular": "Круглая",
+      "rectangular": "Прямоугольная"
+    },
+    "regionType": "Тип",
+    "regionTypeLabel": "Тип текста {{name}}",
+    "regionTypes": {
+      "narration": "Повествование",
+      "notSet": "Не задано",
+      "sfx": "Звуковой эффект",
+      "speech": "Речь"
+    },
+    "rerunOcr": "Повторить OCR",
+    "rerunOcrLabel": "Повторить OCR для {{name}}",
     "show": "Показать {{name}}",
     "sourceLabel": "Исходный текст {{name}}",
     "textName": "Текст {{index}}",

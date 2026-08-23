@@ -7,11 +7,12 @@ use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
     Geometry as SceneGeometry, Group as SceneGroup, Origin, PageDraft, Point as ScenePoint,
     Presents, RasterLayer as SceneRasterLayer, RasterLayerKind, Region as SceneRegion,
-    RemovePolicy, Revision, Session, Snapshot, SourceText as SceneSourceText,
-    TextGroup as SceneTextGroup, TextLayout as SceneTextLayout, TextLayoutKind,
-    Translation as SceneTranslation, Typography as SceneTypography, Visibility as SceneVisibility,
+    RegionShape as SceneRegionShape, RegionShapeKind, RemovePolicy, Revision, Session, Snapshot,
+    SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
+    TextLayoutKind, TextRole as SceneTextRole, Translation as SceneTranslation,
+    Typography as SceneTypography, Visibility as SceneVisibility,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::sync::Mutex;
 
@@ -120,8 +121,35 @@ pub struct TextContent {
     pub id: EntityId,
     pub source: Option<SourceText>,
     pub translation: Option<Translation>,
-    pub role: Option<String>,
+    pub classification: Option<TextClassification>,
     pub source_region: Option<EntityId>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TextClassification {
+    Speech,
+    Narration,
+    Sfx,
+}
+
+impl TextClassification {
+    fn from_role(role: &str) -> Option<Self> {
+        match role {
+            SceneTextRole::SPEECH => Some(Self::Speech),
+            SceneTextRole::NARRATION => Some(Self::Narration),
+            SceneTextRole::SFX => Some(Self::Sfx),
+            _ => None,
+        }
+    }
+
+    fn role(self) -> &'static str {
+        match self {
+            Self::Speech => SceneTextRole::SPEECH,
+            Self::Narration => SceneTextRole::NARRATION,
+            Self::Sfx => SceneTextRole::SFX,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -131,6 +159,7 @@ pub struct AnalysisRegion {
     pub geometry: Geometry,
     pub kind: String,
     pub label: Option<String>,
+    pub shape: RegionShapeKind,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -494,6 +523,30 @@ impl Project {
         self.commit(patch).await
     }
 
+    pub(crate) async fn set_text_classification(
+        &mut self,
+        layer: EntityId,
+        classification: Option<TextClassification>,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let content = Self::text_content(&snapshot, layer)?;
+        let patch = snapshot.patch(|edit| {
+            edit.promote_entity_to_user(layer)?;
+            edit.promote_entity_to_user(content)?;
+            match classification {
+                Some(classification) => edit.set(
+                    content,
+                    &SceneTextRole {
+                        origin: Origin::User,
+                        role: classification.role().to_owned(),
+                    },
+                ),
+                None => edit.remove::<SceneTextRole>(content),
+            }
+        })?;
+        self.commit(patch).await
+    }
+
     pub(crate) async fn set_translation(
         &mut self,
         layer: EntityId,
@@ -605,6 +658,41 @@ impl Project {
                 }
             }
             Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
+    pub(crate) async fn set_region_geometry(
+        &mut self,
+        region: EntityId,
+        frame: Frame,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        snapshot.analysis_region(region)?;
+        let geometry = Self::geometry_from_frame(frame)?;
+        let patch = snapshot.patch(|edit| {
+            edit.promote_entity_to_user(region)?;
+            edit.set(region, &geometry)
+        })?;
+        self.commit(patch).await
+    }
+
+    pub(crate) async fn set_region_shape(
+        &mut self,
+        region: EntityId,
+        shape: RegionShapeKind,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        snapshot.analysis_region(region)?;
+        let patch = snapshot.patch(|edit| {
+            edit.promote_entity_to_user(region)?;
+            edit.set(
+                region,
+                &SceneRegionShape {
+                    origin: Origin::User,
+                    kind: shape,
+                },
+            )
         })?;
         self.commit(patch).await
     }
@@ -1007,7 +1095,9 @@ impl Project {
                 text: translation.text.value,
                 language: translation.language.map(|language| language.to_string()),
             });
-            let role = content.role()?.map(|role| role.role);
+            let classification = content
+                .role()?
+                .and_then(|role| TextClassification::from_role(&role.role));
             let source_region = content.source_region()?.map(|region| region.id());
             let automatic_region = text_layer.automatic_target()?.map(|region| region.id());
             let typography = text_layer.typography()?.map(Self::typography_view);
@@ -1022,7 +1112,7 @@ impl Project {
                     id: content.id(),
                     source,
                     translation,
-                    role,
+                    classification,
                     source_region,
                 }),
                 typography,
@@ -1070,6 +1160,9 @@ impl Project {
             geometry,
             kind: region.kind.as_str().to_owned(),
             label: region.label,
+            shape: snapshot
+                .component::<SceneRegionShape>(id)?
+                .map_or(RegionShapeKind::Rectangular, |shape| shape.kind),
         })
     }
 

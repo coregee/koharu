@@ -239,6 +239,22 @@
     "moveUp": "{{name}} öğesini yukarı taşı",
     "opacityLabel": "{{name}} opaklığı",
     "originalArtwork": "Orijinal çizim",
+    "regionShape": "Şekil",
+    "regionShapeLabel": "{{name}} bölge şekli",
+    "regionShapes": {
+      "circular": "Dairesel",
+      "rectangular": "Dikdörtgen"
+    },
+    "regionType": "Tür",
+    "regionTypeLabel": "{{name}} metin türü",
+    "regionTypes": {
+      "narration": "Anlatım",
+      "notSet": "Ayarlanmadı",
+      "sfx": "Ses efekti",
+      "speech": "Konuşma"
+    },
+    "rerunOcr": "OCR'yi yeniden çalıştır",
+    "rerunOcrLabel": "{{name}} için OCR'yi yeniden çalıştır",
     "show": "{{name}} öğesini göster",
     "sourceLabel": "{{name}} kaynak metni",
     "textName": "Metin {{index}}",

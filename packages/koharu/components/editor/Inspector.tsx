@@ -18,6 +18,7 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  ScanText,
   Trash2,
   Type,
 } from 'lucide-react'
@@ -40,10 +41,13 @@ import { useKoharuStore } from '@/lib/store'
 import { previewCanvasOpacity } from '@koharu/bridge/canvas'
 import {
   commands,
+  type AnalysisRegion,
   type EntityId,
   type FontFamily,
   type FontStyle,
   type Layer,
+  type RegionShapeKind,
+  type TextClassification,
   type TextAlignment,
   type Typography,
   type WritingMode,
@@ -585,6 +589,11 @@ function LayersInspector() {
               <LayerRow
                 key={`${layer.type}:${layer.id}`}
                 layer={layer}
+                region={
+                  isTextLayer(layer) && layer.content.source_region
+                    ? page.regions.find((region) => region.id === layer.content.source_region)
+                    : undefined
+                }
                 index={index}
                 depth={depth}
                 selected={selected.includes(layer.id)}
@@ -613,6 +622,7 @@ function LayersInspector() {
 
 function LayerRow({
   layer,
+  region,
   index,
   depth,
   selected,
@@ -627,6 +637,7 @@ function LayerRow({
   onDelete,
 }: {
   layer: Layer
+  region?: AnalysisRegion
   index: number
   depth: number
   selected: boolean
@@ -731,7 +742,7 @@ function LayerRow({
         </div>
         {expanded && (
           <div className='animate-in duration-150 fade-in slide-in-from-top-1 motion-reduce:animate-none'>
-            <LayerEditor layer={layer} onDelete={onDelete} />
+            <LayerEditor layer={layer} region={region} onDelete={onDelete} />
           </div>
         )}
       </div>
@@ -739,9 +750,19 @@ function LayerRow({
   )
 }
 
-function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void }) {
+function LayerEditor({
+  layer,
+  region,
+  onDelete,
+}: {
+  layer: Layer
+  region?: AnalysisRegion
+  onDelete?: () => void
+}) {
   const { t } = useTranslation()
   const name = localizedLayerName(layer, 0, t)
+  const jobs = useKoharuStore((state) => state.jobs)
+  const processing = Object.values(jobs).some((job) => job.state === 'running')
   const [opacity, setOpacity] = useState(layer.visibility.opacity * 100)
 
   useEffect(() => {
@@ -767,6 +788,33 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
     void call(commands.setGeometry, [{ layer: layer.id, points: null }])
       .then(() => refresh(projectKey, pageKey))
       .catch(() => undefined)
+  }
+
+  const setClassification = (classification: string | null) => {
+    if (!isTextLayer(layer) || !classification) return
+    void call(
+      commands.setTextClassification,
+      layer.id,
+      classification === 'not_set' ? null : (classification as TextClassification),
+    )
+      .then(() => refresh(projectKey, pageKey))
+      .catch(() => undefined)
+  }
+
+  const setRegionShape = (shape: RegionShapeKind | null) => {
+    if (!region || !shape) return
+    void call(commands.setRegionShape, region.id, shape)
+      .then(() => refresh(projectKey, pageKey))
+      .catch(() => undefined)
+  }
+
+  const rerunOcr = () => {
+    if (!isTextLayer(layer) || !region || processing) return
+    void call(
+      commands.process,
+      { scope: 'entities', value: [layer.id] },
+      { operation: 'only', stage: 'ocr' },
+    ).catch(() => undefined)
   }
 
   return (
@@ -812,6 +860,62 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
       </div>
       {isTextLayer(layer) && (
         <>
+          <div className={`grid min-w-0 gap-1.5 ${region ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <InspectorField label={t('layers.regionType')}>
+              <Select
+                value={layer.content.classification ?? 'not_set'}
+                disabled={processing}
+                onValueChange={setClassification}
+              >
+                <SelectTrigger
+                  size='sm'
+                  aria-label={t('layers.regionTypeLabel', { name })}
+                  className='w-full min-w-0'
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='not_set'>{t('layers.regionTypes.notSet')}</SelectItem>
+                  <SelectItem value='speech'>{t('layers.regionTypes.speech')}</SelectItem>
+                  <SelectItem value='narration'>{t('layers.regionTypes.narration')}</SelectItem>
+                  <SelectItem value='sfx'>{t('layers.regionTypes.sfx')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </InspectorField>
+            {region && (
+              <InspectorField label={t('layers.regionShape')}>
+                <Select value={region.shape} disabled={processing} onValueChange={setRegionShape}>
+                  <SelectTrigger
+                    size='sm'
+                    aria-label={t('layers.regionShapeLabel', { name })}
+                    className='w-full min-w-0'
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='rectangular'>
+                      {t('layers.regionShapes.rectangular')}
+                    </SelectItem>
+                    <SelectItem value='circular'>{t('layers.regionShapes.circular')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </InspectorField>
+            )}
+          </div>
+          {region && (
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='h-6 justify-start text-[10px] font-normal'
+              disabled={processing}
+              aria-label={t('layers.rerunOcrLabel', { name })}
+              onClick={rerunOcr}
+            >
+              <ScanText data-icon='inline-start' />
+              {t('layers.rerunOcr')}
+            </Button>
+          )}
           <div className='flex h-5 min-w-0 items-center gap-1.5'>
             <span className='text-[8px] font-medium text-muted-foreground uppercase'>
               {t('inspector.placement')}
@@ -1035,9 +1139,9 @@ function localizedLayerKind(layer: Layer, t: TFunction): string {
     return t(`layers.kinds.${layer.kind}`, { defaultValue: layer.kind })
   }
   if (layer.type === 'text') {
-    const role = layer.content.role?.split('.').at(-1)
-    if (role === 'dialogue') return t('layers.kinds.dialogue')
-    if (role === 'free-text') return t('layers.kinds.freeText')
+    if (layer.content.classification) {
+      return t(`layers.regionTypes.${layer.content.classification}`)
+    }
     return t('layers.kinds.text')
   }
   return t('layers.kinds.image')

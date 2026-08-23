@@ -287,7 +287,7 @@ describe('canvas interaction adapter', () => {
             id: 'content',
             source: { text: 'Source', language: 'en' },
             translation: { text: 'Rendered', language: null },
-            role: null,
+            classification: null,
             source_region: null,
           },
           typography: null,
@@ -373,7 +373,137 @@ describe('canvas interaction adapter', () => {
     )
   })
 
-  it('shows the automatic region behind the selected text controls', () => {
+  it('resizes the detected source region instead of the rendered text frame', async () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        {
+          type: 'text',
+          id: 'element',
+          parent: 'page',
+          geometry: null,
+          visibility: { visible: true, opacity: 1 },
+          content: {
+            id: 'content',
+            source: { text: 'Source', language: 'en' },
+            translation: null,
+            classification: 'narration',
+            source_region: 'region',
+          },
+          typography: null,
+          layout: 'paragraph',
+          automatic_region: 'region',
+        },
+      ],
+      regions: [
+        {
+          id: 'region',
+          parent: 'page',
+          geometry: {
+            points: [
+              { x: 10, y: 20 },
+              { x: 110, y: 20 },
+              { x: 110, y: 70 },
+              { x: 10, y: 70 },
+            ],
+          },
+          kind: 'dev.koharu.region.text',
+          label: 'text',
+          shape: 'rectangular',
+        },
+      ],
+    }))
+    useKoharuStore.setState({ selectedLayers: ['element'] })
+    const setRegionGeometry = vi.spyOn(commands, 'setRegionGeometry').mockResolvedValue(null)
+    const commitTransform = vi.spyOn(commands, 'commitTransform').mockResolvedValue(null)
+    renderWorkspace()
+    Object.defineProperty(screen.getByTestId('canvas-overlay'), 'getBoundingClientRect', {
+      value: () => ({ x: 10, y: 20, width: 800, height: 600 }),
+    })
+    const handle = document.querySelector<HTMLElement>('[data-resize-handle="e"]')!
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 11, clientX: 120, clientY: 65 })
+    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 140, clientY: 65 })
+    fireEvent.pointerUp(handle, { pointerId: 11, clientX: 140, clientY: 65 })
+
+    await waitFor(() =>
+      expect(setRegionGeometry).toHaveBeenCalledWith('region', {
+        x: 10,
+        y: 20,
+        width: 120,
+        height: 50,
+        angle_degrees: 0,
+      }),
+    )
+    expect(canvas.beginTransform).not.toHaveBeenCalled()
+    expect(commitTransform).not.toHaveBeenCalled()
+  })
+
+  it('moves a detected source region by dragging inside it', async () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        {
+          type: 'text',
+          id: 'element',
+          parent: 'page',
+          geometry: null,
+          visibility: { visible: true, opacity: 1 },
+          content: {
+            id: 'content',
+            source: { text: 'Source', language: 'en' },
+            translation: null,
+            classification: 'narration',
+            source_region: 'region',
+          },
+          typography: null,
+          layout: 'paragraph',
+          automatic_region: 'region',
+        },
+      ],
+      regions: [
+        {
+          id: 'region',
+          parent: 'page',
+          geometry: {
+            points: [
+              { x: 10, y: 20 },
+              { x: 110, y: 20 },
+              { x: 110, y: 70 },
+              { x: 10, y: 70 },
+            ],
+          },
+          kind: 'dev.koharu.region.text',
+          label: 'text',
+          shape: 'rectangular',
+        },
+      ],
+    }))
+    const setRegionGeometry = vi.spyOn(commands, 'setRegionGeometry').mockResolvedValue(null)
+    const commitTransform = vi.spyOn(commands, 'commitTransform').mockResolvedValue(null)
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 12, clientX: 50, clientY: 60 })
+    fireEvent.pointerMove(surface, { pointerId: 12, clientX: 70, clientY: 80 })
+    fireEvent.pointerUp(surface, { pointerId: 12, clientX: 70, clientY: 80 })
+
+    await waitFor(() =>
+      expect(setRegionGeometry).toHaveBeenCalledWith('region', {
+        x: 30,
+        y: 40,
+        width: 100,
+        height: 50,
+        angle_degrees: 0,
+      }),
+    )
+    expect(useKoharuStore.getState().selectedLayers).toEqual(['element'])
+    expect(canvas.beginTransform).not.toHaveBeenCalled()
+    expect(commitTransform).not.toHaveBeenCalled()
+  })
+
+  it('shows the automatic circular region behind the selected text controls', () => {
     installProject()
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
       ...page,
@@ -388,7 +518,7 @@ describe('canvas interaction adapter', () => {
             id: 'content',
             source: { text: 'Source', language: 'en' },
             translation: { text: 'Rendered', language: null },
-            role: null,
+            classification: null,
             source_region: null,
           },
           typography: null,
@@ -410,6 +540,7 @@ describe('canvas interaction adapter', () => {
           },
           kind: 'bubble',
           label: null,
+          shape: 'circular',
         },
       ],
     }))
@@ -422,9 +553,9 @@ describe('canvas interaction adapter', () => {
 
     renderWorkspace()
 
-    expect(screen.getByTestId('text-fit-region').querySelector('polygon')).toHaveAttribute(
-      'points',
-      '20,30 100,30 100,90 20,90',
+    expect(screen.getByTestId('text-fit-region').querySelector('ellipse')).toHaveAttribute(
+      'rx',
+      '40',
     )
   })
 

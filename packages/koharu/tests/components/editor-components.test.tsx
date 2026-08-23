@@ -69,7 +69,7 @@ const textLayer: Layer = {
     id: 'content',
     source: { text: 'こんにちは', language: 'ja' },
     translation: { text: 'Hello', language: null },
-    role: null,
+    classification: null,
     source_region: null,
   },
   typography: {
@@ -714,14 +714,14 @@ describe('greenfield editor', () => {
     await waitFor(() => expect(save).toHaveBeenCalledWith('element', 'corrected OCR'))
   })
 
-  it('shows actual layers with only the useful text-role distinction', () => {
+  it('shows the detected text classification for each text layer', () => {
     installProject()
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
       ...page,
       layers: [
         ...page.layers.map((layer) =>
           layer.type === 'text'
-            ? { ...layer, content: { ...layer.content, role: 'dev.koharu.text.onomatopoeia' } }
+            ? { ...layer, content: { ...layer.content, classification: 'sfx' } }
             : layer,
         ),
         {
@@ -731,7 +731,7 @@ describe('greenfield editor', () => {
             ...textLayer.content,
             id: 'dialogue-content',
             translation: { text: 'Dialogue line', language: null },
-            role: 'dev.koharu.text.dialogue',
+            classification: 'speech',
           },
         },
         {
@@ -741,7 +741,7 @@ describe('greenfield editor', () => {
             ...textLayer.content,
             id: 'free-text-content',
             translation: { text: 'Caption', language: null },
-            role: 'dev.koharu.text.free-text',
+            classification: 'narration',
           },
         },
       ],
@@ -749,10 +749,60 @@ describe('greenfield editor', () => {
     render(<Inspector />)
 
     expect(screen.queryByRole('button', { name: /Filter layers by type/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Edit Hello' })).toHaveTextContent('Text')
-    expect(screen.getByRole('button', { name: 'Edit Dialogue line' })).toHaveTextContent('Dialogue')
-    expect(screen.getByRole('button', { name: 'Edit Caption' })).toHaveTextContent('Free text')
-    expect(screen.queryByText('Onomatopoeia')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit Hello' })).toHaveTextContent('SFX')
+    expect(screen.getByRole('button', { name: 'Edit Dialogue line' })).toHaveTextContent('Speech')
+    expect(screen.getByRole('button', { name: 'Edit Caption' })).toHaveTextContent('Narration')
+  })
+
+  it('edits detected-region metadata and reruns OCR for one text box', async () => {
+    installProject()
+    const user = userEvent.setup()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: page.layers.map((layer) =>
+        layer.type === 'text'
+          ? {
+              ...layer,
+              content: { ...layer.content, source_region: 'region' },
+            }
+          : layer,
+      ),
+      regions: [
+        {
+          id: 'region',
+          parent: 'page',
+          geometry: {
+            points: [
+              { x: 10, y: 20 },
+              { x: 110, y: 20 },
+              { x: 110, y: 70 },
+              { x: 10, y: 70 },
+            ],
+          },
+          kind: 'dev.koharu.region.text',
+          label: 'text',
+          shape: 'rectangular',
+        },
+      ],
+    }))
+    const classify = vi.spyOn(commands, 'setTextClassification').mockResolvedValue(null)
+    const reshape = vi.spyOn(commands, 'setRegionShape').mockResolvedValue(null)
+    const process = vi.spyOn(commands, 'process').mockResolvedValue('job')
+    render(<Inspector />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Hello text type' }))
+    await user.click(screen.getByRole('option', { name: 'Speech' }))
+    await waitFor(() => expect(classify).toHaveBeenCalledWith('element', 'speech'))
+
+    await user.click(screen.getByRole('combobox', { name: 'Hello region shape' }))
+    await user.click(screen.getByRole('option', { name: 'Circular' }))
+    await waitFor(() => expect(reshape).toHaveBeenCalledWith('region', 'circular'))
+
+    await user.click(screen.getByRole('button', { name: 'Run OCR again for Hello' }))
+    expect(process).toHaveBeenCalledWith(
+      { scope: 'entities', value: ['element'] },
+      { operation: 'only', stage: 'ocr' },
+    )
   })
 
   it('resets a custom text frame to its automatic region', async () => {

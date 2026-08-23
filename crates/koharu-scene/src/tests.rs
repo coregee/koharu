@@ -123,13 +123,14 @@ async fn built_in_component_schemas_remain_revision_one() {
             schema::<TextGroup>(),
             schema::<Typography>(),
             schema::<Region>(),
+            schema::<RegionShape>(),
             schema::<DetectionAnalysis>(),
             schema::<EntityOrigin>(),
             schema::<TextContent>(),
             schema::<crate::components::Assets>(),
             schema::<Relation>(),
         ],
-        [1; 19]
+        [1; 20]
     );
 }
 
@@ -153,6 +154,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             TextGroup::KIND,
             Typography::KIND,
             Region::KIND,
+            RegionShape::KIND,
             DetectionAnalysis::KIND,
             OcrAnalysis::KIND,
             crate::components::Assets::KIND,
@@ -174,6 +176,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu.text.group",
             "dev.koharu.text.typography",
             "dev.koharu.analysis.region",
+            "dev.koharu.analysis.region-shape",
             "dev.koharu.analysis.detection",
             "dev.koharu.analysis.ocr",
             "dev.koharu.assets",

@@ -45,9 +45,12 @@ export const commands = {
 	deletePages: (pages: EntityId[]) => __TAURI_INVOKE<null>("delete_pages", { pages }),
 	movePage: (page: EntityId, index: number) => __TAURI_INVOKE<null>("move_page", { page, index }),
 	setSourceText: (layer: EntityId, text: string) => __TAURI_INVOKE<null>("set_source_text", { layer, text }),
+	setTextClassification: (layer: EntityId, classification: "speech" | "narration" | "sfx" | null) => __TAURI_INVOKE<null>("set_text_classification", { layer, classification }),
 	setTranslation: (layer: EntityId, text: string | null) => __TAURI_INVOKE<null>("set_translation", { layer, text }),
 	setTypography: (updates: TypographyUpdate[]) => __TAURI_INVOKE<null>("set_typography", { updates: updates.map(i=>({...i,typography:({...i.typography,size:i.typography.size==null?i.typography.size:i.typography.size,stroke_width:i.typography.stroke_width==null?i.typography.stroke_width:i.typography.stroke_width})})) }),
 	setGeometry: (updates: GeometryUpdate[]) => __TAURI_INVOKE<null>("set_geometry", { updates: updates.map(i=>({...i,points:i.points==null?i.points:i.points.map(i=>i)})) }),
+	setRegionGeometry: (region: EntityId, frame: Frame) => __TAURI_INVOKE<null>("set_region_geometry", { region, frame }),
+	setRegionShape: (region: EntityId, shape: RegionShapeKind) => __TAURI_INVOKE<null>("set_region_shape", { region, shape }),
 	setVisibility: (layers: EntityId[], visible: boolean | null, opacity: number | null) => __TAURI_INVOKE<null>("set_visibility", { layers, visible, opacity: opacity==null?opacity:opacity }),
 	deleteLayers: (layers: EntityId[]) => __TAURI_INVOKE<null>("delete_layers", { layers }),
 	moveLayer: (layer: EntityId, parent: EntityId, index: number) => __TAURI_INVOKE<Page>("move_layer", { layer, parent, index }).then((v) => (({...v,regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
@@ -98,6 +101,7 @@ export type AnalysisRegion = {
 	geometry: Geometry,
 	kind: string,
 	label: string | null,
+	shape: RegionShapeKind,
 };
 
 export type AtlasCloudConfig = Record<string, never>;
@@ -448,6 +452,8 @@ export type RasterLayerKind = "cleanup" | "paint";
 
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
+export type RegionShapeKind = "circular" | "rectangular";
+
 export type Revision = number;
 
 export type RoremMixedConfig = {
@@ -477,11 +483,13 @@ export type StartupState = {
 
 export type TextAlignment = "Start" | "Center" | "End" | "Justify";
 
+export type TextClassification = "speech" | "narration" | "sfx";
+
 export type TextContent = {
 	id: EntityId,
 	source: SourceText | null,
 	translation: Translation | null,
-	role: string | null,
+	classification: TextClassification | null,
 	source_region: EntityId | null,
 };
 

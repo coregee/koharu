@@ -24,8 +24,8 @@ use koharu_ml::koharu_layout_rfdetr_seg_2xl::{
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, DetectionAnalysis, DetectionLabel,
     EntityId, EntityOrigin, FitsTo, FlowsIn, Generation, Geometry, Inside, Origin, PanelRegion,
-    Point, RecognizedFrom, Region, RegionKind, RegionSpec, RemovePolicy, TextLayout,
-    TextLayoutKind, TextRegion, TextRole, Typography, WritingMode,
+    Point, RecognizedFrom, Region, RegionKind, RegionShape, RegionShapeKind, RegionSpec,
+    RemovePolicy, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography, WritingMode,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -190,6 +190,7 @@ struct DetectedText<'a> {
     bounds: [f32; 4],
     content: EntityId,
     layer: EntityId,
+    is_sfx: bool,
 }
 
 enum RegionOutput<'a> {
@@ -301,7 +302,7 @@ fn write_regions<'a>(
     let inferred = detections
         .par_iter()
         .map(|detection| {
-            (detection.label == "text")
+            matches!(detection.label.as_str(), "text" | "onomatopoeia")
                 .then(|| infer_typography(image, detection))
                 .flatten()
         })
@@ -346,7 +347,7 @@ fn write_region<'a>(
     let kind = region_kind(&detection.label)?;
     let geometry = if detection.label == "bubble" {
         mask_geometry(&detection.mask).unwrap_or_else(|| rectangle_geometry(detection.bbox))
-    } else if detection.label == "text" {
+    } else if matches!(detection.label.as_str(), "text" | "onomatopoeia") {
         inferred.map_or_else(
             || rectangle_geometry(detection.bbox),
             |typography| rotated_rectangle_geometry(detection.bbox, typography.angle_degrees),
@@ -367,6 +368,18 @@ fn write_region<'a>(
     .context("failed to set detected region metadata")?;
     edit.set(
         entity,
+        &RegionShape {
+            origin: Origin::Generated(generation.clone()),
+            kind: if detection.label == "bubble" {
+                RegionShapeKind::Circular
+            } else {
+                RegionShapeKind::Rectangular
+            },
+        },
+    )
+    .context("failed to set detected region shape")?;
+    edit.set(
+        entity,
         &DetectionAnalysis {
             origin: Origin::Generated(generation.clone()),
             labels: vec![DetectionLabel {
@@ -376,7 +389,7 @@ fn write_region<'a>(
         },
     )
     .context("failed to set detection analysis")?;
-    if detection.label != "text" {
+    if !matches!(detection.label.as_str(), "text" | "onomatopoeia") {
         return Ok(if detection.label == "bubble" {
             RegionOutput::Bubble(DetectedRegion {
                 entity,
@@ -398,8 +411,18 @@ fn write_region<'a>(
             kind: TextLayoutKind::Paragraph,
         },
     )?;
-    write_text_role(edit, content, "dev.koharu.text.free-text", generation)
-        .context("failed to set the detected text role")?;
+    let is_sfx = detection.label == "onomatopoeia";
+    write_text_role(
+        edit,
+        content,
+        if is_sfx {
+            TextRole::SFX
+        } else {
+            TextRole::NARRATION
+        },
+        generation,
+    )
+    .context("failed to set the detected text role")?;
     edit.set(
         layer,
         &Typography {
@@ -429,6 +452,7 @@ fn write_region<'a>(
         bounds: detection.bbox,
         content,
         layer,
+        is_sfx,
     }))
 }
 
@@ -438,11 +462,15 @@ fn link_dialogue_regions(
     generation: &Generation,
 ) -> Result<()> {
     for text in &regions.texts {
+        if text.is_sfx {
+            edit.relate::<FitsTo>(text.layer, text.entity)?;
+            continue;
+        }
         let bubble = containing_bubble(&regions.bubbles, text);
         if let Some(bubble) = bubble {
             edit.relate::<Inside>(text.entity, bubble.entity)?;
             edit.relate::<FlowsIn>(text.layer, bubble.entity)?;
-            write_text_role(edit, text.content, "dev.koharu.text.dialogue", generation)?;
+            write_text_role(edit, text.content, TextRole::SPEECH, generation)?;
         } else {
             edit.relate::<FitsTo>(text.layer, text.entity)?;
         }
@@ -1443,6 +1471,7 @@ async fn preserve_mask_outside_region(
 fn region_kind(label: &str) -> Result<RegionKind> {
     RegionKind::new(match label {
         "text" => TextRegion::KIND,
+        "onomatopoeia" => TextRegion::KIND,
         "bubble" => BubbleRegion::KIND,
         "panel" => PanelRegion::KIND,
         _ => "dev.koharu.region.unknown",
@@ -1839,8 +1868,8 @@ mod tests {
     };
     use koharu_ml::koharu_layout_rfdetr_seg_2xl::{KoharuLayoutDetection, KoharuLayoutMask};
     use koharu_scene::{
-        At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, Origin, PageDraft, Session,
-        TextLayout, TextLayoutKind, TextRegion, Typography, WritingMode,
+        At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, Origin, PageDraft, Region, RegionSpec,
+        Session, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography, WritingMode,
     };
 
     use super::{
@@ -1957,17 +1986,18 @@ mod tests {
                             bounds: [0.0, 0.0, 1.0, 1.0],
                             content,
                             layer,
+                            is_sfx: false,
                         }],
                     },
                     &generation,
                 )
                 .unwrap();
-                ids = Some((bubble, region, layer));
+                ids = Some((bubble, region, content, layer));
                 Ok(())
             })
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
-        let (bubble, region, layer) = ids.unwrap();
+        let (bubble, region, content, layer) = ids.unwrap();
 
         assert_eq!(
             snapshot
@@ -1987,6 +2017,76 @@ mod tests {
                 .value()
                 .target,
             bubble
+        );
+        assert_eq!(
+            snapshot
+                .component::<TextRole>(content)
+                .unwrap()
+                .unwrap()
+                .role,
+            TextRole::SPEECH
+        );
+    }
+
+    #[tokio::test]
+    async fn onomatopoeia_creates_an_ocr_target_classified_as_sfx() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let create = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 100.0, 100.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(create).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let detection = detection("onomatopoeia", 0.9, [10.0, 20.0, 60.0, 70.0]);
+        let generation = generation(super::PRODUCER, super::MODEL_ID).unwrap();
+        let mut ids = None;
+        let patch = snapshot
+            .patch(|edit| {
+                let RegionOutput::Text(text) =
+                    write_region(edit, page, &detection, None, &generation).unwrap()
+                else {
+                    panic!("onomatopoeia must create a text region");
+                };
+                ids = Some((text.entity, text.content, text.layer));
+                link_dialogue_regions(
+                    edit,
+                    &PageRegions {
+                        bubbles: Vec::new(),
+                        texts: vec![text],
+                    },
+                    &generation,
+                )
+                .unwrap();
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let (region, content, layer) = ids.unwrap();
+
+        assert_eq!(
+            snapshot.component::<Region>(region).unwrap().unwrap().kind,
+            TextRegion::kind()
+        );
+        assert_eq!(
+            snapshot
+                .component::<TextRole>(content)
+                .unwrap()
+                .unwrap()
+                .role,
+            TextRole::SFX
+        );
+        assert_eq!(
+            snapshot
+                .relation_from::<FitsTo>(layer)
+                .unwrap()
+                .unwrap()
+                .value()
+                .target,
+            region
         );
     }
 

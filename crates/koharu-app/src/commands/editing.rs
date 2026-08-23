@@ -1,6 +1,6 @@
 use anyhow::Context as _;
-use koharu_desktop::{CanvasState, Desktop};
-use koharu_scene::EntityId;
+use koharu_desktop::{CanvasState, Desktop, Frame};
+use koharu_scene::{EntityId, RegionShapeKind};
 use serde::Deserialize;
 use specta::Type;
 use tauri::State;
@@ -8,7 +8,7 @@ use tauri::State;
 use super::{
     ChannelExt as _, Error,
     canvas::{CanvasChannel, Point},
-    project::{CurrentProject, Page, Project, Typography},
+    project::{CurrentProject, Page, Project, TextClassification, Typography},
 };
 async fn synchronize_canvas(
     desktop: &Desktop,
@@ -141,6 +141,35 @@ pub(crate) async fn set_source_text(
 
 #[tracing::instrument(
     target = "koharu_metrics",
+    name = "text_classification_edited",
+    skip_all,
+    fields(origin = "user", classification = ?classification),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_text_classification(
+    layer: EntityId,
+    classification: Option<TextClassification>,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<(), Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project
+            .set_text_classification(layer, classification)
+            .await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, page).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(())
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
     name = "translation_edited",
     skip_all,
     fields(
@@ -214,6 +243,60 @@ pub(crate) async fn set_geometry(
         let mut project = project.project.lock().await;
         let project = project.as_mut().context("no project is open")?;
         let commit = project.set_geometry(updates).await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, page).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(())
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "region_geometry_edited",
+    skip_all,
+    fields(origin = "user", region = %region),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_region_geometry(
+    region: EntityId,
+    frame: Frame,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<(), Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.set_region_geometry(region, frame).await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, page).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(())
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "region_shape_edited",
+    skip_all,
+    fields(origin = "user", region = %region, shape = ?shape),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_region_shape(
+    region: EntityId,
+    shape: RegionShapeKind,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<(), Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.set_region_shape(region, shape).await?;
         project.record_commit(&commit);
         (commit, project.active_page())
     };

@@ -18,6 +18,7 @@ interface SelectionControlsProps {
   frame: Frame
   camera: Camera
   edgesOnly: boolean
+  rotatable?: boolean
   onTransformStart: (elements: TransformFrame[]) => void
   onTransformFrame: (elements: TransformFrame[]) => void
   onTransformEnd: () => void
@@ -49,6 +50,7 @@ export function SelectionControls({
   frame,
   camera,
   edgesOnly,
+  rotatable = true,
   onTransformStart,
   onTransformFrame,
   onTransformEnd,
@@ -169,16 +171,20 @@ export function SelectionControls({
         </div>
       ))}
 
-      <span className='pointer-events-none absolute top-0 left-1/2 h-2 w-px -translate-x-1/2 -translate-y-full bg-[var(--canvas-selection)]' />
-      <div
-        data-canvas-control
-        data-rotate-handle
-        className='pointer-events-auto absolute top-[-16px] left-1/2 grid size-3.5 -translate-x-1/2 -translate-y-1/2 cursor-alias touch-none place-items-center'
-        onPointerDown={startRotate}
-        {...pointerEvents}
-      >
-        <span className='size-1.5 rounded-[1px] border border-primary-foreground bg-[var(--canvas-selection)] shadow-[0_0_0_1px_rgb(0_0_0/0.12)]' />
-      </div>
+      {rotatable && (
+        <>
+          <span className='pointer-events-none absolute top-0 left-1/2 h-2 w-px -translate-x-1/2 -translate-y-full bg-[var(--canvas-selection)]' />
+          <div
+            data-canvas-control
+            data-rotate-handle
+            className='pointer-events-auto absolute top-[-16px] left-1/2 grid size-3.5 -translate-x-1/2 -translate-y-1/2 cursor-alias touch-none place-items-center'
+            onPointerDown={startRotate}
+            {...pointerEvents}
+          >
+            <span className='size-1.5 rounded-[1px] border border-primary-foreground bg-[var(--canvas-selection)] shadow-[0_0_0_1px_rgb(0_0_0/0.12)]' />
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -6,8 +6,8 @@
 
 use crate::{
     BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, OcrAnalysis,
-    Page, Project, RasterLayer, Region, RegionSpec, Relation, Result, SourceText, TextContent,
-    TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography, Visibility,
+    Page, Project, RasterLayer, Region, RegionShape, RegionSpec, Relation, Result, SourceText,
+    TextContent, TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography, Visibility,
     component::{Component, ComponentRecord, ValidationContext, decode, key},
     components::Assets,
     state::{Components, State},
@@ -60,6 +60,7 @@ component_schema! {
     DETECTION_ANALYSIS = 15 => DetectionAnalysis,
     ASSETS = 16 => Assets,
     ENTITY_ORIGIN = 17 => EntityOrigin,
+    REGION_SHAPE = 18 => RegionShape,
 }
 
 pub(crate) fn validate_components(
@@ -83,6 +84,7 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     let has_content = has(TEXT_CONTENT);
     let has_translation = has(TRANSLATION);
     let has_region = has(REGION);
+    let has_region_shape = has(REGION_SHAPE);
     let has_geometry = has(GEOMETRY);
     let has_raster = has(RASTER_LAYER);
     let has_assets = has(ASSETS);
@@ -164,6 +166,10 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     } else if has_region && !has_geometry {
         Err(Error::invalid(format!(
             "analysis region {id} has no geometry"
+        )))
+    } else if has_region_shape && !has_region {
+        Err(Error::invalid(format!(
+            "entity {id} has a region shape but is not an analysis region"
         )))
     } else if has_layout
         && (has_source || has_translation || has_region || has_detection || has_ocr)

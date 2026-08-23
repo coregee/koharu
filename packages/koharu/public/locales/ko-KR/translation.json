@@ -239,6 +239,22 @@
     "moveUp": "{{name}} 위로 이동",
     "opacityLabel": "{{name}} 불투명도",
     "originalArtwork": "원본 아트워크",
+    "regionShape": "모양",
+    "regionShapeLabel": "{{name}} 영역 모양",
+    "regionShapes": {
+      "circular": "원형",
+      "rectangular": "사각형"
+    },
+    "regionType": "유형",
+    "regionTypeLabel": "{{name}} 텍스트 유형",
+    "regionTypes": {
+      "narration": "내레이션",
+      "notSet": "설정 안 함",
+      "sfx": "효과음",
+      "speech": "대사"
+    },
+    "rerunOcr": "OCR 다시 실행",
+    "rerunOcrLabel": "{{name}} OCR 다시 실행",
     "show": "{{name}} 표시",
     "sourceLabel": "{{name}} 원문",
     "textName": "텍스트 {{index}}",

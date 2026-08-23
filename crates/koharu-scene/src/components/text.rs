@@ -220,3 +220,9 @@ impl Component for TextRole {
         true
     }
 }
+
+impl TextRole {
+    pub const NARRATION: &'static str = "dev.koharu.text.narration";
+    pub const SFX: &'static str = "dev.koharu.text.sfx";
+    pub const SPEECH: &'static str = "dev.koharu.text.speech";
+}

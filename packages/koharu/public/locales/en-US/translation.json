@@ -239,6 +239,22 @@
     "moveUp": "Move {{name}} up",
     "opacityLabel": "{{name}} opacity",
     "originalArtwork": "Original artwork",
+    "regionShape": "Shape",
+    "regionShapeLabel": "{{name}} region shape",
+    "regionShapes": {
+      "circular": "Circular",
+      "rectangular": "Rectangular"
+    },
+    "regionType": "Type",
+    "regionTypeLabel": "{{name}} text type",
+    "regionTypes": {
+      "narration": "Narration",
+      "notSet": "Not set",
+      "sfx": "SFX",
+      "speech": "Speech"
+    },
+    "rerunOcr": "Run OCR again",
+    "rerunOcrLabel": "Run OCR again for {{name}}",
     "show": "Show {{name}}",
     "sourceLabel": "{{name}} source text",
     "textName": "Text {{index}}",

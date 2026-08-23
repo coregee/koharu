@@ -239,6 +239,22 @@
     "moveUp": "Mover {{name}} arriba",
     "opacityLabel": "Opacidad de {{name}}",
     "originalArtwork": "Ilustración original",
+    "regionShape": "Forma",
+    "regionShapeLabel": "Forma de la región de {{name}}",
+    "regionShapes": {
+      "circular": "Circular",
+      "rectangular": "Rectangular"
+    },
+    "regionType": "Tipo",
+    "regionTypeLabel": "Tipo de texto de {{name}}",
+    "regionTypes": {
+      "narration": "Narración",
+      "notSet": "Sin definir",
+      "sfx": "SFX",
+      "speech": "Diálogo"
+    },
+    "rerunOcr": "Repetir OCR",
+    "rerunOcrLabel": "Repetir OCR para {{name}}",
     "show": "Mostrar {{name}}",
     "sourceLabel": "Texto original de {{name}}",
     "textName": "Texto {{index}}",

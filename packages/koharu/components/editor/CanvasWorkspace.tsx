@@ -10,10 +10,12 @@ import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
 import { useCanvas } from '@/components/editor/useCanvas'
 import { call } from '@/lib/backend'
-import { expandLayerSelection } from '@/lib/document'
+import { effectiveLayerVisibility, expandLayerSelection, isTextLayer } from '@/lib/document'
 import {
   controlFrame,
   draftFrame,
+  frameContains,
+  geometryFrame,
   hitTestLayers,
   pagePoint,
   physicalPoint,
@@ -39,7 +41,13 @@ import {
   type CanvasTool,
 } from '@/lib/store'
 import { prefetchCanvasPages, workspaceColor, type CanvasColor } from '@koharu/bridge/canvas'
-import { commands, type Frame, type Point, type TransformFrame } from '@koharu/bridge/protocol'
+import {
+  commands,
+  type Frame,
+  type Page,
+  type Point,
+  type TransformFrame,
+} from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
 
 const BRUSH_DIAMETER_STEP = 4
@@ -57,6 +65,7 @@ const canvasCursors = {
 type Gesture =
   | { kind: 'pan'; pointer: number; start: Point; translation: [number, number] }
   | { kind: 'move'; pointer: number; start: Point; originals: TransformFrame[] }
+  | { kind: 'region-move'; pointer: number; start: Point; original: TransformFrame }
   | { kind: 'text'; pointer: number; start: Point; frame: Frame }
   | StrokeGesture
 
@@ -90,9 +99,12 @@ export function CanvasWorkspace() {
   const transformActive = useRef(false)
   const transformRevision = useRef<number | null>(null)
   const transformFinal = useRef<TransformFrame[]>([])
+  const regionTransformActive = useRef(false)
+  const regionTransformFinal = useRef<TransformFrame | null>(null)
   const commitPending = useRef(false)
   const commandQueue = useRef<Promise<void>>(Promise.resolve())
   const [previews, setPreviews] = useState<Record<string, Frame>>({})
+  const [regionPreviews, setRegionPreviews] = useState<Record<string, Frame>>({})
   const [draft, setDraft] = useState<Frame | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const [cursor, setCursor] = useState<Point | null>(null)
@@ -205,6 +217,41 @@ export function CanvasWorkspace() {
       })
   }, [canvas, enqueue, transformUpdates])
 
+  const beginRegionTransform = useCallback((elements: TransformFrame[]) => {
+    const [element] = elements
+    if (!element || regionTransformActive.current || commitPending.current) return
+    regionTransformActive.current = true
+    regionTransformFinal.current = element
+    setRegionPreviews({ [element.element]: element.frame })
+  }, [])
+
+  const updateRegionTransform = useCallback((elements: TransformFrame[]) => {
+    if (!regionTransformActive.current) return
+    const [element] = elements
+    if (!element) return
+    regionTransformFinal.current = element
+    setRegionPreviews({ [element.element]: element.frame })
+  }, [])
+
+  const finishRegionTransform = useCallback(() => {
+    if (!regionTransformActive.current) return
+    regionTransformActive.current = false
+    const element = regionTransformFinal.current
+    regionTransformFinal.current = null
+    if (!element) {
+      setRegionPreviews({})
+      return
+    }
+    commitPending.current = true
+    void enqueue(() => call(commands.setRegionGeometry, element.element, element.frame))
+      .then(() => refresh(projectKey, pagesKey, pageKey))
+      .catch(() => undefined)
+      .finally(() => {
+        commitPending.current = false
+        setRegionPreviews({})
+      })
+  }, [enqueue])
+
   const cancelGesture = useCallback(() => {
     const current = gesture.current
     gesture.current = null
@@ -218,8 +265,13 @@ export function CanvasWorkspace() {
       transformRevision.current = null
       canvas?.cancelTransform()
     }
+    if (regionTransformActive.current) {
+      regionTransformActive.current = false
+      regionTransformFinal.current = null
+    }
     setDraft(null)
     setPreviews({})
+    setRegionPreviews({})
   }, [canvas, strokeUpdates, transformUpdates])
 
   const fitCanvas = useCallback(() => {
@@ -416,9 +468,11 @@ export function CanvasWorkspace() {
     setCursor(physical)
     if (!current || current.pointer !== pointer) {
       if (tool === 'select') {
+        const point = clientPagePoint(sample.clientX, sample.clientY)
         setHovered(
-          hitTestLayers(page.layers, clientPagePoint(sample.clientX, sample.clientY), layerFrames)
-            ?.id ?? null,
+          hitTestSourceRegion(page, point)?.layer.id ??
+            hitTestLayers(page.layers, point, layerFrames)?.id ??
+            null,
         )
       }
       return
@@ -453,6 +507,17 @@ export function CanvasWorkspace() {
           y: point.y - current.start.y,
         }),
       )
+    } else if (current.kind === 'region-move') {
+      updateRegionTransform([
+        {
+          element: current.original.element,
+          frame: {
+            ...current.original.frame,
+            x: current.original.frame.x + point.x - current.start.x,
+            y: current.original.frame.y + point.y - current.start.y,
+          },
+        },
+      ])
     } else if (current.kind === 'text') {
       current.frame = draftFrame(current.start, point)
       setDraft(current.frame)
@@ -468,6 +533,8 @@ export function CanvasWorkspace() {
     if (!current || !page) return
     if (current.kind === 'move') {
       finishTransform()
+    } else if (current.kind === 'region-move') {
+      finishRegionTransform()
     } else if (current.kind === 'text') {
       const pointText =
         current.frame.width < 4 / camera.zoom && current.frame.height < 4 / camera.zoom
@@ -565,8 +632,32 @@ export function CanvasWorkspace() {
                 translation: camera.translation,
               }
             } else if (tool === 'select') {
-              const target = hitTestLayers(page.layers, point, layerFrames)
               const additive = event.shiftKey || event.ctrlKey || event.metaKey
+              const regionTarget = hitTestSourceRegion(page, point)
+              if (regionTarget) {
+                const target = regionTarget.layer
+                const next = additive
+                  ? selected.includes(target.id)
+                    ? selected.filter((id) => id !== target.id)
+                    : [...selected, target.id]
+                  : [target.id]
+                selectLayers(next)
+                if (next.length !== 1 || next[0] !== target.id) return
+                const original = {
+                  element: regionTarget.region,
+                  frame: regionTarget.frame,
+                }
+                gesture.current = {
+                  kind: 'region-move',
+                  pointer: event.pointerId,
+                  start: point,
+                  original,
+                }
+                beginRegionTransform([original])
+                event.preventDefault()
+                return
+              }
+              const target = hitTestLayers(page.layers, point, layerFrames)
               if (!target) {
                 if (!additive) selectLayers([])
                 return
@@ -756,6 +847,7 @@ export function CanvasWorkspace() {
               hovered={hovered}
               frames={layerFrames}
               previews={previews}
+              regionPreviews={regionPreviews}
               draft={draft}
               cursor={cursor}
               brushSize={brush.diameter}
@@ -763,6 +855,9 @@ export function CanvasWorkspace() {
               onTransformStart={beginTransform}
               onTransformFrame={updateTransform}
               onTransformEnd={finishTransform}
+              onRegionTransformStart={beginRegionTransform}
+              onRegionTransformFrame={updateRegionTransform}
+              onRegionTransformEnd={finishRegionTransform}
             />
           )}
           {page && canvasState.status === 'error' && (
@@ -809,6 +904,21 @@ export function CanvasWorkspace() {
       <StatusBar onZoomChange={setZoom} />
     </main>
   )
+}
+
+function hitTestSourceRegion(page: Page, point: Point) {
+  for (let index = page.layers.length - 1; index >= 0; index -= 1) {
+    const layer = page.layers[index]!
+    if (!isTextLayer(layer) || !layer.content.source_region) continue
+    const visibility = effectiveLayerVisibility(page.layers, layer)
+    if (!visibility.visible || visibility.opacity <= 0) continue
+    const region = page.regions.find((candidate) => candidate.id === layer.content.source_region)
+    const frame = region && geometryFrame(region.geometry)
+    if (region && frame && frameContains(frame, point)) {
+      return { layer, region: region.id, frame }
+    }
+  }
+  return null
 }
 
 function hexToRgba(hex: string): [number, number, number, number] {

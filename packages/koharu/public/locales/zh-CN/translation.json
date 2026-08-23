@@ -239,6 +239,22 @@
     "moveUp": "上移 {{name}}",
     "opacityLabel": "{{name}} 不透明度",
     "originalArtwork": "原始图稿",
+    "regionShape": "形状",
+    "regionShapeLabel": "{{name}} 的区域形状",
+    "regionShapes": {
+      "circular": "圆形",
+      "rectangular": "矩形"
+    },
+    "regionType": "类型",
+    "regionTypeLabel": "{{name}} 的文本类型",
+    "regionTypes": {
+      "narration": "旁白",
+      "notSet": "未设置",
+      "sfx": "音效",
+      "speech": "对白"
+    },
+    "rerunOcr": "重新运行 OCR",
+    "rerunOcrLabel": "为 {{name}} 重新运行 OCR",
     "show": "显示 {{name}}",
     "sourceLabel": "{{name}} 的原文",
     "textName": "文本 {{index}}",
