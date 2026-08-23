@@ -275,6 +275,8 @@ export type Job = {
 	state: JobState,
 	completed: number,
 	total: number,
+	pages_completed: number,
+	pages_total: number,
 	page: EntityId | null,
 	stage: Stage | null,
 	model: string | null,

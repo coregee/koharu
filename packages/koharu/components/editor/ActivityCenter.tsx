@@ -95,7 +95,17 @@ function JobItem({ job }: { job: Job }) {
               ? t(`phase.${job.stage}`, { defaultValue: job.stage })
               : t('activity.processing')}
           </span>
-          <p className='mt-0.5 truncate text-[10px] text-muted-foreground'>{job.model}</p>
+          <div className='mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground'>
+            {job.model && <span className='min-w-0 truncate'>{job.model}</span>}
+            {job.pages_total > 0 && (
+              <span className='shrink-0 tabular-nums'>
+                {t('activity.pageProgress', {
+                  completed: job.pages_completed,
+                  total: job.pages_total,
+                })}
+              </span>
+            )}
+          </div>
         </div>
         <span className='pt-0.5 text-right text-[10px] tabular-nums'>
           {percent !== null ? `${percent}%` : null}

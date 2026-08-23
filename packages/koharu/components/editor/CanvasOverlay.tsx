@@ -79,6 +79,10 @@ export function CanvasOverlay({
   const sourceRegion = selectedTextLayer?.content.source_region
     ? page.regions.find((region) => region.id === selectedTextLayer.content.source_region)
     : undefined
+  const textRegions = useMemo(
+    () => page.regions.filter((region) => region.kind === 'dev.koharu.region.text'),
+    [page.regions],
+  )
   const regionControlFrame = sourceRegion
     ? (regionPreviews[sourceRegion.id] ?? geometryFrame(sourceRegion.geometry))
     : null
@@ -94,13 +98,15 @@ export function CanvasOverlay({
       className='pointer-events-none absolute inset-0 overflow-hidden'
       aria-hidden
     >
-      {sourceRegion && (
+      {textRegions.map((region) => (
         <TextRegionOverlay
-          region={sourceRegion}
-          preview={regionPreviews[sourceRegion.id]}
+          key={region.id}
+          region={region}
+          preview={regionPreviews[region.id]}
           camera={camera}
+          active={region.id === sourceRegion?.id}
         />
-      )}
+      ))}
       {layers.map(({ layer, frame, opacity }) => {
         const position = cssFrame(frame, camera)
         const selected = selectedIds.has(layer.id) && selectableLayer(layer)
@@ -173,10 +179,12 @@ function TextRegionOverlay({
   region,
   preview,
   camera,
+  active,
 }: {
   region: AnalysisRegion
   preview?: Frame
   camera: Camera
+  active: boolean
 }) {
   const dpr = window.devicePixelRatio
   const frame = preview ?? geometryFrame(region.geometry)
@@ -214,9 +222,13 @@ function TextRegionOverlay({
     )
 
   return (
-    <svg className='absolute inset-0 size-full overflow-hidden' data-testid='text-source-region'>
-      {shape('var(--canvas-region-contrast)', '7')}
-      {shape('var(--canvas-region-stroke)', '3')}
+    <svg
+      className='absolute inset-0 size-full overflow-hidden'
+      data-testid={active ? 'text-source-region' : 'text-region-preview'}
+      opacity={active ? 1 : 0.25}
+    >
+      {shape('var(--canvas-region-contrast)', active ? '7' : '5')}
+      {shape('var(--canvas-region-stroke)', active ? '3' : '1.5')}
     </svg>
   )
 }

@@ -92,15 +92,15 @@ export function CanvasCommandBar() {
             stage={stage}
             icon={quickStageIcons[stage]}
             model={preferences ? stageModel(preferences.pipeline, stage).model : null}
-            runDisabled={!page || Boolean(running)}
+            runDisabled={!page || selectedPages.length === 0 || Boolean(running)}
             settingsDisabled={!preferences || Boolean(running) || Boolean(savingStage)}
-            onRun={() => run('page', [stage])}
+            onRun={() => run('selected-pages', [stage])}
             onModelChange={(name) => changeModel(stage, name)}
           />
         ))}
         <TranslationQuickControl
-          disabled={!page || Boolean(running)}
-          onRun={() => run('page', ['translation'])}
+          disabled={!page || selectedPages.length === 0 || Boolean(running)}
+          onRun={() => run('selected-pages', ['translation'])}
         />
       </div>
       <Separator

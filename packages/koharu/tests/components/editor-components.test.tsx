@@ -910,9 +910,10 @@ describe('greenfield editor', () => {
     expect(useKoharuStore.getState().settingsOpen).toBe(true)
   })
 
-  it('runs one stage on the current page from each command bar shortcut', async () => {
+  it('runs one stage on every selected page from each command bar shortcut', async () => {
     installProject()
     useKoharuStore.setState({
+      selectedPages: ['page', 'second-page'],
       processingScope: 'project',
       processingStages: ['detection', 'ocr'],
     })
@@ -930,7 +931,7 @@ describe('greenfield editor', () => {
       fireEvent.click(shortcut)
       await waitFor(() =>
         expect(run).toHaveBeenLastCalledWith(
-          { scope: 'pages', value: ['page'] },
+          { scope: 'pages', value: ['page', 'second-page'] },
           { operation: 'only', stage },
         ),
       )
@@ -1696,6 +1697,8 @@ describe('greenfield editor', () => {
           id: 'job',
           completed: 1,
           total: 4,
+          pages_completed: 1,
+          pages_total: 3,
           page: 'page',
           stage: 'ocr',
           model: 'manga-ocr',
@@ -1706,6 +1709,7 @@ describe('greenfield editor', () => {
     const stop = vi.spyOn(commands, 'stopJob').mockResolvedValue(null)
     render(<ActivityCenter />)
     expect(screen.getByText('25%')).toBeInTheDocument()
+    expect(screen.getByText('Pages 1/3')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(stop).toHaveBeenCalledWith('job'))
   })

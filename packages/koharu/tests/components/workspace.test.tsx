@@ -542,6 +542,21 @@ describe('canvas interaction adapter', () => {
           label: null,
           shape: 'circular',
         },
+        {
+          id: 'other-region',
+          parent: 'page',
+          geometry: {
+            points: [
+              { x: 120, y: 130 },
+              { x: 180, y: 130 },
+              { x: 180, y: 170 },
+              { x: 120, y: 170 },
+            ],
+          },
+          kind: 'dev.koharu.region.text',
+          label: null,
+          shape: 'rectangular',
+        },
       ],
     }))
     useKoharuStore.setState({
@@ -557,6 +572,8 @@ describe('canvas interaction adapter', () => {
       'rx',
       '40',
     )
+    expect(screen.getByTestId('text-source-region')).toHaveAttribute('opacity', '1')
+    expect(screen.getByTestId('text-region-preview')).toHaveAttribute('opacity', '0.25')
   })
 
   it('targets the selected raster layer with the eraser', async () => {

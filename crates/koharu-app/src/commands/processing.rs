@@ -43,10 +43,45 @@ pub struct Job {
     pub completed: usize,
     #[specta(type = f64)]
     pub total: usize,
+    #[specta(type = f64)]
+    pub pages_completed: usize,
+    #[specta(type = f64)]
+    pub pages_total: usize,
     pub page: Option<koharu_scene::EntityId>,
     pub stage: Option<koharu_pipeline::Stage>,
     pub model: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Default)]
+struct JobProgress {
+    completed: usize,
+    total: usize,
+    pages_completed: usize,
+    pages_total: usize,
+    stages_per_page: usize,
+    completed_stages: HashMap<koharu_scene::EntityId, usize>,
+}
+
+impl JobProgress {
+    fn start(&mut self, pages: usize, stages: usize) {
+        self.completed = 0;
+        self.total = pages.saturating_mul(stages);
+        self.pages_completed = 0;
+        self.pages_total = pages;
+        self.stages_per_page = stages;
+        self.completed_stages.clear();
+    }
+
+    fn complete_stage(&mut self, page: koharu_scene::EntityId) {
+        self.completed = self.completed.saturating_add(1).min(self.total);
+        let completed = self.completed_stages.entry(page).or_default();
+        let previous = *completed;
+        *completed = completed.saturating_add(1).min(self.stages_per_page);
+        if previous < self.stages_per_page && *completed == self.stages_per_page {
+            self.pages_completed = self.pages_completed.saturating_add(1).min(self.pages_total);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Type)]
@@ -102,6 +137,8 @@ pub(crate) async fn process(
         state: JobState::Running,
         completed: 0,
         total: 0,
+        pages_completed: 0,
+        pages_total: 0,
         page: None,
         stage: None,
         model: None,
@@ -114,7 +151,7 @@ pub(crate) async fn process(
     let task_handle = handle.clone();
     let inpainting_mask = processing.inpainting_mask.lock().take();
     drop(tokio::spawn(async move {
-        let progress = Arc::new(Mutex::new((0_usize, 0_usize)));
+        let progress = Arc::new(Mutex::new(JobProgress::default()));
         let progress_handle = task_handle.clone();
         let mut request = koharu_pipeline::Request {
             operation,
@@ -133,8 +170,16 @@ pub(crate) async fn process(
                         stage_count = stages.len(),
                     );
                     let mut progress = progress.lock();
-                    *progress = (0, pages.len().saturating_mul(stages.len()));
-                    Some((0, progress.1, None, None, None))
+                    progress.start(pages.len(), stages.len());
+                    Some((
+                        progress.completed,
+                        progress.total,
+                        progress.pages_completed,
+                        progress.pages_total,
+                        None,
+                        None,
+                        None,
+                    ))
                 }
                 Progress::Loading { page, stage, model } => {
                     tracing::info!(
@@ -144,7 +189,15 @@ pub(crate) async fn process(
                         model,
                     );
                     let progress = progress.lock();
-                    Some((progress.0, progress.1, Some(page), Some(stage), Some(model)))
+                    Some((
+                        progress.completed,
+                        progress.total,
+                        progress.pages_completed,
+                        progress.pages_total,
+                        Some(page),
+                        Some(stage),
+                        Some(model),
+                    ))
                 }
                 Progress::Finished {
                     page,
@@ -162,8 +215,16 @@ pub(crate) async fn process(
                         );
                     }
                     let mut progress = progress.lock();
-                    progress.0 = progress.0.saturating_add(1).min(progress.1);
-                    Some((progress.0, progress.1, Some(page), Some(stage), Some(model)))
+                    progress.complete_stage(page);
+                    Some((
+                        progress.completed,
+                        progress.total,
+                        progress.pages_completed,
+                        progress.pages_total,
+                        Some(page),
+                        Some(stage),
+                        Some(model),
+                    ))
                 }
                 Progress::Skipped { page, stage } => {
                     tracing::info!(
@@ -172,8 +233,16 @@ pub(crate) async fn process(
                         stage = %stage,
                     );
                     let mut progress = progress.lock();
-                    progress.0 = progress.0.saturating_add(1).min(progress.1);
-                    Some((progress.0, progress.1, Some(page), Some(stage), None))
+                    progress.complete_stage(page);
+                    Some((
+                        progress.completed,
+                        progress.total,
+                        progress.pages_completed,
+                        progress.pages_total,
+                        Some(page),
+                        Some(stage),
+                        None,
+                    ))
                 }
                 Progress::Running { stage, model, .. } => {
                     tracing::info!(
@@ -185,13 +254,17 @@ pub(crate) async fn process(
                     None
                 }
             };
-            if let Some((completed, total, page, stage, model)) = update {
+            if let Some((completed, total, pages_completed, pages_total, page, stage, model)) =
+                update
+            {
                 let job = {
                     let processing = progress_handle.state::<Processing>();
                     let mut jobs = processing.jobs.lock();
                     jobs.get_mut(&id).map(|job| {
                         job.completed = completed;
                         job.total = total;
+                        job.pages_completed = pages_completed;
+                        job.pages_total = pages_total;
                         job.page = page;
                         job.stage = stage;
                         job.model = model;
@@ -295,4 +368,29 @@ pub(crate) async fn stop_job(
         .with_context(|| format!("job {job} is not running"))?;
     stop.stop();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JobProgress;
+    use koharu_scene::EntityId;
+
+    #[test]
+    fn job_progress_counts_pages_after_every_stage_finishes() {
+        let first = EntityId::new();
+        let second = EntityId::new();
+        let mut progress = JobProgress::default();
+        progress.start(2, 2);
+
+        progress.complete_stage(first);
+        progress.complete_stage(second);
+        assert_eq!(progress.completed, 2);
+        assert_eq!(progress.pages_completed, 0);
+
+        progress.complete_stage(first);
+        assert_eq!(progress.pages_completed, 1);
+        progress.complete_stage(second);
+        assert_eq!(progress.completed, 4);
+        assert_eq!(progress.pages_completed, 2);
+    }
 }
