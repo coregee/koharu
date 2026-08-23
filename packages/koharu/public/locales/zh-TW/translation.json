@@ -261,7 +261,9 @@
     "sourceLabel": "{{name}} 的原文",
     "textName": "文字 {{index}}",
     "title": "圖層",
-    "translationLabel": "{{name}} 的譯文"
+    "translationLabel": "{{name}} 的譯文",
+    "rerunTranslation": "重新翻譯",
+    "rerunTranslationLabel": "重新翻譯 {{name}}"
   },
   "menu": {
     "about": "關於",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "基礎 URL",
     "default": "預設",
-    "instructions": "翻譯說明",
-    "targetLanguage": "目標語言"
+    "instructions": "專案提示詞",
+    "targetLanguage": "目標語言",
+    "sourceLanguage": "來源語言"
   },
   "modelPicker": {
     "empty": "沒有可用的模型。",
@@ -327,7 +330,9 @@
     "instructions": "翻譯指示",
     "instructionsPlaceholder": "關於語氣、名稱和格式的選填說明。",
     "targetLanguage": "目標語言",
-    "title": "翻譯輸出"
+    "title": "翻譯輸出",
+    "autoDetect": "自動偵測",
+    "sourceLanguage": "來源語言"
   },
   "phase": {
     "detection": "偵測",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "選擇文字要翻譯成的語言。",
       "title": "譯文",
       "translationModel": "翻譯模型",
-      "translationModelDescription": "選擇用於翻譯文字的模型。"
+      "translationModelDescription": "選擇用於翻譯文字的模型。",
+      "context": "上下文",
+      "contextBudget": "權杖預算",
+      "contextBudgetDescription": "將最近的專案文字保持在模型輸入預算內。",
+      "contextDescription": "前面的頁面提供連續上下文；音效採用無上下文的獨立流程。",
+      "contextWindow": "上下文視窗",
+      "responseReserve": "回應預留 (%)",
+      "sourceLanguageDescription": "選擇 OCR 語言，或讓模型自動偵測。"
     },
     "typesetting": {
       "addFamily": "新增字型家族",

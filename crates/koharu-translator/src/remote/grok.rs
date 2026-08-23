@@ -70,6 +70,7 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
                 .iter()
                 .any(|modality| modality == "image"),
             reasoning: true,
+            context_window: None,
         })
         .collect())
 }
@@ -212,8 +213,14 @@ mod tests {
 
     #[test]
     fn serializes_responses_schema_and_image_input() {
-        let request = TranslationRequest::new(["hello"], crate::Language::Japanese)
-            .with_image(std::sync::Arc::new(image::DynamicImage::new_rgb8(1, 1)));
+        let request = TranslationRequest::new(
+            [crate::TranslationSegment::new(
+                crate::TranslationRole::Speech,
+                "hello",
+            )],
+            crate::Language::Japanese,
+        )
+        .with_image(std::sync::Arc::new(image::DynamicImage::new_rgb8(1, 1)));
         let body = request_body(
             "grok-4.5",
             &GenerationConfig {

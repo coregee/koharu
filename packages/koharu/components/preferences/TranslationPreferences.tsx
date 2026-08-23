@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { ModelPicker } from '@/components/controls/ModelPicker'
 import { GenerationPreferences } from '@/components/preferences/GenerationPreferences'
 import {
+  NumberField,
   PreferencePage,
   PreferenceRow,
   PreferenceSection,
@@ -53,6 +54,7 @@ export function TranslationPreferences({
     quantizations: [],
     vision: value.model.vision ?? false,
     reasoning: value.model.reasoning ?? false,
+    context_window: value.model.context_window ?? null,
   }
   const choices = selected ? modelChoices : [current, ...modelChoices]
   const quantizations = current.quantizations
@@ -138,6 +140,42 @@ export function TranslationPreferences({
 
       <PreferenceSection title={t('settings.translation.output')}>
         <PreferenceRow
+          title={t('model.sourceLanguage')}
+          description={t('settings.translation.sourceLanguageDescription')}
+        >
+          <Select
+            value={value.source_language ?? '__auto__'}
+            items={{
+              __auto__: t('outputPicker.autoDetect'),
+              ...Object.fromEntries(
+                languageChoices.map((language) => [language.tag, language.name]),
+              ),
+            }}
+            onValueChange={(source_language) =>
+              source_language &&
+              onChange({
+                ...value,
+                source_language: source_language === '__auto__' ? null : source_language,
+              })
+            }
+          >
+            <SelectTrigger
+              aria-label={t('model.sourceLanguage')}
+              className='h-8 w-full text-[11px]'
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='__auto__'>{t('outputPicker.autoDetect')}</SelectItem>
+              {languageChoices.map((language) => (
+                <SelectItem key={language.tag} value={language.tag}>
+                  {language.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </PreferenceRow>
+        <PreferenceRow
           title={t('model.targetLanguage')}
           description={t('settings.translation.targetLanguageDescription')}
         >
@@ -179,6 +217,37 @@ export function TranslationPreferences({
               onChange({ ...value, instructions: event.currentTarget.value || null })
             }
           />
+        </PreferenceRow>
+      </PreferenceSection>
+
+      <PreferenceSection
+        title={t('settings.translation.context')}
+        description={t('settings.translation.contextDescription')}
+      >
+        <PreferenceRow
+          title={t('settings.translation.contextBudget')}
+          description={t('settings.translation.contextBudgetDescription')}
+          align='start'
+        >
+          <div className='grid grid-cols-2 gap-2'>
+            <NumberField
+              label={t('settings.translation.contextWindow')}
+              value={value.context_window ?? null}
+              min={1024}
+              step={1024}
+              onChange={(context_window) => onChange({ ...value, context_window })}
+            />
+            <NumberField
+              label={t('settings.translation.responseReserve')}
+              value={value.response_reserve_percent}
+              min={10}
+              max={90}
+              step={5}
+              onChange={(response_reserve_percent) =>
+                response_reserve_percent && onChange({ ...value, response_reserve_percent })
+              }
+            />
+          </div>
         </PreferenceRow>
       </PreferenceSection>
     </PreferencePage>

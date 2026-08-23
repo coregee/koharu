@@ -261,7 +261,9 @@
     "sourceLabel": "{{name}} source text",
     "textName": "Text {{index}}",
     "title": "Layers",
-    "translationLabel": "{{name}} translation"
+    "translationLabel": "{{name}} translation",
+    "rerunTranslation": "Translate again",
+    "rerunTranslationLabel": "Translate {{name}} again"
   },
   "menu": {
     "about": "About",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "Base URL",
     "default": "Default",
-    "instructions": "Instructions",
-    "targetLanguage": "Target language"
+    "instructions": "Project prompt",
+    "targetLanguage": "Target language",
+    "sourceLanguage": "Source language"
   },
   "modelPicker": {
     "empty": "No models are available.",
@@ -327,7 +330,9 @@
     "instructions": "Translation instructions",
     "instructionsPlaceholder": "Optional guidance for tone, names, and formatting.",
     "targetLanguage": "Target language",
-    "title": "Translation output"
+    "title": "Translation output",
+    "autoDetect": "Auto-detect",
+    "sourceLanguage": "Source language"
   },
   "phase": {
     "detection": "Detection",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "Choose the language to translate text into.",
       "title": "Translation",
       "translationModel": "Translation model",
-      "translationModelDescription": "Choose the model used to translate text."
+      "translationModelDescription": "Choose the model used to translate text.",
+      "context": "Context",
+      "contextBudget": "Token budget",
+      "contextBudgetDescription": "Keep recent project text within the model's available input budget.",
+      "contextDescription": "Earlier pages provide continuity; SFX use a separate context-free pass.",
+      "contextWindow": "Context window",
+      "responseReserve": "Response reserve (%)",
+      "sourceLanguageDescription": "Choose the OCR language, or let the model detect it."
     },
     "typesetting": {
       "addFamily": "Add font family",

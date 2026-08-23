@@ -261,7 +261,9 @@
     "sourceLabel": "{{name}}の原文",
     "textName": "テキスト {{index}}",
     "title": "レイヤー",
-    "translationLabel": "{{name}}の翻訳"
+    "translationLabel": "{{name}}の翻訳",
+    "rerunTranslation": "再翻訳",
+    "rerunTranslationLabel": "{{name}}を再翻訳"
   },
   "menu": {
     "about": "Koharuについて",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "ベース URL",
     "default": "既定",
-    "instructions": "翻訳指示",
-    "targetLanguage": "対象言語"
+    "instructions": "プロジェクトプロンプト",
+    "targetLanguage": "対象言語",
+    "sourceLanguage": "原文の言語"
   },
   "modelPicker": {
     "empty": "利用できるモデルがありません。",
@@ -327,7 +330,9 @@
     "instructions": "翻訳指示",
     "instructionsPlaceholder": "文体、固有名詞、書式に関する任意の指示。",
     "targetLanguage": "対象言語",
-    "title": "翻訳出力"
+    "title": "翻訳出力",
+    "autoDetect": "自動検出",
+    "sourceLanguage": "原文の言語"
   },
   "phase": {
     "detection": "検出",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "テキストの翻訳先言語を選択します。",
       "title": "翻訳",
       "translationModel": "翻訳モデル",
-      "translationModelDescription": "テキストの翻訳に使用するモデルを選択します。"
+      "translationModelDescription": "テキストの翻訳に使用するモデルを選択します。",
+      "context": "コンテキスト",
+      "contextBudget": "トークン予算",
+      "contextBudgetDescription": "直近のプロジェクト本文をモデルの入力予算内に収めます。",
+      "contextDescription": "前のページを文脈として使用し、効果音は文脈なしの別処理で翻訳します。",
+      "contextWindow": "コンテキストウィンドウ",
+      "responseReserve": "応答用の予約 (%)",
+      "sourceLanguageDescription": "OCRの言語を選択するか、モデルに自動検出させます。"
     },
     "typesetting": {
       "addFamily": "フォントファミリーを追加",

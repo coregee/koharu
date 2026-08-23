@@ -261,7 +261,9 @@
     "sourceLabel": "{{name}} kaynak metni",
     "textName": "Metin {{index}}",
     "title": "Katmanlar",
-    "translationLabel": "{{name}} çevirisi"
+    "translationLabel": "{{name}} çevirisi",
+    "rerunTranslation": "Yeniden çevir",
+    "rerunTranslationLabel": "{{name}} öğesini yeniden çevir"
   },
   "menu": {
     "about": "Hakkında",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "Temel URL",
     "default": "Varsayılan",
-    "instructions": "Çeviri talimatları",
-    "targetLanguage": "Hedef dil"
+    "instructions": "Proje istemi",
+    "targetLanguage": "Hedef dil",
+    "sourceLanguage": "Kaynak dil"
   },
   "modelPicker": {
     "empty": "Kullanılabilir model yok.",
@@ -327,7 +330,9 @@
     "instructions": "Çeviri talimatları",
     "instructionsPlaceholder": "Üslup, adlar ve biçimlendirme için isteğe bağlı yönlendirme.",
     "targetLanguage": "Hedef dil",
-    "title": "Çeviri çıktısı"
+    "title": "Çeviri çıktısı",
+    "autoDetect": "Otomatik algıla",
+    "sourceLanguage": "Kaynak dil"
   },
   "phase": {
     "detection": "Algılama",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "Metnin çevrileceği dili seçin.",
       "title": "Çeviri",
       "translationModel": "Çeviri modeli",
-      "translationModelDescription": "Metni çevirmek için kullanılacak modeli seçin."
+      "translationModelDescription": "Metni çevirmek için kullanılacak modeli seçin.",
+      "context": "Bağlam",
+      "contextBudget": "Belirteç bütçesi",
+      "contextBudgetDescription": "Yakın proje metnini modelin giriş bütçesi içinde tutar.",
+      "contextDescription": "Önceki sayfalar süreklilik sağlar; SFX bağlamsız ayrı bir geçiş kullanır.",
+      "contextWindow": "Bağlam penceresi",
+      "responseReserve": "Yanıt rezervi (%)",
+      "sourceLanguageDescription": "OCR dilini seçin veya modelin algılamasına izin verin."
     },
     "typesetting": {
       "addFamily": "Yazı tipi ailesi ekle",

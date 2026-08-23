@@ -121,9 +121,6 @@ impl Model {
                     continue;
                 }
                 let previous = input.scene.component::<SourceText>(content)?;
-                if previous.as_ref().is_some_and(protects_manual_text) {
-                    continue;
-                }
                 targets.push(OcrTarget {
                     content,
                     region,
@@ -164,6 +161,7 @@ impl Model {
             edit.observe::<SourceText>(result.content)?;
         }
         for result in results {
+            edit.accept_ocr_delegation(result.content)?;
             let language = result
                 .previous
                 .and_then(|value| value.language)
@@ -255,10 +253,6 @@ fn normalize_ocr_text(text: String) -> String {
     }
 }
 
-fn protects_manual_text(source: &SourceText) -> bool {
-    matches!(source.text.origin, Origin::User) && !source.text.value.trim().is_empty()
-}
-
 fn crop(source: &DynamicImage, geometry: &Geometry) -> Result<DynamicImage> {
     let (min_x, min_y, max_x, max_y) =
         geometry_extents(geometry).ok_or_else(|| anyhow!("geometry is empty"))?;
@@ -274,9 +268,9 @@ fn crop(source: &DynamicImage, geometry: &Geometry) -> Result<DynamicImage> {
 
 #[cfg(test)]
 mod tests {
-    use super::{crop, normalize_ocr_text, protects_manual_text};
+    use super::{crop, normalize_ocr_text};
     use image::DynamicImage;
-    use koharu_scene::{Authored, Geometry, SourceText};
+    use koharu_scene::Geometry;
 
     #[test]
     fn crop_uses_the_current_region_geometry() {
@@ -286,18 +280,6 @@ mod tests {
         let cropped = crop(&source, &edited).expect("edited region should overlap the page");
 
         assert_eq!((cropped.width(), cropped.height()), (81, 43));
-    }
-
-    #[test]
-    fn only_non_empty_manual_text_is_protected_from_ocr() {
-        let source = |text: &str| SourceText {
-            text: Authored::user(text.to_owned()),
-            language: None,
-        };
-
-        assert!(!protects_manual_text(&source("")));
-        assert!(!protects_manual_text(&source("  \n")));
-        assert!(protects_manual_text(&source("corrected text")));
     }
 
     #[test]

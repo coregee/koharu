@@ -261,7 +261,9 @@
     "sourceLabel": "Texto de origem de {{name}}",
     "textName": "Texto {{index}}",
     "title": "Camadas",
-    "translationLabel": "Tradução de {{name}}"
+    "translationLabel": "Tradução de {{name}}",
+    "rerunTranslation": "Traduzir novamente",
+    "rerunTranslationLabel": "Traduzir {{name}} novamente"
   },
   "menu": {
     "about": "Sobre",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "URL base",
     "default": "Padrão",
-    "instructions": "Instruções",
-    "targetLanguage": "Idioma de destino"
+    "instructions": "Prompt do projeto",
+    "targetLanguage": "Idioma de destino",
+    "sourceLanguage": "Idioma de origem"
   },
   "modelPicker": {
     "empty": "Nenhum modelo disponível.",
@@ -327,7 +330,9 @@
     "instructions": "Instruções de tradução",
     "instructionsPlaceholder": "Orientações opcionais sobre tom, nomes e formatação.",
     "targetLanguage": "Idioma de destino",
-    "title": "Saída da tradução"
+    "title": "Saída da tradução",
+    "autoDetect": "Detectar automaticamente",
+    "sourceLanguage": "Idioma de origem"
   },
   "phase": {
     "detection": "Detecção",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "Escolha o idioma para o qual o texto será traduzido.",
       "title": "Tradução",
       "translationModel": "Modelo de tradução",
-      "translationModelDescription": "Escolha o modelo usado para traduzir texto."
+      "translationModelDescription": "Escolha o modelo usado para traduzir texto.",
+      "context": "Contexto",
+      "contextBudget": "Orçamento de tokens",
+      "contextBudgetDescription": "Mantém o texto recente do projeto dentro do orçamento de entrada do modelo.",
+      "contextDescription": "As páginas anteriores dão continuidade; os SFX usam uma etapa separada sem contexto.",
+      "contextWindow": "Janela de contexto",
+      "responseReserve": "Reserva de resposta (%)",
+      "sourceLanguageDescription": "Escolha o idioma do OCR ou deixe o modelo detectá-lo."
     },
     "typesetting": {
       "addFamily": "Adicionar família de fontes",

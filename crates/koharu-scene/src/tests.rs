@@ -466,6 +466,106 @@ async fn producer_reruns_respect_component_ownership() {
 }
 
 #[tokio::test]
+async fn ocr_candidate_delegates_source_and_translation_outputs() {
+    let mut session = Session::memory().await.unwrap();
+    let mut content = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let page = edit.add_page(page(), At::End)?;
+            let entity = edit.add_text_content(page, At::End)?;
+            edit.set(entity, &source("manual source"))?;
+            edit.set(
+                entity,
+                &Translation {
+                    text: Authored::user("manual translation".to_owned()),
+                    language: Some(LanguageTag::new("en").unwrap()),
+                },
+            )?;
+            edit.set(
+                entity,
+                &OcrCandidate {
+                    origin: Origin::User,
+                },
+            )?;
+            content = Some(entity);
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    let content = content.unwrap();
+    let generation = Generation::new(ProducerId::new("dev.koharu.pipeline.ocr").unwrap());
+
+    let mut unauthorized = snapshot.edit_as(generation.clone());
+    assert!(matches!(
+        unauthorized.set(content, &source("blocked")),
+        Err(Error::Authorship(_))
+    ));
+
+    let mut delegated = snapshot.edit_as(generation.clone());
+    delegated.accept_ocr_delegation(content).unwrap();
+    delegated
+        .set(content, &source("recognized source"))
+        .unwrap();
+    delegated
+        .set(
+            content,
+            &Translation {
+                text: Authored::user("translated output".to_owned()),
+                language: Some(LanguageTag::new("en").unwrap()),
+            },
+        )
+        .unwrap();
+    let snapshot = session
+        .commit(delegated.finish().unwrap())
+        .await
+        .unwrap()
+        .snapshot;
+
+    assert!(matches!(
+        snapshot
+            .component::<SourceText>(content)
+            .unwrap()
+            .unwrap()
+            .text
+            .origin,
+        Origin::Generated(ref actual) if actual.producer == generation.producer
+    ));
+    assert!(matches!(
+        snapshot
+            .component::<Translation>(content)
+            .unwrap()
+            .unwrap()
+            .text
+            .origin,
+        Origin::Generated(ref actual) if actual.producer == generation.producer
+    ));
+}
+
+#[tokio::test]
+async fn ocr_delegation_requires_the_candidate_marker() {
+    let mut session = Session::memory().await.unwrap();
+    let mut content = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let page = edit.add_page(page(), At::End)?;
+            content = Some(edit.add_text_content(page, At::End)?);
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    let mut edit = snapshot.edit_as(Generation::new(
+        ProducerId::new("dev.koharu.pipeline.ocr").unwrap(),
+    ));
+
+    assert!(matches!(
+        edit.accept_ocr_delegation(content.unwrap()),
+        Err(Error::Authorship(_))
+    ));
+}
+
+#[tokio::test]
 async fn pipeline_removal_respects_entity_lifecycle_owner() {
     let mut session = Session::memory().await.unwrap();
     let mut page_id = None;

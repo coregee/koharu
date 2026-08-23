@@ -12,31 +12,36 @@ const JPEG_QUALITY: u8 = 88;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TranslationRequest {
-    pub segments: Vec<String>,
+    pub segments: Vec<TranslationSegment>,
     pub source_language: Option<Language>,
     pub target_language: Language,
     pub instructions: Option<String>,
     pub context: Vec<TranslationContext>,
+    pub context_window: usize,
+    pub response_reserve_percent: u8,
+    pub purpose: TranslationPurpose,
     pub image: Option<Arc<DynamicImage>>,
 }
 
 impl TranslationRequest {
     #[must_use]
     pub fn new(
-        segments: impl IntoIterator<Item = impl Into<String>>,
+        segments: impl IntoIterator<Item = TranslationSegment>,
         target_language: Language,
     ) -> Self {
         Self {
-            segments: segments.into_iter().map(Into::into).collect(),
+            segments: segments.into_iter().collect(),
             source_language: None,
             target_language,
             instructions: None,
             context: Vec::new(),
+            context_window: 32_768,
+            response_reserve_percent: 30,
+            purpose: TranslationPurpose::Dialogue,
             image: None,
         }
     }
 
-    #[cfg(test)]
     #[must_use]
     pub fn with_source_language(mut self, language: Language) -> Self {
         self.source_language = Some(language);
@@ -55,11 +60,35 @@ impl TranslationRequest {
         self
     }
 
-    #[cfg(test)]
     #[must_use]
     pub fn with_context(mut self, context: impl IntoIterator<Item = TranslationContext>) -> Self {
         self.context = context.into_iter().collect();
         self
+    }
+
+    #[must_use]
+    pub fn with_context_window(
+        mut self,
+        context_window: usize,
+        response_reserve_percent: u8,
+    ) -> Self {
+        self.context_window = context_window;
+        self.response_reserve_percent = response_reserve_percent;
+        self
+    }
+
+    #[must_use]
+    pub fn with_purpose(mut self, purpose: TranslationPurpose) -> Self {
+        self.purpose = purpose;
+        self
+    }
+
+    #[must_use]
+    pub fn source_segments(&self) -> Vec<String> {
+        self.segments
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect()
     }
 
     pub(crate) fn prepare_image(&mut self) -> anyhow::Result<()> {
@@ -123,17 +152,56 @@ pub(crate) fn encode_image(image: &DynamicImage) -> anyhow::Result<EncodedImage>
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TranslationContext {
+    pub page: usize,
+    pub role: TranslationRole,
     pub source: String,
-    pub translation: String,
+    pub translation: Option<String>,
 }
 
 impl TranslationContext {
-    #[cfg(test)]
     #[must_use]
-    pub fn new(source: impl Into<String>, translation: impl Into<String>) -> Self {
+    pub fn new(
+        page: usize,
+        role: TranslationRole,
+        source: impl Into<String>,
+        translation: Option<String>,
+    ) -> Self {
         Self {
+            page,
+            role,
             source: source.into(),
-            translation: translation.into(),
+            translation,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum TranslationRole {
+    Narration,
+    Speech,
+    Sfx,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranslationSegment {
+    pub role: TranslationRole,
+    pub text: String,
+}
+
+impl TranslationSegment {
+    #[must_use]
+    pub fn new(role: TranslationRole, text: impl Into<String>) -> Self {
+        Self {
+            role,
+            text: text.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TranslationPurpose {
+    #[default]
+    Dialogue,
+    SoundEffects,
 }

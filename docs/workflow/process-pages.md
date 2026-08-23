@@ -25,6 +25,8 @@ The processing selector above the canvas supports:
 
 The **Process** menu also offers selected-layer processing for OCR and translation. Use that after correcting or adding a small set of text elements.
 
+Translation proceeds in page order. Each page uses prior project text for continuity, and a selected-layer translation also uses earlier speech and narration on the same page. The Translate button's dropdown provides the source language, target language, and project prompt without leaving the canvas.
+
 ## Choose stages
 
 Select any non-empty subset of detection, OCR, translation, and inpainting. Selecting all stages runs the complete workflow. Selecting one stage runs only that stage. Multiple selected stages run in the fixed workflow order. Omitted prerequisites are not added automatically, so include detection or OCR when a downstream stage needs fresh input.

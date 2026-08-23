@@ -180,6 +180,7 @@ pub(super) async fn models(client: &Client, config: &OpenAiCompatibleConfig) -> 
             quantizations: Vec::new(),
             vision: true,
             reasoning: true,
+            context_window: None,
         })
         .collect())
 }

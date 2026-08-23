@@ -14,6 +14,7 @@ import {
   Folder,
   Image as ImageIcon,
   Layers3,
+  Languages,
   Lock,
   Minus,
   Plus,
@@ -817,6 +818,15 @@ function LayerEditor({
     ).catch(() => undefined)
   }
 
+  const rerunTranslation = () => {
+    if (!isTextLayer(layer) || !layer.content.source?.text.trim() || processing) return
+    void call(
+      commands.process,
+      { scope: 'entities', value: [layer.id] },
+      { operation: 'only', stage: 'translation' },
+    ).catch(() => undefined)
+  }
+
   return (
     <div className='grid min-w-0 gap-1.5 px-1.5 pt-0.5 pb-1.5'>
       <div className='flex min-w-0 items-center gap-1.5'>
@@ -941,18 +951,32 @@ function LayerEditor({
             />
           </InspectorField>
           <InspectorField label={t('inspector.translation')}>
-            <CommitTextarea
-              data-testid={`edit-translation-${layer.id}`}
-              aria-label={t('layers.translationLabel', { name })}
-              wrap='soft'
-              className='max-h-44 min-h-9 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md border-primary/25 bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
-              value={layer.content.translation?.text ?? ''}
-              onCommit={(text) =>
-                void call(commands.setTranslation, layer.id, text.trim() ? text : null)
-                  .then(() => refresh(projectKey, pageKey))
-                  .catch(() => undefined)
-              }
-            />
+            <div className='grid gap-1'>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                className='h-6 justify-self-end text-[10px] font-normal'
+                disabled={processing || !layer.content.source?.text.trim()}
+                aria-label={t('layers.rerunTranslationLabel', { name })}
+                onClick={rerunTranslation}
+              >
+                <Languages data-icon='inline-start' />
+                {t('layers.rerunTranslation')}
+              </Button>
+              <CommitTextarea
+                data-testid={`edit-translation-${layer.id}`}
+                aria-label={t('layers.translationLabel', { name })}
+                wrap='soft'
+                className='max-h-44 min-h-9 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md border-primary/25 bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
+                value={layer.content.translation?.text ?? ''}
+                onCommit={(text) =>
+                  void call(commands.setTranslation, layer.id, text.trim() ? text : null)
+                    .then(() => refresh(projectKey, pageKey))
+                    .catch(() => undefined)
+                }
+              />
+            </div>
           </InspectorField>
         </>
       )}

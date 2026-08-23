@@ -261,7 +261,9 @@
     "sourceLabel": "Исходный текст {{name}}",
     "textName": "Текст {{index}}",
     "title": "Слои",
-    "translationLabel": "Перевод {{name}}"
+    "translationLabel": "Перевод {{name}}",
+    "rerunTranslation": "Перевести снова",
+    "rerunTranslationLabel": "Перевести {{name}} снова"
   },
   "menu": {
     "about": "О программе",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "Базовый URL",
     "default": "По умолчанию",
-    "instructions": "Инструкции",
-    "targetLanguage": "Язык перевода"
+    "instructions": "Промпт проекта",
+    "targetLanguage": "Язык перевода",
+    "sourceLanguage": "Исходный язык"
   },
   "modelPicker": {
     "empty": "Нет доступных моделей.",
@@ -327,7 +330,9 @@
     "instructions": "Инструкции по переводу",
     "instructionsPlaceholder": "Необязательные указания по стилю, именам и форматированию.",
     "targetLanguage": "Язык перевода",
-    "title": "Вывод перевода"
+    "title": "Вывод перевода",
+    "autoDetect": "Определять автоматически",
+    "sourceLanguage": "Исходный язык"
   },
   "phase": {
     "detection": "Обнаружение",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "Выберите язык, на который нужно перевести текст.",
       "title": "Перевод",
       "translationModel": "Модель перевода",
-      "translationModelDescription": "Выберите модель для перевода текста."
+      "translationModelDescription": "Выберите модель для перевода текста.",
+      "context": "Контекст",
+      "contextBudget": "Бюджет токенов",
+      "contextBudgetDescription": "Сохраняет недавний текст проекта в пределах входного бюджета модели.",
+      "contextDescription": "Предыдущие страницы дают контекст; звуковые эффекты переводятся отдельно без контекста.",
+      "contextWindow": "Контекстное окно",
+      "responseReserve": "Резерв ответа (%)",
+      "sourceLanguageDescription": "Выберите язык OCR или разрешите модели определить его."
     },
     "typesetting": {
       "addFamily": "Добавить семейство шрифтов",

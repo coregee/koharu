@@ -261,7 +261,9 @@
     "sourceLabel": "{{name}} 원문",
     "textName": "텍스트 {{index}}",
     "title": "레이어",
-    "translationLabel": "{{name}} 번역"
+    "translationLabel": "{{name}} 번역",
+    "rerunTranslation": "다시 번역",
+    "rerunTranslationLabel": "{{name}} 다시 번역"
   },
   "menu": {
     "about": "정보",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "기본 URL",
     "default": "기본값",
-    "instructions": "번역 지침",
-    "targetLanguage": "대상 언어"
+    "instructions": "프로젝트 프롬프트",
+    "targetLanguage": "대상 언어",
+    "sourceLanguage": "원본 언어"
   },
   "modelPicker": {
     "empty": "사용 가능한 모델이 없습니다.",
@@ -327,7 +330,9 @@
     "instructions": "번역 지침",
     "instructionsPlaceholder": "말투, 이름, 서식에 관한 선택적 지침입니다.",
     "targetLanguage": "대상 언어",
-    "title": "번역 출력"
+    "title": "번역 출력",
+    "autoDetect": "자동 감지",
+    "sourceLanguage": "원본 언어"
   },
   "phase": {
     "detection": "감지",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "텍스트를 번역할 언어를 선택합니다.",
       "title": "번역",
       "translationModel": "번역 모델",
-      "translationModelDescription": "텍스트 번역에 사용할 모델을 선택합니다."
+      "translationModelDescription": "텍스트 번역에 사용할 모델을 선택합니다.",
+      "context": "문맥",
+      "contextBudget": "토큰 예산",
+      "contextBudgetDescription": "최근 프로젝트 텍스트를 모델의 입력 예산 안에 유지합니다.",
+      "contextDescription": "이전 페이지를 문맥으로 사용하며 SFX는 문맥 없이 별도로 번역합니다.",
+      "contextWindow": "컨텍스트 창",
+      "responseReserve": "응답 예약 (%)",
+      "sourceLanguageDescription": "OCR 언어를 선택하거나 모델이 자동으로 감지하게 합니다."
     },
     "typesetting": {
       "addFamily": "글꼴 패밀리 추가",

@@ -99,10 +99,14 @@ const preferences: Preferences = {
         quantization: null,
         vision: true,
         reasoning: true,
+        context_window: 32768,
       },
       generation: { vision: true, reasoning: false },
+      source_language: null,
       target_language: 'en-US',
       instructions: null,
+      context_window: null,
+      response_reserve_percent: 30,
     },
     inpainting: { model: 'lama' },
     processor: {},
@@ -178,6 +182,7 @@ function installProject() {
         quantizations: [],
         vision: true,
         reasoning: true,
+        context_window: 32768,
       },
     ],
     selectedPages: ['page'],
@@ -815,6 +820,18 @@ describe('greenfield editor', () => {
     expect(screen.queryByText('Placement')).not.toBeInTheDocument()
   })
 
+  it('retries translation for one text box', async () => {
+    installProject()
+    const process = vi.spyOn(commands, 'process').mockResolvedValue('job')
+    render(<Inspector />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Translate Hello again' }))
+    expect(process).toHaveBeenCalledWith(
+      { scope: 'entities', value: ['element'] },
+      { operation: 'only', stage: 'translation' },
+    )
+  })
+
   it('shows zoom before page size without a fit control', () => {
     installProject()
     useKoharuStore.setState({ camera: { zoom: 1.25, translation: [0, 0], fitted: false } })
@@ -830,6 +847,12 @@ describe('greenfield editor', () => {
     installProject()
     const run = vi.spyOn(commands, 'process').mockResolvedValue('job')
     render(<CanvasCommandBar />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Translate' }))
+    expect(screen.getByRole('combobox', { name: 'Source language' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Target language' })).toBeInTheDocument()
+    expect(screen.getByText('Project prompt')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Processing settings' }))
     fireEvent.click(screen.getByRole('button', { name: /Scope Page/ }))
@@ -965,6 +988,7 @@ describe('greenfield editor', () => {
         ...preferences.pipeline,
         translation: {
           ...preferences.pipeline.translation,
+          source_language: 'en-US',
           target_language: 'ja-JP',
           instructions: 'Keep character names unchanged.',
         },
@@ -980,6 +1004,10 @@ describe('greenfield editor', () => {
     await user.click(screen.getByRole('button', { name: 'Processing settings' }))
     await waitFor(() => expect(commands.getTranslationModels).toHaveBeenCalled())
     await user.click(screen.getByRole('button', { name: /Output English/ }))
+    const sourceLanguage = screen.getByRole('combobox', { name: 'Source language' })
+    expect(sourceLanguage).toHaveTextContent('Auto-detect')
+    await user.click(sourceLanguage)
+    await user.click(await screen.findByRole('option', { name: 'English' }))
     const language = screen.getByRole('combobox', { name: 'Target language' })
     expect(language).toHaveTextContent('English')
     expect(language).not.toHaveTextContent('en-US')
@@ -1081,6 +1109,7 @@ describe('greenfield editor', () => {
             quantization: null,
             vision: true,
             reasoning: true,
+            context_window: 32768,
           },
         },
       },
@@ -1096,6 +1125,7 @@ describe('greenfield editor', () => {
           quantizations: [],
           vision: true,
           reasoning: true,
+          context_window: 32768,
         },
       ],
     })
@@ -1137,6 +1167,7 @@ describe('greenfield editor', () => {
             quantization: null,
             vision: false,
             reasoning: true,
+            context_window: null,
           },
           generation: {
             ...preferences.pipeline.translation.generation,
@@ -1157,6 +1188,7 @@ describe('greenfield editor', () => {
           quantizations: [],
           vision: false,
           reasoning: true,
+          context_window: null,
         },
       ],
     })
@@ -1191,6 +1223,7 @@ describe('greenfield editor', () => {
           quantizations: [],
           vision: true,
           reasoning: false,
+          context_window: 32768,
         },
       ],
     })
@@ -1293,7 +1326,10 @@ describe('greenfield editor', () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.getByLabelText('Target language')).toHaveTextContent('English')
+    expect(screen.getByLabelText('Source language')).toHaveTextContent('Auto-detect')
     expect(screen.getByText('Choose the language to translate text into.')).toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'Context window' })).toHaveValue(null)
+    expect(screen.getByRole('spinbutton', { name: 'Response reserve (%)' })).toHaveValue(30)
     expect(screen.getByLabelText('Translation instructions')).toHaveClass(
       'field-sizing-fixed',
       'overflow-y-auto',
@@ -1315,6 +1351,7 @@ describe('greenfield editor', () => {
             quantization: null,
             vision: false,
             reasoning: true,
+            context_window: null,
           },
           generation: {
             ...preferences.pipeline.translation.generation,
@@ -1334,6 +1371,7 @@ describe('greenfield editor', () => {
           quantizations: [],
           vision: false,
           reasoning: true,
+          context_window: null,
         },
       ],
     })
@@ -1500,6 +1538,7 @@ describe('greenfield editor', () => {
           quantizations: [],
           vision: true,
           reasoning: true,
+          context_window: 131072,
         },
       ],
     })

@@ -261,7 +261,9 @@
     "sourceLabel": "{{name}} 的原文",
     "textName": "文本 {{index}}",
     "title": "图层",
-    "translationLabel": "{{name}} 的译文"
+    "translationLabel": "{{name}} 的译文",
+    "rerunTranslation": "重新翻译",
+    "rerunTranslationLabel": "重新翻译 {{name}}"
   },
   "menu": {
     "about": "关于",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "基础 URL",
     "default": "默认",
-    "instructions": "翻译说明",
-    "targetLanguage": "目标语言"
+    "instructions": "项目提示词",
+    "targetLanguage": "目标语言",
+    "sourceLanguage": "源语言"
   },
   "modelPicker": {
     "empty": "没有可用模型。",
@@ -327,7 +330,9 @@
     "instructions": "翻译说明",
     "instructionsPlaceholder": "关于语气、名称和格式的可选说明。",
     "targetLanguage": "目标语言",
-    "title": "翻译输出"
+    "title": "翻译输出",
+    "autoDetect": "自动检测",
+    "sourceLanguage": "源语言"
   },
   "phase": {
     "detection": "检测",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "选择文本要翻译成的语言。",
       "title": "译文",
       "translationModel": "翻译模型",
-      "translationModelDescription": "选择用于翻译文本的模型。"
+      "translationModelDescription": "选择用于翻译文本的模型。",
+      "context": "上下文",
+      "contextBudget": "令牌预算",
+      "contextBudgetDescription": "将最近的项目文本保持在模型输入预算内。",
+      "contextDescription": "前面的页面提供连续上下文；音效采用无上下文的独立流程。",
+      "contextWindow": "上下文窗口",
+      "responseReserve": "响应预留 (%)",
+      "sourceLanguageDescription": "选择 OCR 语言，或让模型自动检测。"
     },
     "typesetting": {
       "addFamily": "添加字体系列",

@@ -173,9 +173,13 @@ impl Default for PipelineConfig {
 pub struct TranslationConfig {
     pub model: koharu_translator::ModelSelection,
     pub generation: GenerationConfig,
+    #[specta(type = Option<String>)]
+    pub source_language: Option<Language>,
     #[specta(type = String)]
     pub target_language: Language,
     pub instructions: Option<String>,
+    pub context_window: Option<u32>,
+    pub response_reserve_percent: u8,
 }
 
 impl Default for TranslationConfig {
@@ -183,8 +187,11 @@ impl Default for TranslationConfig {
         Self {
             model: koharu_translator::ModelSelection::default(),
             generation: GenerationConfig::default(),
+            source_language: None,
             target_language: Language::English,
             instructions: None,
+            context_window: None,
+            response_reserve_percent: 30,
         }
     }
 }
@@ -234,6 +241,16 @@ impl PipelineConfig {
             OcrModel::PaddleOcrVl1_6 | OcrModel::MangaOcr | OcrModel::BaberuOcr
         ) {
             bail!("unsupported OCR model")
+        }
+        if self
+            .translation
+            .context_window
+            .is_some_and(|context_window| context_window < 1_024)
+        {
+            bail!("translation context window must be at least 1024 tokens")
+        }
+        if !(10..=90).contains(&self.translation.response_reserve_percent) {
+            bail!("translation response reserve must be between 10 and 90 percent")
         }
         Ok(())
     }

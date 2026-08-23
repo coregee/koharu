@@ -4,8 +4,8 @@ use smallvec::SmallVec;
 
 use crate::{
     Asset, AssetInput, AssetRole, BlobId, ComponentOwner, EntityId, EntityOrigin, Error,
-    Generation, Group, Origin, Page, PageDraft, Patch, Relation, RelationId, RelationKind,
-    RelationSpec, Result, Snapshot, TextGroup, Visibility,
+    Generation, Group, OcrCandidate, Origin, Page, PageDraft, Patch, Relation, RelationId,
+    RelationKind, RelationSpec, Result, Snapshot, SourceText, TextGroup, Translation, Visibility,
     component::{Component, ComponentKey, ComponentRecord, ValidationContext, decode, encode, key},
     components::Assets,
     patch::{Observation, Operation},
@@ -35,6 +35,7 @@ pub struct Edit {
     operations: Vec<Operation>,
     attachments: Vec<(BlobId, bytes::Bytes)>,
     validate_entities: HashSet<EntityId>,
+    delegated_components: BTreeSet<(ComponentOwner, ComponentKey)>,
     generation: Option<Generation>,
 }
 
@@ -47,6 +48,7 @@ impl Edit {
             operations: Vec::new(),
             attachments: Vec::new(),
             validate_entities: HashSet::new(),
+            delegated_components: BTreeSet::new(),
             generation,
         }
     }
@@ -281,6 +283,37 @@ impl Edit {
                 origin: Origin::User,
             })?),
         )
+    }
+
+    /// Accepts the processing delegation represented by an [`OcrCandidate`].
+    ///
+    /// While the marker is present, OCR and downstream text stages may replace
+    /// user-authored source and translation outputs. Other user-owned
+    /// components on the content, its region, or its presentation remain
+    /// protected. Observing the marker makes a concurrent opt-out win during
+    /// patch rebasing.
+    pub fn accept_ocr_delegation(&mut self, content: EntityId) -> Result<()> {
+        if self.generation.is_none() {
+            return Err(Error::Authorship(
+                "only pipeline edits can accept OCR delegation".to_owned(),
+            ));
+        }
+        if !self.state.contains_entity(content) {
+            return Err(Error::EntityNotFound(content));
+        }
+        let owner = ComponentOwner::Entity(content);
+        let marker = key::<OcrCandidate>()?;
+        self.observe_component(owner, marker.clone())?;
+        if self.component(owner, &marker)?.is_none() {
+            return Err(Error::Authorship(
+                "text content has not been delegated to OCR".to_owned(),
+            ));
+        }
+        self.delegated_components
+            .insert((owner, key::<SourceText>()?));
+        self.delegated_components
+            .insert((owner, key::<Translation>()?));
+        Ok(())
     }
 
     pub fn set<T: Component>(&mut self, entity: EntityId, value: &T) -> Result<()> {
@@ -797,7 +830,7 @@ impl Edit {
                 decode::<T>(value, &ValidationContext::new(&record_exists, &blob_exists))
             })
             .transpose()?;
-        self.observe_component(owner, key)?;
+        self.observe_component(owner, key.clone())?;
         match existing {
             None => Ok(()),
             Some(value) => {
@@ -806,6 +839,11 @@ impl Edit {
                         "pipeline cannot remove unmanaged component {}",
                         T::KIND
                     )));
+                }
+                if matches!(value.origin(), Some(Origin::User))
+                    && self.delegated_components.contains(&(owner, key.clone()))
+                {
+                    return Ok(());
                 }
                 self.validate_origin_removal(value.origin())
             }

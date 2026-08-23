@@ -17,7 +17,10 @@ use koharu_ml::Device;
 use error::{Error, Result};
 use local::LocalTranslator;
 
-pub use backend::{TranslationContext, TranslationRequest};
+pub use backend::{
+    TranslationContext, TranslationPurpose, TranslationRequest, TranslationRole,
+    TranslationSegment,
+};
 pub use language::Language;
 pub use model::{GenerationConfig, Model, ModelSelection, Quantization};
 pub(crate) use model::{ModelGeneration, QuantizationDefinition, display_name};
@@ -126,10 +129,20 @@ impl Translator {
         let provider_id: &'static str = provider.into();
         if request.segments.is_empty() {
             tracing::Span::current().record("outcome", "skipped");
-            return Ok((provider_id, request.segments));
+            return Ok((provider_id, Vec::new()));
         }
 
-        let generation = generation.for_model(selection);
+        let mut generation = generation.for_model(selection);
+        let response_budget = request
+            .context_window
+            .saturating_mul(usize::from(request.response_reserve_percent.min(90)))
+            / 100;
+        let response_budget = u32::try_from(response_budget.max(1)).unwrap_or(u32::MAX);
+        generation.max_tokens = Some(
+            generation
+                .max_tokens
+                .map_or(response_budget, |configured| configured.min(response_budget)),
+        );
 
         if Self::supports_vision(selection, &generation) {
             request.prepare_image()?;
@@ -201,6 +214,7 @@ mod tests {
             quantization: None,
             vision: true,
             reasoning: true,
+            context_window: Some(32_768),
         }
     }
 

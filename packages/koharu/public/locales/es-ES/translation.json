@@ -261,7 +261,9 @@
     "sourceLabel": "Texto original de {{name}}",
     "textName": "Texto {{index}}",
     "title": "Capas",
-    "translationLabel": "Traducción de {{name}}"
+    "translationLabel": "Traducción de {{name}}",
+    "rerunTranslation": "Traducir de nuevo",
+    "rerunTranslationLabel": "Traducir {{name}} de nuevo"
   },
   "menu": {
     "about": "Acerca de",
@@ -290,8 +292,9 @@
   "model": {
     "baseUrl": "URL base",
     "default": "Predeterminado",
-    "instructions": "Instrucciones",
-    "targetLanguage": "Idioma de destino"
+    "instructions": "Prompt del proyecto",
+    "targetLanguage": "Idioma de destino",
+    "sourceLanguage": "Idioma de origen"
   },
   "modelPicker": {
     "empty": "No hay modelos disponibles.",
@@ -327,7 +330,9 @@
     "instructions": "Instrucciones de traducción",
     "instructionsPlaceholder": "Indicaciones opcionales sobre el tono, los nombres y el formato.",
     "targetLanguage": "Idioma de destino",
-    "title": "Salida de traducción"
+    "title": "Salida de traducción",
+    "autoDetect": "Detectar automáticamente",
+    "sourceLanguage": "Idioma de origen"
   },
   "phase": {
     "detection": "Detección",
@@ -471,7 +476,14 @@
       "targetLanguageDescription": "Elige el idioma al que se traducirá el texto.",
       "title": "Traducción",
       "translationModel": "Modelo de traducción",
-      "translationModelDescription": "Elige el modelo utilizado para traducir texto."
+      "translationModelDescription": "Elige el modelo utilizado para traducir texto.",
+      "context": "Contexto",
+      "contextBudget": "Presupuesto de tokens",
+      "contextBudgetDescription": "Mantiene el texto reciente del proyecto dentro del presupuesto de entrada del modelo.",
+      "contextDescription": "Las páginas anteriores aportan continuidad; los SFX se traducen por separado sin contexto.",
+      "contextWindow": "Ventana de contexto",
+      "responseReserve": "Reserva de respuesta (%)",
+      "sourceLanguageDescription": "Elige el idioma del OCR o deja que el modelo lo detecte."
     },
     "typesetting": {
       "addFamily": "Añadir familia tipográfica",

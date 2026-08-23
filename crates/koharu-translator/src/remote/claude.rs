@@ -44,6 +44,7 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
                 quantizations: Vec::new(),
                 vision: model.capabilities.image_input.supported,
                 reasoning,
+                context_window: None,
             }
         })
         .collect())

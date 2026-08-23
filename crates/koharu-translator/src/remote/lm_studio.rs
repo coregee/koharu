@@ -92,6 +92,7 @@ pub(super) async fn models(client: &Client, config: &LmStudioConfig) -> Result<V
                     .is_some_and(|capabilities| capabilities.vision),
                 reasoning: capabilities
                     .is_some_and(|capabilities| capabilities.reasoning.is_some()),
+                context_window: model.max_context_length,
             }
         })
         .collect())
@@ -171,6 +172,7 @@ struct ListedModel {
     kind: String,
     key: String,
     capabilities: Option<ListedModelCapabilities>,
+    max_context_length: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -241,6 +243,7 @@ mod tests {
                 {
                     "type": "llm",
                     "key": "publisher/chat-model",
+                    "max_context_length": 32768,
                     "capabilities": { "vision": false }
                 },
                 {
@@ -269,6 +272,7 @@ mod tests {
                 let capabilities = model.capabilities;
                 (
                     model.key,
+                    model.max_context_length,
                     capabilities
                         .as_ref()
                         .is_some_and(|capabilities| capabilities.vision),
@@ -279,8 +283,13 @@ mod tests {
         assert_eq!(
             models,
             [
-                ("publisher/chat-model".to_owned(), false, false),
-                ("publisher/vision-model".to_owned(), true, true)
+                (
+                    "publisher/chat-model".to_owned(),
+                    Some(32_768),
+                    false,
+                    false
+                ),
+                ("publisher/vision-model".to_owned(), None, true, true)
             ]
         );
     }

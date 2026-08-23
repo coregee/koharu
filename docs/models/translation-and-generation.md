@@ -1,6 +1,6 @@
 ---
 title: Translation and Generation
-description: Configure target language, instructions, quantization, sampling, and thinking behavior.
+description: Configure translation languages, project prompt, context, quantization, and generation.
 ---
 
 # Translation and Generation
@@ -9,9 +9,17 @@ Translation is a normal stage in Koharu's fixed pipeline. Its model and output c
 
 ## Output
 
-Choose a target language and optional instructions in the processing selector or **Settings -> Translation**. Instructions are project-wide guidance for names, terminology, tone, pronouns, formatting, or content that should remain untranslated.
+Choose a source language, target language, and optional project prompt from the Translate button above the canvas or **Settings -> Translation**. Leave the source language on auto-detect when a provider can identify it. The project prompt supplies shared guidance for names, terminology, tone, pronouns, formatting, or content that should remain untranslated.
 
-Keep instructions concise and test them on several pages. They are not a substitute for correcting source OCR.
+Keep the project prompt concise and test it on several pages. It is not a substitute for correcting source OCR.
+
+## Page context
+
+Speech and narration are translated together in text-layer order. Every segment includes its role and a stable numeric ID, and the provider must return exactly one translation for each input ID. Sound effects use a separate, context-free pass.
+
+Earlier pages are included as reference context. Koharu prefers their target-language translations and retains source OCR alongside them for terminology mapping; untranslated entries still contribute their OCR text. A single-bubble retry also includes speech and narration before that bubble on the current page.
+
+Koharu uses a model's reported context window when its catalog provides one, with a conservative fallback for models that do not report it. The context-window setting can override that value. Koharu always reserves the configured percentage for the response and removes the oldest context entries first when the prompt would exceed the remaining input budget. Requests remain independent: prior reasoning output is neither stored nor sent to later pages.
 
 ## Local quantization
 

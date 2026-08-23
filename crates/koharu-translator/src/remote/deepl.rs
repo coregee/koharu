@@ -60,8 +60,8 @@ pub(super) async fn translate(
         .map(|entry| entry.source.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let mut form = request
-        .segments
+    let segments = request.source_segments();
+    let mut form = segments
         .iter()
         .map(|text| ("text", text.as_str()))
         .collect::<Vec<_>>();

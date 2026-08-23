@@ -6,7 +6,7 @@ use koharu_config::Config;
 use koharu_secrets::{ExposeSecret, SecretString};
 use koharu_translator::{
     GenerationConfig, Language, ModelSelection, Provider, ProvidersConfig, TranslationRequest,
-    Translator,
+    TranslationRole, TranslationSegment, Translator,
 };
 use url::Url;
 
@@ -85,8 +85,14 @@ async fn main() -> Result<()> {
         quantization: None,
         vision: true,
         reasoning: true,
+        context_window: None,
     };
-    let mut request = TranslationRequest::new(args.segments, args.target);
+    let mut request = TranslationRequest::new(
+        args.segments
+            .into_iter()
+            .map(|text| TranslationSegment::new(TranslationRole::Speech, text)),
+        args.target,
+    );
     if let Some(instructions) = args.instructions {
         request = request.with_instructions(instructions);
     }

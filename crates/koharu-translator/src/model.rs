@@ -61,6 +61,8 @@ pub struct ModelSelection {
     pub vision: bool,
     #[serde(default)]
     pub reasoning: bool,
+    #[serde(default)]
+    pub context_window: Option<u32>,
 }
 
 impl Default for ModelSelection {
@@ -71,6 +73,7 @@ impl Default for ModelSelection {
             quantization: Some(crate::local::DEFAULT_QUANTIZATION.to_owned()),
             vision: true,
             reasoning: true,
+            context_window: Some(32_768),
         }
     }
 }
@@ -89,6 +92,7 @@ pub struct Model {
     pub quantizations: Vec<Quantization>,
     pub vision: bool,
     pub reasoning: bool,
+    pub context_window: Option<u32>,
 }
 
 impl Model {
@@ -100,6 +104,7 @@ impl Model {
             quantizations: Vec::new(),
             vision: false,
             reasoning: false,
+            context_window: None,
         }
     }
 }
@@ -189,6 +194,7 @@ mod tests {
             quantization: None,
             vision,
             reasoning,
+            context_window: None,
         }
     }
 
@@ -218,5 +224,6 @@ mod tests {
         .unwrap();
         assert!(!selection.vision);
         assert!(!selection.reasoning);
+        assert_eq!(selection.context_window, None);
     }
 }

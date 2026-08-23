@@ -68,6 +68,7 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
                         .supported_parameters
                         .iter()
                         .any(|parameter| parameter == "reasoning"),
+                context_window: model.context_length,
             })
             .collect(),
         Err(error) => {
@@ -89,6 +90,7 @@ struct ListedModel {
     architecture: Architecture,
     supported_parameters: Vec<String>,
     reasoning: Option<ReasoningCapabilities>,
+    context_length: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +112,7 @@ mod tests {
                 {
                     "id": "provider/reasoning-model",
                     "name": "Reasoning Model",
+                    "context_length": 131072,
                     "architecture": { "input_modalities": ["text"] },
                     "supported_parameters": ["reasoning"],
                     "reasoning": {
@@ -126,6 +129,7 @@ mod tests {
         }))
         .unwrap();
         assert!(response.data[0].reasoning.is_some());
+        assert_eq!(response.data[0].context_length, Some(131_072));
         assert!(response.data[1].reasoning.is_none());
     }
 }

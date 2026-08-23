@@ -222,6 +222,8 @@ impl Component for TextRole {
 }
 
 /// Marks text content as eligible for OCR independently from its placement.
+/// Its presence also delegates source and translation output ownership to the
+/// processing pipeline; removing it opts the content out again.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 pub struct OcrCandidate {

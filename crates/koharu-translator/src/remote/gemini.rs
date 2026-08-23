@@ -48,6 +48,7 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
                 quantizations: Vec::new(),
                 vision: true,
                 reasoning: model.thinking,
+                context_window: model.input_token_limit,
             })
         })
         .collect())
@@ -234,6 +235,7 @@ struct ListedModel {
     supported_generation_methods: Vec<String>,
     #[serde(default)]
     thinking: bool,
+    input_token_limit: Option<u32>,
 }
 
 #[cfg(test)]
@@ -312,7 +314,8 @@ mod tests {
                     "name": "models/gemini-3.7-flash",
                     "displayName": "Gemini 3.7 Flash",
                     "supportedGenerationMethods": ["generateContent"],
-                    "thinking": true
+                    "thinking": true,
+                    "inputTokenLimit": 1048576
                 },
                 {
                     "name": "models/gemini-2.0-flash-lite",
@@ -323,6 +326,7 @@ mod tests {
         }))
         .unwrap();
         assert!(response.models[0].thinking);
+        assert_eq!(response.models[0].input_token_limit, Some(1_048_576));
         assert!(!response.models[1].thinking);
     }
 }

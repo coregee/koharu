@@ -21,6 +21,7 @@ export function modelSelection(model: Model): ModelSelection {
     quantization: model.quantizations[0]?.id ?? null,
     vision: model.vision,
     reasoning: model.reasoning,
+    context_window: model.context_window,
   }
 }
 

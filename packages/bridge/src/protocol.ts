@@ -325,6 +325,7 @@ export type Model = {
 	quantizations: Quantization[],
 	vision: boolean,
 	reasoning: boolean,
+	context_window: number | null,
 };
 
 export type ModelResources = {
@@ -340,6 +341,7 @@ export type ModelSelection = {
 	quantization?: string | null,
 	vision?: boolean,
 	reasoning?: boolean,
+	context_window?: number | null,
 };
 
 export type OcrModel = { model: "paddleocr-vl-1.6" } | { model: "manga-ocr" } | { model: "baberu-ocr" };
@@ -511,8 +513,11 @@ export type Translation = {
 export type TranslationConfig = {
 	model: ModelSelection,
 	generation: GenerationConfig,
+	source_language: string | null,
 	target_language: string,
 	instructions: string | null,
+	context_window: number | null,
+	response_reserve_percent: number,
 };
 
 export type TypesettingConfig = {

@@ -33,6 +33,7 @@ pub(super) async fn translate(
         provider: "caiyun",
         language: request.target_language,
     })?;
+    let segments = request.source_segments();
     let response: Response = send_json(
         "caiyun",
         client
@@ -42,7 +43,7 @@ pub(super) async fn translate(
                 format!("token {}", api_key.expose_secret()),
             )
             .json(&Request {
-                source: &request.segments,
+                source: &segments,
                 trans_type: format!("auto2{target}"),
                 request_id: "koharu-translator",
                 detect: true,

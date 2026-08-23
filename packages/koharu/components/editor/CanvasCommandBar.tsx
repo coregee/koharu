@@ -4,6 +4,7 @@ import { ChevronDown, Eraser, FileText, Languages, Search, type LucideIcon } fro
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { OutputPicker, type OutputDraft } from '@/components/controls/OutputPicker'
 import { InferenceControl } from '@/components/editor/InferenceControl'
 import {
   defaultModel,
@@ -97,17 +98,10 @@ export function CanvasCommandBar() {
             onModelChange={(name) => changeModel(stage, name)}
           />
         ))}
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          className='h-7 rounded-lg px-2 text-[11px] font-normal text-muted-foreground hover:bg-primary/10 hover:text-foreground'
+        <TranslationQuickControl
           disabled={!page || Boolean(running)}
-          onClick={() => run('page', ['translation'])}
-        >
-          <Languages data-icon='inline-start' />
-          {t('inference.quickStage.translation')}
-        </Button>
+          onRun={() => run('page', ['translation'])}
+        />
       </div>
       <Separator
         orientation='vertical'
@@ -115,6 +109,84 @@ export function CanvasCommandBar() {
       />
       <InferenceControl disabled={!page || Boolean(running)} onRun={run} />
     </header>
+  )
+}
+
+function TranslationQuickControl({ disabled, onRun }: { disabled: boolean; onRun: () => void }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const preferences = useKoharuStore((state) => state.preferences)
+  const translation = preferences?.pipeline.translation ?? null
+
+  const saveOutput = (draft: OutputDraft) => {
+    if (!preferences || !translation || saving) return
+    setSaving(true)
+    const pipeline = {
+      ...preferences.pipeline,
+      translation: {
+        ...translation,
+        source_language: draft.sourceLanguage,
+        target_language: draft.targetLanguage,
+        instructions: draft.instructions || null,
+      },
+    }
+    void savePreferences(pipeline, preferences.providers, preferences.typesetting)
+      .then(receivePreferences)
+      .catch(() => undefined)
+      .finally(() => setSaving(false))
+  }
+
+  return (
+    <ButtonGroup>
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        className='h-7 px-2 text-[11px] font-normal text-muted-foreground hover:bg-primary/10 hover:text-foreground'
+        disabled={disabled}
+        onClick={onRun}
+      >
+        <Languages data-icon='inline-start' />
+        {t('inference.quickStage.translation')}
+      </Button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              aria-label={t('inference.configureStage', {
+                stage: t('inference.quickStage.translation'),
+              })}
+              className='h-7 w-5 px-0 text-muted-foreground hover:bg-primary/10 hover:text-foreground'
+              disabled={disabled || !translation}
+            />
+          }
+        >
+          <ChevronDown className='size-3' />
+        </PopoverTrigger>
+        <PopoverContent
+          align='start'
+          sideOffset={4}
+          className='w-72 min-w-0 gap-0 overflow-hidden rounded-xl border border-border/50 p-1 shadow-sm ring-0'
+        >
+          {translation && preferences && (
+            <OutputPicker
+              sourceLanguage={translation.source_language}
+              targetLanguage={translation.target_language}
+              instructions={translation.instructions}
+              languages={preferences.languages}
+              disabled={disabled}
+              saving={saving}
+              onBack={() => setOpen(false)}
+              onChange={saveOutput}
+            />
+          )}
+        </PopoverContent>
+      </Popover>
+    </ButtonGroup>
   )
 }
 

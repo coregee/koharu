@@ -39,10 +39,11 @@ pub(super) async fn translate(
     let mut url = Url::parse(URL).expect("Google API URL is valid");
     url.query_pairs_mut()
         .append_pair("key", api_key.expose_secret());
+    let segments = request.source_segments();
     let response: Response = send_json(
         "google-cloud-translation",
         client.post(url).json(&Request {
-            q: &request.segments,
+            q: &segments,
             target: request.target_language.tag(),
             source: request.source_language.map(|language| language.tag()),
             format: "text",

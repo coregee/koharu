@@ -166,6 +166,7 @@ function RuntimeSelector({
       ...preferences.pipeline,
       translation: {
         ...translation,
+        source_language: draft.sourceLanguage,
         target_language: draft.targetLanguage,
         instructions: draft.instructions || null,
       },
@@ -333,6 +334,7 @@ function RuntimeSelector({
 
         {view === 'output' && translation && (
           <OutputPicker
+            sourceLanguage={translation.source_language}
             targetLanguage={translation.target_language}
             instructions={translation.instructions}
             languages={languages}
@@ -451,6 +453,7 @@ function availableModels(
       quantizations: [],
       vision: selected.vision ?? false,
       reasoning: selected.reasoning ?? false,
+      context_window: selected.context_window ?? null,
     },
     ...models,
   ]
