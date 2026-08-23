@@ -539,11 +539,25 @@ export function CanvasWorkspace() {
       const pointText =
         current.frame.width < 4 / camera.zoom && current.frame.height < 4 / camera.zoom
       setDraft(null)
-      void (
-        pointText
-          ? call(commands.addPointText, current.start)
-          : call(commands.addTextBox, current.frame)
-      )
+      if (
+        pointText &&
+        (current.start.x < 0 ||
+          current.start.y < 0 ||
+          current.start.x >= page.size.width ||
+          current.start.y >= page.size.height)
+      ) {
+        return
+      }
+      const frame = pointText
+        ? {
+            x: current.start.x,
+            y: current.start.y,
+            width: Math.min(Math.max(page.size.width - current.start.x, 1), 320),
+            height: Math.min(Math.max(page.size.height - current.start.y, 1), 120),
+            angle_degrees: 0,
+          }
+        : current.frame
+      void call(commands.addTextBox, frame)
         .then((result) => {
           selectLayers([result.layer])
           return refresh(projectKey, pagesKey, pageKey)

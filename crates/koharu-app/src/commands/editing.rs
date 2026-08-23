@@ -280,6 +280,33 @@ pub(crate) async fn set_region_geometry(
 
 #[tracing::instrument(
     target = "koharu_metrics",
+    name = "ocr_inclusion_edited",
+    skip_all,
+    fields(origin = "user", included)
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_ocr_inclusion(
+    layer: EntityId,
+    included: bool,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<(), Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.set_ocr_inclusion(layer, included).await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, page).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(())
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
     name = "region_shape_edited",
     skip_all,
     fields(origin = "user", region = %region, shape = ?shape),

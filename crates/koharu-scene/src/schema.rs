@@ -6,8 +6,9 @@
 
 use crate::{
     BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, OcrAnalysis,
-    Page, Project, RasterLayer, Region, RegionShape, RegionSpec, Relation, Result, SourceText,
-    TextContent, TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography, Visibility,
+    OcrCandidate, Page, Project, RasterLayer, Region, RegionShape, RegionSpec, Relation, Result,
+    SourceText, TextContent, TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography,
+    Visibility,
     component::{Component, ComponentRecord, ValidationContext, decode, key},
     components::Assets,
     state::{Components, State},
@@ -61,6 +62,7 @@ component_schema! {
     ASSETS = 16 => Assets,
     ENTITY_ORIGIN = 17 => EntityOrigin,
     REGION_SHAPE = 18 => RegionShape,
+    OCR_CANDIDATE = 19 => OcrCandidate,
 }
 
 pub(crate) fn validate_components(
@@ -82,6 +84,7 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     let has = |component| kinds & component != 0;
     let has_source = has(SOURCE_TEXT);
     let has_content = has(TEXT_CONTENT);
+    let has_ocr_candidate = has(OCR_CANDIDATE);
     let has_translation = has(TRANSLATION);
     let has_region = has(REGION);
     let has_region_shape = has(REGION_SHAPE);
@@ -104,7 +107,7 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
         })
     });
 
-    if (has_source || has_translation || has(TEXT_ROLE)) && !has_content {
+    if (has_source || has_translation || has(TEXT_ROLE) || has_ocr_candidate) && !has_content {
         Err(Error::invalid(format!(
             "entity {id} carries text content data but is not text content"
         )))

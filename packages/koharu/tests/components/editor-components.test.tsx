@@ -71,6 +71,7 @@ const textLayer: Layer = {
     translation: { text: 'Hello', language: null },
     classification: null,
     source_region: null,
+    include_for_ocr: true,
   },
   typography: {
     preferred_font: 'Noto Sans',
@@ -85,7 +86,6 @@ const textLayer: Layer = {
     writing_mode: null,
   },
   layout: 'paragraph',
-  automatic_region: null,
 }
 
 const preferences: Preferences = {
@@ -787,6 +787,7 @@ describe('greenfield editor', () => {
     }))
     const classify = vi.spyOn(commands, 'setTextClassification').mockResolvedValue(null)
     const reshape = vi.spyOn(commands, 'setRegionShape').mockResolvedValue(null)
+    const include = vi.spyOn(commands, 'setOcrInclusion').mockResolvedValue(null)
     const process = vi.spyOn(commands, 'process').mockResolvedValue('job')
     render(<Inspector />)
 
@@ -803,23 +804,12 @@ describe('greenfield editor', () => {
       { scope: 'entities', value: ['element'] },
       { operation: 'only', stage: 'ocr' },
     )
-  })
 
-  it('resets a custom text frame to its automatic region', async () => {
-    installProject()
-    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
-      ...page,
-      layers: page.layers.map((layer) =>
-        layer.type === 'text' ? { ...layer, automatic_region: 'bubble' } : layer,
-      ),
-    }))
-    const reset = vi.spyOn(commands, 'setGeometry').mockResolvedValue(null)
-    render(<Inspector />)
-
-    expect(screen.getByText('Custom frame')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Reset to auto fit' }))
-
-    await waitFor(() => expect(reset).toHaveBeenCalledWith([{ layer: 'element', points: null }]))
+    const checkbox = screen.getByRole('checkbox', { name: 'Include for OCR' })
+    expect(checkbox).toBeChecked()
+    await user.click(checkbox)
+    await waitFor(() => expect(include).toHaveBeenCalledWith('element', false))
+    expect(screen.queryByText('Placement')).not.toBeInTheDocument()
   })
 
   it('shows zoom before page size without a fit control', () => {

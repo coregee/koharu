@@ -221,6 +221,30 @@ impl Component for TextRole {
     }
 }
 
+/// Marks text content as eligible for OCR independently from its placement.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct OcrCandidate {
+    pub origin: Origin,
+}
+
+impl Component for OcrCandidate {
+    const KIND: &'static str = "dev.koharu.text.ocr-candidate";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        self.origin.validate()
+    }
+
+    fn origin(&self) -> Option<&Origin> {
+        Some(&self.origin)
+    }
+
+    fn set_origin(&mut self, origin: Origin) -> bool {
+        self.origin = origin;
+        true
+    }
+}
+
 impl TextRole {
     pub const NARRATION: &'static str = "dev.koharu.text.narration";
     pub const SFX: &'static str = "dev.koharu.text.sfx";

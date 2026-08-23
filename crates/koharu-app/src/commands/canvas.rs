@@ -138,38 +138,6 @@ pub(crate) async fn get_canvas_page_resource(
 
 #[tracing::instrument(
     target = "koharu_metrics",
-    name = "point_text_added",
-    skip_all,
-    fields(origin = "user", point_count = 1_u64)
-)]
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn add_point_text(
-    point: Point,
-    desktop: State<'_, Desktop>,
-    project: State<'_, CurrentProject>,
-    canvas_channel: State<'_, CanvasChannel>,
-) -> Result<LayerCommit, Error> {
-    let (commit, page, layer) = {
-        let mut project = project.project.lock().await;
-        let project = project.as_mut().context("no project is open")?;
-        let page = project
-            .active_page()
-            .context("the project has no active page")?;
-        let (commit, layer) = project.add_point_text(page, point).await?;
-        project.record_commit(&commit);
-        (commit, project.active_page(), layer)
-    };
-    desktop.synchronize(&commit.snapshot, page, &commit).await?;
-    canvas_channel.channel.publish(desktop.canvas_state());
-    Ok(LayerCommit {
-        revision: commit.revision,
-        layer,
-    })
-}
-
-#[tracing::instrument(
-    target = "koharu_metrics",
     name = "text_box_added",
     skip_all,
     fields(origin = "user", entity_count = 1_u64)

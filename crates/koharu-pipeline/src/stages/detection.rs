@@ -23,9 +23,10 @@ use koharu_ml::koharu_layout_rfdetr_seg_2xl::{
 };
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, DetectionAnalysis, DetectionLabel,
-    EntityId, EntityOrigin, FitsTo, FlowsIn, Generation, Geometry, Inside, Origin, PanelRegion,
-    Point, RecognizedFrom, Region, RegionKind, RegionShape, RegionShapeKind, RegionSpec,
-    RemovePolicy, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography, WritingMode,
+    EntityId, EntityOrigin, FitsTo, FlowsIn, Generation, Geometry, Inside, OcrCandidate, Origin,
+    PanelRegion, Point, RecognizedFrom, Region, RegionKind, RegionShape, RegionShapeKind,
+    RegionSpec, RemovePolicy, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography,
+    WritingMode,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -402,6 +403,12 @@ fn write_region<'a>(
     }
 
     let content = edit.add_text_content(page, At::End)?;
+    edit.set(
+        content,
+        &OcrCandidate {
+            origin: Origin::Generated(generation.clone()),
+        },
+    )?;
     let layer = edit.add_text_layer(
         page,
         At::End,
@@ -1868,8 +1875,9 @@ mod tests {
     };
     use koharu_ml::koharu_layout_rfdetr_seg_2xl::{KoharuLayoutDetection, KoharuLayoutMask};
     use koharu_scene::{
-        At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, Origin, PageDraft, Region, RegionSpec,
-        Session, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography, WritingMode,
+        At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, OcrCandidate, Origin, PageDraft,
+        Region, RegionSpec, Session, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography,
+        WritingMode,
     };
 
     use super::{
@@ -2078,6 +2086,12 @@ mod tests {
                 .unwrap()
                 .role,
             TextRole::SFX
+        );
+        assert!(
+            snapshot
+                .component::<OcrCandidate>(content)
+                .unwrap()
+                .is_some()
         );
         assert_eq!(
             snapshot

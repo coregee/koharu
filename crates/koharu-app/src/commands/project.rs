@@ -4,12 +4,13 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use image::{DynamicImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
-    AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
-    Geometry as SceneGeometry, Group as SceneGroup, Origin, PageDraft, Point as ScenePoint,
-    Presents, RasterLayer as SceneRasterLayer, RasterLayerKind, Region as SceneRegion,
-    RegionShape as SceneRegionShape, RegionShapeKind, RemovePolicy, Revision, Session, Snapshot,
-    SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
-    TextLayoutKind, TextRole as SceneTextRole, Translation as SceneTranslation,
+    AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin, FitsTo,
+    Geometry as SceneGeometry, Group as SceneGroup, OcrCandidate as SceneOcrCandidate, Origin,
+    PageDraft, Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
+    RecognizedFrom, Region as SceneRegion, RegionShape as SceneRegionShape, RegionShapeKind,
+    RemovePolicy, Revision, Session, Snapshot, SourceText as SceneSourceText,
+    TextGroup as SceneTextGroup, TextLayout as SceneTextLayout, TextLayoutKind,
+    TextRegion as SceneTextRegion, TextRole as SceneTextRole, Translation as SceneTranslation,
     Typography as SceneTypography, Visibility as SceneVisibility,
 };
 use serde::{Deserialize, Serialize};
@@ -84,7 +85,6 @@ pub enum Layer {
         content: Box<TextContent>,
         typography: Option<Typography>,
         layout: TextLayoutKind,
-        automatic_region: Option<EntityId>,
     },
     Raster {
         id: EntityId,
@@ -123,6 +123,7 @@ pub struct TextContent {
     pub translation: Option<Translation>,
     pub classification: Option<TextClassification>,
     pub source_region: Option<EntityId>,
+    pub include_for_ocr: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, Type)]
@@ -408,50 +409,17 @@ impl Project {
         self.commit(patch).await
     }
 
-    pub(crate) async fn add_point_text(
-        &mut self,
-        page: EntityId,
-        point: Point,
-    ) -> Result<(Commit, EntityId)> {
-        if !point.x.is_finite() || !point.y.is_finite() {
-            bail!("text position must contain finite coordinates");
-        }
-        let value = self.snapshot().page(page)?.page()?;
-        if point.x < 0.0 || point.y < 0.0 || point.x >= value.width || point.y >= value.height {
-            bail!("text position must be inside the page");
-        }
-        self.add_text(
-            page,
-            Frame {
-                x: point.x as f32,
-                y: point.y as f32,
-                width: (value.width - point.x).clamp(1.0, 320.0) as f32,
-                height: (value.height - point.y).clamp(1.0, 120.0) as f32,
-                angle_degrees: 0.0,
-            },
-            TextLayoutKind::Point,
-        )
-        .await
-    }
-
     pub(crate) async fn add_text_box(
         &mut self,
         page: EntityId,
         frame: Frame,
     ) -> Result<(Commit, EntityId)> {
-        self.add_text(page, frame, TextLayoutKind::Paragraph).await
-    }
-
-    async fn add_text(
-        &mut self,
-        page: EntityId,
-        frame: Frame,
-        kind: TextLayoutKind,
-    ) -> Result<(Commit, EntityId)> {
         let snapshot = self.snapshot();
         let geometry = Self::geometry_from_frame(frame)?;
         let mut layer = None;
         let patch = snapshot.patch(|edit| {
+            let region =
+                edit.add_analysis_region::<SceneTextRegion>(page, At::End, &geometry, None)?;
             let content = edit.add_text_content(page, At::End)?;
             edit.set(
                 content,
@@ -460,17 +428,24 @@ impl Project {
                     language: None,
                 },
             )?;
+            edit.set(
+                content,
+                &SceneOcrCandidate {
+                    origin: Origin::User,
+                },
+            )?;
             let added_layer = edit.add_text_layer(
                 page,
                 At::End,
                 content,
                 &SceneTextLayout {
                     origin: Origin::User,
-                    kind,
+                    kind: TextLayoutKind::Paragraph,
                 },
             )?;
             layer = Some(added_layer);
-            edit.set(added_layer, &geometry)?;
+            edit.relate::<RecognizedFrom>(content, region)?;
+            edit.relate::<FitsTo>(added_layer, region)?;
             edit.set(
                 added_layer,
                 &SceneTypography {
@@ -483,10 +458,7 @@ impl Project {
                     color: None,
                     stroke_color: None,
                     stroke_width: None,
-                    alignment: match kind {
-                        TextLayoutKind::Point => Some(koharu_scene::TextAlignment::Start),
-                        TextLayoutKind::Paragraph => None,
-                    },
+                    alignment: None,
                     writing_mode: None,
                     extensions: Default::default(),
                 },
@@ -542,6 +514,30 @@ impl Project {
                     },
                 ),
                 None => edit.remove::<SceneTextRole>(content),
+            }
+        })?;
+        self.commit(patch).await
+    }
+
+    pub(crate) async fn set_ocr_inclusion(
+        &mut self,
+        layer: EntityId,
+        included: bool,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let content = Self::text_content(&snapshot, layer)?;
+        let patch = snapshot.patch(|edit| {
+            edit.promote_entity_to_user(layer)?;
+            edit.promote_entity_to_user(content)?;
+            if included {
+                edit.set(
+                    content,
+                    &SceneOcrCandidate {
+                        origin: Origin::User,
+                    },
+                )
+            } else {
+                edit.remove::<SceneOcrCandidate>(content)
             }
         })?;
         self.commit(patch).await
@@ -1099,7 +1095,9 @@ impl Project {
                 .role()?
                 .and_then(|role| TextClassification::from_role(&role.role));
             let source_region = content.source_region()?.map(|region| region.id());
-            let automatic_region = text_layer.automatic_target()?.map(|region| region.id());
+            let include_for_ocr = snapshot
+                .component::<SceneOcrCandidate>(content.id())?
+                .is_some();
             let typography = text_layer.typography()?.map(Self::typography_view);
             return Ok(Layer::Text {
                 id: layer,
@@ -1114,10 +1112,10 @@ impl Project {
                     translation,
                     classification,
                     source_region,
+                    include_for_ocr,
                 }),
                 typography,
                 layout: layout.kind,
-                automatic_region,
             });
         }
         if let Some(raster) = snapshot.component::<SceneRasterLayer>(layer)? {
@@ -1419,7 +1417,7 @@ fn rasterize_stroke(
 
 #[cfg(test)]
 mod tests {
-    use koharu_scene::{Generation, ProducerId, WritingMode};
+    use koharu_scene::{Generation, OcrCandidate, ProducerId, WritingMode};
 
     use super::*;
 
@@ -1450,6 +1448,65 @@ mod tests {
         assert_eq!(
             Project::typography_view(typography).writing_mode,
             Some(WritingMode::Vertical)
+        );
+    }
+
+    #[tokio::test]
+    async fn added_text_boxes_are_blank_ocr_candidates_with_source_regions() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 500.0, 700.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(patch).await.unwrap();
+        let page = page.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+
+        let (_, layer) = project
+            .add_text_box(
+                page,
+                Frame {
+                    x: 20.0,
+                    y: 30.0,
+                    width: 140.0,
+                    height: 80.0,
+                    angle_degrees: 0.0,
+                },
+            )
+            .await
+            .unwrap();
+
+        let snapshot = project.snapshot();
+        let text = snapshot.text_layer(layer).unwrap();
+        let content = text.content().unwrap();
+        let region = content.source_region().unwrap().unwrap();
+        assert_eq!(content.source().unwrap().unwrap().text.value, "");
+        assert!(
+            snapshot
+                .component::<OcrCandidate>(content.id())
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(text.fit_target().unwrap().unwrap().id(), region.id());
+        assert!(
+            snapshot
+                .component::<SceneGeometry>(layer)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(text.layout().unwrap().kind, TextLayoutKind::Paragraph);
+
+        project.set_ocr_inclusion(layer, false).await.unwrap();
+        assert!(
+            project
+                .snapshot()
+                .component::<OcrCandidate>(content.id())
+                .unwrap()
+                .is_none()
         );
     }
 

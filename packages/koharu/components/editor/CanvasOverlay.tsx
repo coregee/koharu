@@ -79,10 +79,6 @@ export function CanvasOverlay({
   const sourceRegion = selectedTextLayer?.content.source_region
     ? page.regions.find((region) => region.id === selectedTextLayer.content.source_region)
     : undefined
-  const automaticRegion = selectedTextLayer?.automatic_region
-    ? page.regions.find((region) => region.id === selectedTextLayer.automatic_region)
-    : undefined
-  const displayedRegion = sourceRegion ?? automaticRegion
   const regionControlFrame = sourceRegion
     ? (regionPreviews[sourceRegion.id] ?? geometryFrame(sourceRegion.geometry))
     : null
@@ -98,10 +94,10 @@ export function CanvasOverlay({
       className='pointer-events-none absolute inset-0 overflow-hidden'
       aria-hidden
     >
-      {displayedRegion && (
-        <AutomaticRegionOverlay
-          region={displayedRegion}
-          preview={regionPreviews[displayedRegion.id]}
+      {sourceRegion && (
+        <TextRegionOverlay
+          region={sourceRegion}
+          preview={regionPreviews[sourceRegion.id]}
           camera={camera}
         />
       )}
@@ -173,7 +169,7 @@ export function CanvasOverlay({
   )
 }
 
-function AutomaticRegionOverlay({
+function TextRegionOverlay({
   region,
   preview,
   camera,
@@ -218,7 +214,7 @@ function AutomaticRegionOverlay({
     )
 
   return (
-    <svg className='absolute inset-0 size-full overflow-hidden' data-testid='text-fit-region'>
+    <svg className='absolute inset-0 size-full overflow-hidden' data-testid='text-source-region'>
       {shape('var(--canvas-region-contrast)', '7')}
       {shape('var(--canvas-region-stroke)', '3')}
     </svg>

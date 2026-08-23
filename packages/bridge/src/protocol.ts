@@ -46,6 +46,7 @@ export const commands = {
 	movePage: (page: EntityId, index: number) => __TAURI_INVOKE<null>("move_page", { page, index }),
 	setSourceText: (layer: EntityId, text: string) => __TAURI_INVOKE<null>("set_source_text", { layer, text }),
 	setTextClassification: (layer: EntityId, classification: "speech" | "narration" | "sfx" | null) => __TAURI_INVOKE<null>("set_text_classification", { layer, classification }),
+	setOcrInclusion: (layer: EntityId, included: boolean) => __TAURI_INVOKE<null>("set_ocr_inclusion", { layer, included }),
 	setTranslation: (layer: EntityId, text: string | null) => __TAURI_INVOKE<null>("set_translation", { layer, text }),
 	setTypography: (updates: TypographyUpdate[]) => __TAURI_INVOKE<null>("set_typography", { updates: updates.map(i=>({...i,typography:({...i.typography,size:i.typography.size==null?i.typography.size:i.typography.size,stroke_width:i.typography.stroke_width==null?i.typography.stroke_width:i.typography.stroke_width})})) }),
 	setGeometry: (updates: GeometryUpdate[]) => __TAURI_INVOKE<null>("set_geometry", { updates: updates.map(i=>({...i,points:i.points==null?i.points:i.points.map(i=>i)})) }),
@@ -73,7 +74,6 @@ export const commands = {
 } | null>("prepare_canvas_page", { page }).then((v) => (v==null?v:({...v,page:({...v.page,regions:v.page.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))})}) as typeof v)),
 	getCanvasPageManifest: (page: EntityId, revision: Revision) => __TAURI_INVOKE<CanvasBytes>("get_canvas_page_manifest", { page, revision }),
 	getCanvasPageResource: (page: EntityId, revision: Revision, resource: string) => __TAURI_INVOKE<CanvasBytes>("get_canvas_page_resource", { page, revision, resource }),
-	addPointText: (point: Point) => __TAURI_INVOKE<LayerCommit>("add_point_text", { point }),
 	addTextBox: (frame: Frame) => __TAURI_INVOKE<LayerCommit>("add_text_box", { frame }),
 	commitPaint: (expectedRevision: Revision, layer: string | null, points: Point[], brush: PaintBrush) => __TAURI_INVOKE<LayerCommit>("commit_paint", { expectedRevision, layer, points: points.map(i=>i), brush }),
 	commitErase: (expectedRevision: Revision, layer: EntityId, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_erase", { expectedRevision, layer, points: points.map(i=>i), diameter }),
@@ -296,7 +296,7 @@ export type LanguageChoice = {
 	name: string,
 };
 
-export type Layer = { type: "group"; id: EntityId; parent: EntityId | null; visibility: LayerVisibility; name: string; role: GroupRole | null } | { type: "text"; id: EntityId; parent: EntityId | null; geometry: Geometry | null; visibility: LayerVisibility; content: TextContent; typography: Typography | null; layout: TextLayoutKind; automatic_region: EntityId | null } | { type: "raster"; id: EntityId; parent: EntityId | null; visibility: LayerVisibility; image: string | null; name: string; kind: RasterLayerKind } | { type: "image"; id: EntityId; parent: EntityId | null; geometry: Geometry; visibility: LayerVisibility; image: string } | { type: "artwork"; id: EntityId; parent: EntityId | null; geometry: Geometry; visibility: LayerVisibility; image: string };
+export type Layer = { type: "group"; id: EntityId; parent: EntityId | null; visibility: LayerVisibility; name: string; role: GroupRole | null } | { type: "text"; id: EntityId; parent: EntityId | null; geometry: Geometry | null; visibility: LayerVisibility; content: TextContent; typography: Typography | null; layout: TextLayoutKind } | { type: "raster"; id: EntityId; parent: EntityId | null; visibility: LayerVisibility; image: string | null; name: string; kind: RasterLayerKind } | { type: "image"; id: EntityId; parent: EntityId | null; geometry: Geometry; visibility: LayerVisibility; image: string } | { type: "artwork"; id: EntityId; parent: EntityId | null; geometry: Geometry; visibility: LayerVisibility; image: string };
 
 export type LayerCommit = {
 	revision: Revision,
@@ -491,6 +491,7 @@ export type TextContent = {
 	translation: Translation | null,
 	classification: TextClassification | null,
 	source_region: EntityId | null,
+	include_for_ocr: boolean,
 };
 
 export type TextLayoutKind = "point" | "paragraph";

@@ -115,6 +115,7 @@ async fn built_in_component_schemas_remain_revision_one() {
             schema::<Geometry>(),
             schema::<Visibility>(),
             schema::<SourceText>(),
+            schema::<OcrCandidate>(),
             schema::<TextLayout>(),
             schema::<Translation>(),
             schema::<TextRole>(),
@@ -130,7 +131,7 @@ async fn built_in_component_schemas_remain_revision_one() {
             schema::<crate::components::Assets>(),
             schema::<Relation>(),
         ],
-        [1; 20]
+        [1; 21]
     );
 }
 
@@ -148,6 +149,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             TextLayout::KIND,
             TextContent::KIND,
             SourceText::KIND,
+            OcrCandidate::KIND,
             Translation::KIND,
             TextRole::KIND,
             Group::KIND,
@@ -170,6 +172,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu.layer.text",
             "dev.koharu.text.content",
             "dev.koharu.text.source",
+            "dev.koharu.text.ocr-candidate",
             "dev.koharu.text.translation",
             "dev.koharu.text.role",
             "dev.koharu.group",

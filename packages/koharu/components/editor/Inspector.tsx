@@ -17,7 +17,6 @@ import {
   Lock,
   Minus,
   Plus,
-  RotateCcw,
   ScanText,
   Trash2,
   Type,
@@ -53,6 +52,7 @@ import {
   type WritingMode,
 } from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
+import { Checkbox } from '@koharu/ui/components/checkbox'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -783,13 +783,6 @@ function LayerEditor({
     previewCanvasOpacity(layer.id, next / 100)
   }
 
-  const resetTextFrame = () => {
-    if (!isTextLayer(layer) || !layer.automatic_region || !layer.geometry) return
-    void call(commands.setGeometry, [{ layer: layer.id, points: null }])
-      .then(() => refresh(projectKey, pageKey))
-      .catch(() => undefined)
-  }
-
   const setClassification = (classification: string | null) => {
     if (!isTextLayer(layer) || !classification) return
     void call(
@@ -808,8 +801,15 @@ function LayerEditor({
       .catch(() => undefined)
   }
 
+  const setOcrInclusion = (included: boolean) => {
+    if (!isTextLayer(layer)) return
+    void call(commands.setOcrInclusion, layer.id, included)
+      .then(() => refresh(projectKey, pageKey))
+      .catch(() => undefined)
+  }
+
   const rerunOcr = () => {
-    if (!isTextLayer(layer) || !region || processing) return
+    if (!isTextLayer(layer) || !region || !layer.content.include_for_ocr || processing) return
     void call(
       commands.process,
       { scope: 'entities', value: [layer.id] },
@@ -902,50 +902,28 @@ function LayerEditor({
               </InspectorField>
             )}
           </div>
-          {region && (
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              className='h-6 justify-start text-[10px] font-normal'
-              disabled={processing}
-              aria-label={t('layers.rerunOcrLabel', { name })}
-              onClick={rerunOcr}
-            >
-              <ScanText data-icon='inline-start' />
-              {t('layers.rerunOcr')}
-            </Button>
-          )}
-          <div className='flex h-5 min-w-0 items-center gap-1.5'>
-            <span className='text-[8px] font-medium text-muted-foreground uppercase'>
-              {t('inspector.placement')}
-            </span>
-            <span className='rounded-md bg-foreground/[0.055] px-1.5 py-0.5 text-[9px] leading-none text-foreground/75'>
-              {layer.geometry
-                ? t('inspector.customFrame')
-                : layer.automatic_region
-                  ? t('inspector.autoFit')
-                  : t('inspector.unplaced')}
-            </span>
-            {layer.geometry && layer.automatic_region && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='xs'
-                      aria-label={t('inspector.resetAutoFit')}
-                      className='ml-auto h-5 gap-1 rounded-md px-1.5 text-[9px] font-normal text-muted-foreground hover:text-foreground'
-                      onClick={resetTextFrame}
-                    />
-                  }
-                >
-                  <RotateCcw className='size-3' />
-                  {t('common.reset')}
-                </TooltipTrigger>
-                <TooltipContent side='left'>{t('inspector.resetAutoFit')}</TooltipContent>
-              </Tooltip>
+          <div className='flex min-w-0 items-center gap-2'>
+            <label className='flex h-6 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1 text-[10px] text-foreground/80'>
+              <Checkbox
+                checked={layer.content.include_for_ocr}
+                disabled={processing}
+                onCheckedChange={setOcrInclusion}
+              />
+              <span>{t('layers.includeForOcr')}</span>
+            </label>
+            {region && (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                className='h-6 justify-start text-[10px] font-normal'
+                disabled={processing || !layer.content.include_for_ocr}
+                aria-label={t('layers.rerunOcrLabel', { name })}
+                onClick={rerunOcr}
+              >
+                <ScanText data-icon='inline-start' />
+                {t('layers.rerunOcr')}
+              </Button>
             )}
           </div>
           <InspectorField label={t('inspector.source')}>

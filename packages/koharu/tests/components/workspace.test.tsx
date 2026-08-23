@@ -289,10 +289,10 @@ describe('canvas interaction adapter', () => {
             translation: { text: 'Rendered', language: null },
             classification: null,
             source_region: null,
+            include_for_ocr: false,
           },
           typography: null,
           layout: 'paragraph',
-          automatic_region: null,
         },
       ],
     }))
@@ -390,10 +390,10 @@ describe('canvas interaction adapter', () => {
             translation: null,
             classification: 'narration',
             source_region: 'region',
+            include_for_ocr: true,
           },
           typography: null,
           layout: 'paragraph',
-          automatic_region: 'region',
         },
       ],
       regions: [
@@ -457,10 +457,10 @@ describe('canvas interaction adapter', () => {
             translation: null,
             classification: 'narration',
             source_region: 'region',
+            include_for_ocr: true,
           },
           typography: null,
           layout: 'paragraph',
-          automatic_region: 'region',
         },
       ],
       regions: [
@@ -503,7 +503,7 @@ describe('canvas interaction adapter', () => {
     expect(commitTransform).not.toHaveBeenCalled()
   })
 
-  it('shows the automatic circular region behind the selected text controls', () => {
+  it('shows the circular source region behind the selected text controls', () => {
     installProject()
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
       ...page,
@@ -519,16 +519,16 @@ describe('canvas interaction adapter', () => {
             source: { text: 'Source', language: 'en' },
             translation: { text: 'Rendered', language: null },
             classification: null,
-            source_region: null,
+            source_region: 'region',
+            include_for_ocr: true,
           },
           typography: null,
           layout: 'paragraph',
-          automatic_region: 'bubble',
         },
       ],
       regions: [
         {
-          id: 'bubble',
+          id: 'region',
           parent: 'page',
           geometry: {
             points: [
@@ -538,7 +538,7 @@ describe('canvas interaction adapter', () => {
               { x: 20, y: 90 },
             ],
           },
-          kind: 'bubble',
+          kind: 'dev.koharu.region.text',
           label: null,
           shape: 'circular',
         },
@@ -553,7 +553,7 @@ describe('canvas interaction adapter', () => {
 
     renderWorkspace()
 
-    expect(screen.getByTestId('text-fit-region').querySelector('ellipse')).toHaveAttribute(
+    expect(screen.getByTestId('text-source-region').querySelector('ellipse')).toHaveAttribute(
       'rx',
       '40',
     )
@@ -603,26 +603,32 @@ describe('canvas interaction adapter', () => {
     expect(commit).toHaveBeenCalledWith(1, expect.arrayContaining([{ x: 20, y: 20 }]), 48)
   })
 
-  it('creates point text on click and paragraph text on drag', async () => {
+  it('creates the same OCR-candidate text box on click and drag', async () => {
     installProject()
     useKoharuStore.setState({ tool: 'text' })
-    const point = vi
-      .spyOn(commands, 'addPointText')
-      .mockResolvedValue({ revision: 2, layer: 'point-text' })
-    const box = vi
-      .spyOn(commands, 'addTextBox')
-      .mockResolvedValue({ revision: 3, layer: 'box-text' })
+    const box = vi.spyOn(commands, 'addTextBox').mockResolvedValue({
+      revision: 3,
+      layer: 'text-box',
+    })
     const surface = renderWorkspace()
 
     fireEvent.pointerDown(surface, { button: 0, pointerId: 13, clientX: 30, clientY: 40 })
     fireEvent.pointerUp(surface, { pointerId: 13, clientX: 30, clientY: 40 })
-    await waitFor(() => expect(point).toHaveBeenCalledWith({ x: 20, y: 20 }))
+    await waitFor(() =>
+      expect(box).toHaveBeenCalledWith({
+        x: 20,
+        y: 20,
+        width: 320,
+        height: 120,
+        angle_degrees: 0,
+      }),
+    )
 
     fireEvent.pointerDown(surface, { button: 0, pointerId: 14, clientX: 40, clientY: 50 })
     fireEvent.pointerMove(surface, { pointerId: 14, clientX: 140, clientY: 110 })
     fireEvent.pointerUp(surface, { pointerId: 14, clientX: 140, clientY: 110 })
-    await waitFor(() => expect(box).toHaveBeenCalledOnce())
-    expect(box).toHaveBeenCalledWith({
+    await waitFor(() => expect(box).toHaveBeenCalledTimes(2))
+    expect(box).toHaveBeenLastCalledWith({
       x: 30,
       y: 30,
       width: 100,
