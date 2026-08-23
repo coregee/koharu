@@ -223,7 +223,9 @@ impl Processor {
             .tokenizer
             .decode(&token_ids, false)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        Ok(PaddleOCRVLResult { text })
+        Ok(PaddleOCRVLResult {
+            text: super::sanitize_ocr_text(text),
+        })
     }
 }
 

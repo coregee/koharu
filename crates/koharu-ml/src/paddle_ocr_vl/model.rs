@@ -12,7 +12,7 @@ use koharu_torch::{
 };
 
 use super::{
-    REPETITION_PENALTY,
+    MAX_CONSECUTIVE_UNKNOWN_TOKENS, REPETITION_PENALTY,
     config::{PaddleOCRVLConfig, PaddleOCRVisionConfig},
 };
 
@@ -139,12 +139,21 @@ impl Model {
         let mut generated = Vec::with_capacity(max_new_tokens);
         let mut unique_tokens = HashSet::new();
         let mut seen_ids = None;
+        let mut consecutive_unknown_tokens = 0;
         for step in 0..max_new_tokens {
             let next_token = greedy_token(&logits, seen_ids.as_ref());
             if next_token == self.config.eos_token_id {
                 break;
             }
             generated.push(next_token);
+            consecutive_unknown_tokens = if next_token == self.config.pad_token_id {
+                consecutive_unknown_tokens + 1
+            } else {
+                0
+            };
+            if consecutive_unknown_tokens >= MAX_CONSECUTIVE_UNKNOWN_TOKENS {
+                break;
+            }
             if step + 1 == max_new_tokens {
                 break;
             }
@@ -183,6 +192,7 @@ impl Model {
         let mut generated = Vec::with_capacity(max_new_tokens);
         let mut unique_tokens = HashSet::new();
         let mut seen_ids = None;
+        let mut consecutive_unknown_tokens = 0;
         for step in 0..max_new_tokens {
             let mut cache = (0..self.config.num_hidden_layers)
                 .map(|_| None)
@@ -200,6 +210,14 @@ impl Model {
                 break;
             }
             generated.push(next_token);
+            consecutive_unknown_tokens = if next_token == self.config.pad_token_id {
+                consecutive_unknown_tokens + 1
+            } else {
+                0
+            };
+            if consecutive_unknown_tokens >= MAX_CONSECUTIVE_UNKNOWN_TOKENS {
+                break;
+            }
             if step + 1 == max_new_tokens {
                 break;
             }

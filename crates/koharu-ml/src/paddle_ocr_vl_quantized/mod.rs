@@ -6,8 +6,13 @@ use koharu_llama::mtmd::mtmd_default_marker;
 
 use crate::{
     Device,
-    llm::{ChatMessage, GenerationOptions, Input, Llm, LoadOptions, MtmdOptions},
-    paddle_ocr_vl::{MAX_NEW_TOKENS, PaddleOCRVLResult, PaddleOCRVLTask, REPETITION_PENALTY},
+    llm::{
+        ChatMessage, GenerationControl, GenerationOptions, Input, Llm, LoadOptions, MtmdOptions,
+    },
+    paddle_ocr_vl::{
+        MAX_CONSECUTIVE_UNKNOWN_TOKENS, MAX_NEW_TOKENS, PaddleOCRVLResult, PaddleOCRVLTask,
+        REPETITION_PENALTY, sanitize_ocr_text,
+    },
 };
 
 crate::model_repository!("PaddlePaddle/PaddleOCR-VL-1.6-GGUF" @ "511b09642bb324401f15f97cc23bc67e8f0a291d" {
@@ -52,7 +57,8 @@ impl PaddleOCRVLQuantized {
             mtmd_default_marker(),
             task.prompt()
         ))])?;
-        let generation = self.model.inference(
+        let mut consecutive_unknown_tokens = 0;
+        let generation = self.model.inference_with_callback(
             &Input::new(&prompt).with_image(image),
             &GenerationOptions {
                 max_tokens: MAX_NEW_TOKENS,
@@ -62,9 +68,23 @@ impl PaddleOCRVLQuantized {
                 add_special: true,
                 ..GenerationOptions::default()
             },
+            |chunk| {
+                consecutive_unknown_tokens = if chunk.piece == "<unk>" {
+                    consecutive_unknown_tokens + 1
+                } else {
+                    0
+                };
+                Ok(
+                    if consecutive_unknown_tokens >= MAX_CONSECUTIVE_UNKNOWN_TOKENS {
+                        GenerationControl::Stop
+                    } else {
+                        GenerationControl::Continue
+                    },
+                )
+            },
         )?;
         Ok(PaddleOCRVLResult {
-            text: generation.text,
+            text: sanitize_ocr_text(generation.text),
         })
     }
 }
