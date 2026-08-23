@@ -99,23 +99,16 @@ impl Model {
 
         let (position_ids, rope_delta) =
             self.get_rope_index(input_ids, mm_token_type_ids, image_grid_thw, device)?;
-        if self.config.use_cache {
-            Ok(self.generate_cached(
-                inputs_embeds,
-                &position_ids,
-                rope_delta,
-                input_ids.len() as i64,
-                max_new_tokens,
-            ))
-        } else {
-            Ok(self.generate_uncached(
-                inputs_embeds,
-                position_ids,
-                rope_delta,
-                input_ids.len() as i64,
-                max_new_tokens,
-            ))
-        }
+        // Transformers treats `use_cache` as a generation default. Koharu's
+        // inference-only greedy decoder always caches K/V tensors so each new
+        // token does not recompute the complete multimodal prefix.
+        Ok(self.generate_cached(
+            inputs_embeds,
+            &position_ids,
+            rope_delta,
+            input_ids.len() as i64,
+            max_new_tokens,
+        ))
     }
 
     fn generate_cached(
@@ -176,73 +169,6 @@ impl Model {
                 &mut cache,
             );
             logits = self.lm_head.forward(&hidden_states.select(1, 0));
-        }
-        generated
-    }
-
-    fn generate_uncached(
-        &self,
-        mut inputs_embeds: Tensor,
-        mut position_ids: Tensor,
-        rope_delta: i64,
-        input_length: i64,
-        max_new_tokens: usize,
-    ) -> Vec<i64> {
-        let device = inputs_embeds.device();
-        let mut generated = Vec::with_capacity(max_new_tokens);
-        let mut unique_tokens = HashSet::new();
-        let mut seen_ids = None;
-        let mut consecutive_unknown_tokens = 0;
-        for step in 0..max_new_tokens {
-            let mut cache = (0..self.config.num_hidden_layers)
-                .map(|_| None)
-                .collect::<Vec<Option<(Tensor, Tensor)>>>();
-            let hidden_states = self.language_model.forward(
-                inputs_embeds.shallow_clone(),
-                &position_ids,
-                true,
-                &mut cache,
-            );
-            let last_index = hidden_states.size()[1] - 1;
-            let logits = self.lm_head.forward(&hidden_states.select(1, last_index));
-            let next_token = greedy_token(&logits, seen_ids.as_ref());
-            if next_token == self.config.eos_token_id {
-                break;
-            }
-            generated.push(next_token);
-            consecutive_unknown_tokens = if next_token == self.config.pad_token_id {
-                consecutive_unknown_tokens + 1
-            } else {
-                0
-            };
-            if consecutive_unknown_tokens >= MAX_CONSECUTIVE_UNKNOWN_TOKENS {
-                break;
-            }
-            if step + 1 == max_new_tokens {
-                break;
-            }
-
-            let next_ids = Tensor::from_slice(&[next_token])
-                .view([1, 1])
-                .to_device(device);
-            if unique_tokens.insert(next_token) {
-                seen_ids = Some(match seen_ids {
-                    Some(seen_ids) => Tensor::cat(&[seen_ids, next_ids.shallow_clone()], 1),
-                    None => next_ids.shallow_clone(),
-                });
-            }
-            inputs_embeds = Tensor::cat(
-                &[inputs_embeds, self.language_model.embed_tokens(&next_ids)],
-                1,
-            );
-            let position = input_length + step as i64 + rope_delta;
-            position_ids = Tensor::cat(
-                &[
-                    position_ids,
-                    Tensor::full([3, 1, 1], position, (Kind::Int64, device)),
-                ],
-                2,
-            );
         }
         generated
     }
@@ -694,21 +620,8 @@ impl PaddleOCRTextModel {
         let embeddings = Tensor::cat(&[frequencies.shallow_clone(), frequencies], -1);
         let cos = embeddings.cos().to_kind(hidden_states.kind());
         let sin = embeddings.sin().to_kind(hidden_states.kind());
-        let attention_mask = causal.then(|| {
-            causal_mask(
-                hidden_states.size()[1],
-                hidden_states.device(),
-                hidden_states.kind(),
-            )
-        });
         for (layer, layer_cache) in self.layers.iter().zip(cache.iter_mut()) {
-            hidden_states = layer.forward(
-                hidden_states,
-                attention_mask.as_ref(),
-                &cos,
-                &sin,
-                layer_cache,
-            );
+            hidden_states = layer.forward(hidden_states, causal, &cos, &sin, layer_cache);
         }
         self.norm.forward(&hidden_states)
     }
@@ -743,7 +656,7 @@ impl PaddleOCRDecoderLayer {
     fn forward(
         &self,
         hidden_states: Tensor,
-        attention_mask: Option<&Tensor>,
+        causal: bool,
         cos: &Tensor,
         sin: &Tensor,
         cache: &mut Option<(Tensor, Tensor)>,
@@ -752,7 +665,7 @@ impl PaddleOCRDecoderLayer {
         let hidden_states = residual
             + self.self_attn.forward(
                 &self.input_layernorm.forward(&hidden_states),
-                attention_mask,
+                causal,
                 cos,
                 sin,
                 cache,
@@ -773,7 +686,6 @@ struct PaddleOCRAttention {
     o_proj: nn::Linear,
     num_heads: i64,
     num_key_value_heads: i64,
-    num_key_value_groups: i64,
     head_dim: i64,
     mrope_section: Vec<i64>,
 }
@@ -807,7 +719,6 @@ impl PaddleOCRAttention {
             ),
             num_heads: config.num_attention_heads,
             num_key_value_heads: config.num_key_value_heads,
-            num_key_value_groups: config.num_attention_heads / config.num_key_value_heads,
             head_dim: config.head_dim,
             mrope_section: config.rope_scaling.mrope_section.clone(),
         }
@@ -816,7 +727,7 @@ impl PaddleOCRAttention {
     fn forward(
         &self,
         hidden_states: &Tensor,
-        attention_mask: Option<&Tensor>,
+        causal: bool,
         cos: &Tensor,
         sin: &Tensor,
         cache: &mut Option<(Tensor, Tensor)>,
@@ -855,18 +766,21 @@ impl PaddleOCRAttention {
         }
         *cache = Some((key.shallow_clone(), value.shallow_clone()));
 
-        let key = repeat_kv(&key, self.num_key_value_groups);
-        let value = repeat_kv(&value, self.num_key_value_groups);
-        let mut weights = query.matmul(&key.transpose(2, 3)) * (self.head_dim as f64).powf(-0.5);
-        if let Some(mask) = attention_mask {
-            weights += mask;
-        }
-        weights = weights.softmax(-1, Kind::Float).to_kind(query.kind());
-        let output = weights.matmul(&value).transpose(1, 2).reshape([
-            batch,
-            sequence_length,
-            self.num_heads * self.head_dim,
-        ]);
+        // Native grouped-query SDPA avoids physically expanding K/V heads and
+        // lets LibTorch select flash or memory-efficient accelerator kernels.
+        let output = Tensor::scaled_dot_product_attention(
+            &query,
+            &key,
+            &value,
+            None::<&Tensor>,
+            0.0,
+            causal,
+            (self.head_dim as f64).powf(-0.5),
+            true,
+        )
+        .transpose(1, 2)
+        .contiguous()
+        .view([batch, sequence_length, self.num_heads * self.head_dim]);
         self.o_proj.forward(&output)
     }
 }
@@ -1005,24 +919,6 @@ fn apply_multimodal_rotary(
     let rotated_query = &query * &selected_cos + rotate_half(&query) * &selected_sin;
     let rotated_key = &key * &selected_cos + rotate_half(&key) * &selected_sin;
     (rotated_query, rotated_key)
-}
-
-fn repeat_kv(hidden_states: &Tensor, repeats: i64) -> Tensor {
-    if repeats == 1 {
-        return hidden_states.shallow_clone();
-    }
-    let size = hidden_states.size();
-    hidden_states
-        .unsqueeze(2)
-        .expand([size[0], size[1], repeats, size[2], size[3]], false)
-        .reshape([size[0], size[1] * repeats, size[2], size[3]])
-}
-
-fn causal_mask(sequence_length: i64, device: Device, kind: Kind) -> Tensor {
-    let mask = Tensor::ones([sequence_length, sequence_length], (Kind::Bool, device)).triu(1);
-    Tensor::zeros([sequence_length, sequence_length], (kind, device))
-        .masked_fill(&mask, f64::NEG_INFINITY)
-        .view([1, 1, sequence_length, sequence_length])
 }
 
 fn vision_position_ids(grid: [i64; 3], device: Device) -> Tensor {

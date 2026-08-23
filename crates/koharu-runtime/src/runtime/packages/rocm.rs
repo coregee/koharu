@@ -327,6 +327,13 @@ impl RuntimePackage for Rocm {
 
     async fn activate(self) -> Result<()> {
         let root = self.install().await?;
+        #[cfg(target_os = "windows")]
+        if self == Self::Gfx1151 {
+            // PyTorch 2.12 keeps AOTriton SDPA kernels behind an opt-in for gfx1151.
+            // PaddleOCR-VL exercises grouped-query attention shapes that have been
+            // verified against the math backend on this target.
+            enable_experimental_aotriton()?;
+        }
         if cfg!(target_os = "windows") && self == Self::Gfx1032 {
             // The ROCm 7.14 package's MIOpen 3.5.2 selects F3x2 and F2x3 Winograd assembly kernels
             // that COMGR cannot build for gfx1032 on Windows. Disable only those solvers while
@@ -347,6 +354,33 @@ impl RuntimePackage for Rocm {
         }
         Ok(())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn enable_experimental_aotriton() -> Result<()> {
+    use std::ffi::CString;
+
+    unsafe extern "C" {
+        fn _putenv_s(name: *const std::ffi::c_char, value: *const std::ffi::c_char) -> i32;
+    }
+
+    const NAME: &str = "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL";
+    if std::env::var_os(NAME).is_some() {
+        return Ok(());
+    }
+    // SAFETY: process-environment mutation is synchronized on Windows.
+    unsafe {
+        std::env::set_var(NAME, "1");
+    }
+    let name = CString::new(NAME)?;
+    let value = CString::new("1")?;
+    // PyTorch reads the Universal CRT environment directly on Windows.
+    // Keep it in sync with the Win32 process environment updated above.
+    let status = unsafe { _putenv_s(name.as_ptr(), value.as_ptr()) };
+    if status != 0 {
+        anyhow::bail!("could not set the ROCm runtime environment: status {status}");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
