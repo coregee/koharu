@@ -17,10 +17,9 @@ use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Origin, RasterLayer, RasterLayerKind, Visibility,
 };
 
-use super::{StageInput, StageProcessor, finish, generation};
+use super::{StageInput, StageProcessor, finish};
 use crate::ModelCell;
 
-const PRODUCER: &str = "dev.koharu.pipeline.decensor";
 const MODEL: &str = "diffusioncreampy-bar-sdxl";
 const CROP_PADDING: u32 = 128;
 
@@ -95,67 +94,79 @@ impl StageProcessor for Processor {
                 .await
                 .context("decensor task panicked")??;
 
-        let mut cleanup = prepared
-            .cleanup
-            .unwrap_or_else(|| RgbaImage::new(generated.width(), generated.height()));
-        let blend_mask = DynamicImage::ImageLuma8(dilate(&prepared.mask, Norm::LInf, 2))
-            .blur(4.0)
-            .to_luma8();
-        for (x, y, target) in cleanup.enumerate_pixels_mut() {
-            let alpha = blend_mask.get_pixel(x, y)[0];
-            if alpha == 0 {
-                continue;
-            }
-            let pixel = generated.get_pixel(x, y);
-            *target = Rgba([pixel[0], pixel[1], pixel[2], alpha]);
-        }
-        let mut bytes = Cursor::new(Vec::new());
-        DynamicImage::ImageRgba8(cleanup).write_to(&mut bytes, ImageFormat::Png)?;
-
-        let mut edit = input.scene.edit_as(generation(PRODUCER, MODEL)?);
-        edit.observe_assets(input.page)?;
-        let cleanup_entity = if let Some(entity) = prepared.cleanup_entity {
-            edit.observe::<RasterLayer>(entity)?;
-            edit.observe_assets(entity)?;
-            entity
-        } else {
-            let entity = edit.add_entity(input.page, At::Start)?;
-            edit.set(
-                entity,
-                &RasterLayer {
-                    origin: Origin::User,
-                    name: "Cleanup".to_owned(),
-                    kind: RasterLayerKind::Cleanup,
-                },
-            )?;
-            entity
-        };
-        edit.set_asset(
-            cleanup_entity,
-            &AssetRole::new("source")?,
-            AssetInput::new(
-                bytes.into_inner(),
-                "image/png",
-                AssetMetadata {
-                    width: Some(generated.width()),
-                    height: Some(generated.height()),
-                    attributes: BTreeMap::new(),
-                },
-            ),
-        )?;
-        for entity in prepared.censor_entities {
-            edit.observe::<Visibility>(entity)?;
-            edit.set(
-                entity,
-                &Visibility {
-                    origin: Origin::User,
-                    visible: false,
-                    opacity: 1.0,
-                },
-            )?;
-        }
-        finish(edit)
+        write_result(&input.scene, input.page, prepared, generated)
     }
+}
+
+fn write_result(
+    scene: &koharu_scene::Snapshot,
+    page: koharu_scene::EntityId,
+    prepared: Prepared,
+    generated: image::RgbImage,
+) -> Result<koharu_scene::Patch> {
+    let mut cleanup = prepared
+        .cleanup
+        .unwrap_or_else(|| RgbaImage::new(generated.width(), generated.height()));
+    let blend_mask = DynamicImage::ImageLuma8(dilate(&prepared.mask, Norm::LInf, 2))
+        .blur(4.0)
+        .to_luma8();
+    for (x, y, target) in cleanup.enumerate_pixels_mut() {
+        let alpha = blend_mask.get_pixel(x, y)[0];
+        if alpha == 0 {
+            continue;
+        }
+        let pixel = generated.get_pixel(x, y);
+        *target = Rgba([pixel[0], pixel[1], pixel[2], alpha]);
+    }
+    let mut bytes = Cursor::new(Vec::new());
+    DynamicImage::ImageRgba8(cleanup).write_to(&mut bytes, ImageFormat::Png)?;
+
+    // A censor mask is an explicit user-authored delegation. Its result,
+    // the cleanup pixels, and hiding the consumed mask therefore remain
+    // user edits rather than claiming ownership for the pipeline producer.
+    let mut edit = scene.edit();
+    edit.observe_assets(page)?;
+    let cleanup_entity = if let Some(entity) = prepared.cleanup_entity {
+        edit.observe::<RasterLayer>(entity)?;
+        edit.observe_assets(entity)?;
+        entity
+    } else {
+        let entity = edit.add_entity(page, At::Start)?;
+        edit.set(
+            entity,
+            &RasterLayer {
+                origin: Origin::User,
+                name: "Cleanup".to_owned(),
+                kind: RasterLayerKind::Cleanup,
+            },
+        )?;
+        entity
+    };
+    edit.set_asset(
+        cleanup_entity,
+        &AssetRole::new("source")?,
+        AssetInput::new(
+            bytes.into_inner(),
+            "image/png",
+            AssetMetadata {
+                width: Some(generated.width()),
+                height: Some(generated.height()),
+                attributes: BTreeMap::new(),
+            },
+        ),
+    )?;
+    for entity in prepared.censor_entities {
+        edit.observe::<Visibility>(entity)?;
+        edit.set(
+            entity,
+            &Visibility {
+                origin: Origin::User,
+                visible: false,
+                opacity: 1.0,
+            },
+        )?;
+    }
+    finish(edit)
 }
 
 struct Prepared {
@@ -267,4 +278,101 @@ fn decensor_regions(
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{Rgb, RgbImage};
+    use koharu_scene::{PageDraft, Session};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn result_may_update_user_cleanup_and_censor_visibility() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let mut cleanup = None;
+        let mut censor = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let page_id = edit.add_page(PageDraft::new("page", 2.0, 2.0), At::End)?;
+                let cleanup_id = edit.add_entity(page_id, At::Start)?;
+                edit.set(
+                    cleanup_id,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Cleanup".to_owned(),
+                        kind: RasterLayerKind::Cleanup,
+                    },
+                )?;
+                edit.set_asset(
+                    cleanup_id,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        [0],
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(2),
+                            height: Some(2),
+                            attributes: BTreeMap::new(),
+                        },
+                    ),
+                )?;
+                let censor_id = edit.add_entity(page_id, At::End)?;
+                edit.set(
+                    censor_id,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Censor".to_owned(),
+                        kind: RasterLayerKind::Censor,
+                    },
+                )?;
+                edit.set(
+                    censor_id,
+                    &Visibility {
+                        origin: Origin::User,
+                        visible: true,
+                        opacity: 1.0,
+                    },
+                )?;
+                page = Some(page_id);
+                cleanup = Some(cleanup_id);
+                censor = Some(censor_id);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let prepared = Prepared {
+            image: DynamicImage::new_rgba8(2, 2),
+            mask: GrayImage::from_pixel(2, 2, Luma([255])),
+            cleanup: Some(RgbaImage::new(2, 2)),
+            cleanup_entity: cleanup,
+            censor_entities: vec![censor.unwrap()],
+        };
+
+        let patch = write_result(
+            &snapshot,
+            page.unwrap(),
+            prepared,
+            RgbImage::from_pixel(2, 2, Rgb([12, 34, 56])),
+        )
+        .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+
+        assert!(
+            snapshot
+                .asset(cleanup.unwrap(), &AssetRole::new("source").unwrap())
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            snapshot
+                .component::<Visibility>(censor.unwrap())
+                .unwrap()
+                .unwrap()
+                .visible,
+            false
+        );
+    }
 }
