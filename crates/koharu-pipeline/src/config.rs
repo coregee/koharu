@@ -170,6 +170,7 @@ impl Default for PipelineConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(default)]
 pub struct TranslationConfig {
     pub model: koharu_translator::ModelSelection,
     pub generation: GenerationConfig,
@@ -352,6 +353,20 @@ mod tests {
         let config = toml::from_str::<PipelineConfig>("").unwrap();
 
         assert_eq!(config, PipelineConfig::default());
+    }
+
+    #[test]
+    fn missing_translation_context_settings_use_defaults() {
+        let config = toml::from_str::<TranslationConfig>(
+            r#"
+                target_language = "en-US"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.source_language, None);
+        assert_eq!(config.context_window, None);
+        assert_eq!(config.response_reserve_percent, 30);
     }
 
     #[test]
