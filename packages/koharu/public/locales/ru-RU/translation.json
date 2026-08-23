@@ -123,6 +123,7 @@
     "style": "Стиль"
   },
   "inference": {
+    "configureStage": "Настроить: {{stage}}",
     "currentPage": "Текущая страница",
     "currentPageDescription": "Обработать только страницу на холсте.",
     "entireProject": "Весь проект",
@@ -133,6 +134,11 @@
     "output": "Результат",
     "pipelineStages": "Этапы конвейера",
     "providerDefault": "По умолчанию у провайдера",
+    "quickModelLabel": {
+      "detection": "Модель обнаружения",
+      "inpainting": "Модель ретуши",
+      "ocr": "Провайдер OCR"
+    },
     "quickStage": {
       "detection": "Обнаружение",
       "inpainting": "Ретушь",

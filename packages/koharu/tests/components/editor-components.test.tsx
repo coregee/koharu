@@ -709,6 +709,9 @@ describe('greenfield editor', () => {
     expect(screen.queryByTestId('edit-source-element')).not.toBeInTheDocument()
     fireEvent.click(layer)
     const source = screen.getByTestId('edit-source-element')
+    const translation = screen.getByTestId('edit-translation-element')
+    expect(source).toHaveClass('max-h-44')
+    expect(translation).toHaveClass('max-h-44')
     fireEvent.change(source, { target: { value: 'corrected OCR' } })
     fireEvent.blur(source)
     await waitFor(() => expect(save).toHaveBeenCalledWith('element', 'corrected OCR'))
@@ -896,8 +899,8 @@ describe('greenfield editor', () => {
     for (const [label, stage] of [
       ['Detection', 'detection'],
       ['OCR', 'ocr'],
-      ['Translate', 'translation'],
       ['Inpaint', 'inpainting'],
+      ['Translate', 'translation'],
     ] as const) {
       const shortcut = screen.getByRole('button', { name: label })
       expect(shortcut.querySelector('svg')).not.toBeNull()
@@ -914,14 +917,43 @@ describe('greenfield editor', () => {
     expect(useKoharuStore.getState().processingStages).toEqual(['detection', 'ocr'])
 
     const separator = screen.getByRole('separator')
-    const inpaint = screen.getByRole('button', { name: 'Inpaint' })
+    const translate = screen.getByRole('button', { name: 'Translate' })
     const selector = screen.getByRole('button', { name: 'Processing settings' })
-    expect(inpaint.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
-      0,
-    )
+    expect(
+      translate.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0)
     expect(separator.compareDocumentPosition(selector) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
       0,
     )
+  })
+
+  it('changes a processing model from a command bar dropdown', async () => {
+    installProject()
+    const user = userEvent.setup()
+    const configured: Preferences = {
+      ...preferences,
+      pipeline: {
+        ...preferences.pipeline,
+        ocr: { model: 'manga-ocr' },
+      },
+    }
+    const save = vi.spyOn(commands, 'savePreferences').mockResolvedValue(configured)
+    render(<CanvasCommandBar />)
+
+    await user.click(screen.getByRole('button', { name: 'Configure OCR' }))
+    const provider = screen.getByRole('combobox', { name: 'OCR Provider' })
+    expect(provider).toHaveTextContent('PaddleOCR-VL 1.6')
+    await user.click(provider)
+    await user.click(await screen.findByRole('option', { name: 'Manga OCR' }))
+
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith(
+        configured.pipeline,
+        preferences.providers,
+        preferences.typesetting,
+      ),
+    )
+    await waitFor(() => expect(useKoharuStore.getState().preferences).toEqual(configured))
   })
 
   it('configures translation output from the runtime selector', async () => {

@@ -16,6 +16,8 @@ pub use self::{
     processor::{PaddleOCRVLImageProcessor, PaddleOCRVLResult, PaddleOCRVLTask},
 };
 
+pub(crate) use self::processor::prepare_ocr_image;
+
 use self::{model::Model, processor::Processor};
 
 pub(super) const MAX_NEW_TOKENS: usize = 4096;

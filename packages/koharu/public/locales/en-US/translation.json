@@ -123,6 +123,7 @@
     "style": "Style"
   },
   "inference": {
+    "configureStage": "Configure {{stage}}",
     "currentPage": "Current page",
     "currentPageDescription": "Process only the page in the canvas.",
     "entireProject": "Entire project",
@@ -133,6 +134,11 @@
     "output": "Output",
     "pipelineStages": "Pipeline stages",
     "providerDefault": "Provider default",
+    "quickModelLabel": {
+      "detection": "Detector",
+      "inpainting": "Inpainter",
+      "ocr": "OCR Provider"
+    },
     "quickStage": {
       "detection": "Detection",
       "inpainting": "Inpaint",

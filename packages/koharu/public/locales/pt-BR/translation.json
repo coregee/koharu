@@ -123,6 +123,7 @@
     "style": "Estilo"
   },
   "inference": {
+    "configureStage": "Configurar {{stage}}",
     "currentPage": "Página atual",
     "currentPageDescription": "Processa somente a página na tela.",
     "entireProject": "Projeto inteiro",
@@ -133,6 +134,11 @@
     "output": "Saída",
     "pipelineStages": "Etapas do pipeline",
     "providerDefault": "Padrão do provedor",
+    "quickModelLabel": {
+      "detection": "Detector",
+      "inpainting": "Modelo de preenchimento",
+      "ocr": "Provedor de OCR"
+    },
     "quickStage": {
       "detection": "Detecção",
       "inpainting": "Preencher",

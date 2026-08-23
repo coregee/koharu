@@ -123,6 +123,7 @@
     "style": "样式"
   },
   "inference": {
+    "configureStage": "配置{{stage}}",
     "currentPage": "当前页面",
     "currentPageDescription": "仅处理画布中的页面。",
     "entireProject": "整个项目",
@@ -133,6 +134,11 @@
     "output": "输出",
     "pipelineStages": "处理流程阶段",
     "providerDefault": "提供商默认值",
+    "quickModelLabel": {
+      "detection": "检测器",
+      "inpainting": "修复模型",
+      "ocr": "OCR 提供商"
+    },
     "quickStage": {
       "detection": "检测",
       "inpainting": "修复",

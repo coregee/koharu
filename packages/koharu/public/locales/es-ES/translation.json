@@ -123,6 +123,7 @@
     "style": "Estilo"
   },
   "inference": {
+    "configureStage": "Configurar {{stage}}",
     "currentPage": "Página actual",
     "currentPageDescription": "Procesa solo la página del lienzo.",
     "entireProject": "Proyecto completo",
@@ -133,6 +134,11 @@
     "output": "Salida",
     "pipelineStages": "Etapas del flujo",
     "providerDefault": "Predeterminado del proveedor",
+    "quickModelLabel": {
+      "detection": "Detector",
+      "inpainting": "Modelo de relleno",
+      "ocr": "Proveedor de OCR"
+    },
     "quickStage": {
       "detection": "Detección",
       "inpainting": "Rellenar",

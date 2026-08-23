@@ -11,7 +11,7 @@ use crate::{
     },
     paddle_ocr_vl::{
         MAX_CONSECUTIVE_UNKNOWN_TOKENS, MAX_NEW_TOKENS, PaddleOCRVLResult, PaddleOCRVLTask,
-        REPETITION_PENALTY, sanitize_ocr_text,
+        REPETITION_PENALTY, prepare_ocr_image, sanitize_ocr_text,
     },
 };
 
@@ -52,6 +52,13 @@ impl PaddleOCRVLQuantized {
         image: &DynamicImage,
         task: PaddleOCRVLTask,
     ) -> Result<PaddleOCRVLResult> {
+        let prepared_ocr;
+        let image = if task == PaddleOCRVLTask::Ocr {
+            prepared_ocr = prepare_ocr_image(image)?;
+            prepared_ocr.as_ref().unwrap_or(image)
+        } else {
+            image
+        };
         let prompt = self.model.render_chat_prompt(&[ChatMessage::user(format!(
             "{}{}",
             mtmd_default_marker(),

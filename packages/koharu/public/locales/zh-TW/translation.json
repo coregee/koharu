@@ -123,6 +123,7 @@
     "style": "樣式"
   },
   "inference": {
+    "configureStage": "設定{{stage}}",
     "currentPage": "目前頁面",
     "currentPageDescription": "只處理畫布中的頁面。",
     "entireProject": "整個專案",
@@ -133,6 +134,11 @@
     "output": "輸出",
     "pipelineStages": "處理流程階段",
     "providerDefault": "提供者預設值",
+    "quickModelLabel": {
+      "detection": "偵測器",
+      "inpainting": "修復模型",
+      "ocr": "OCR 提供者"
+    },
     "quickStage": {
       "detection": "偵測",
       "inpainting": "修復",

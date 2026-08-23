@@ -123,6 +123,7 @@
     "style": "Stil"
   },
   "inference": {
+    "configureStage": "{{stage}} ayarları",
     "currentPage": "Geçerli sayfa",
     "currentPageDescription": "Yalnızca tuvaldeki sayfayı işler.",
     "entireProject": "Tüm proje",
@@ -133,6 +134,11 @@
     "output": "Çıktı",
     "pipelineStages": "İşlem hattı aşamaları",
     "providerDefault": "Sağlayıcı varsayılanı",
+    "quickModelLabel": {
+      "detection": "Algılama modeli",
+      "inpainting": "Rötuş modeli",
+      "ocr": "OCR sağlayıcısı"
+    },
     "quickStage": {
       "detection": "Algılama",
       "inpainting": "Rötuşla",

@@ -123,6 +123,7 @@
     "style": "스타일"
   },
   "inference": {
+    "configureStage": "{{stage}} 설정",
     "currentPage": "현재 페이지",
     "currentPageDescription": "캔버스의 페이지만 처리합니다.",
     "entireProject": "전체 프로젝트",
@@ -133,6 +134,11 @@
     "output": "출력",
     "pipelineStages": "파이프라인 단계",
     "providerDefault": "제공자 기본값",
+    "quickModelLabel": {
+      "detection": "감지 모델",
+      "inpainting": "인페인팅 모델",
+      "ocr": "OCR 제공자"
+    },
     "quickStage": {
       "detection": "감지",
       "inpainting": "인페인팅",

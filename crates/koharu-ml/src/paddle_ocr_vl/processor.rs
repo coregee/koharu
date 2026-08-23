@@ -7,10 +7,23 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
-use image::DynamicImage;
+use image::{DynamicImage, GrayImage, Luma};
+use imageproc::{
+    contrast::otsu_level,
+    distance_transform::Norm,
+    morphology::dilate,
+    region_labelling::{Connectivity, connected_components},
+};
 use koharu_torch::{Device, Kind, Tensor};
 use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
+
+const OCR_RESIZE_FACTOR: i64 = 28;
+const OCR_MIN_PIXELS: i64 = 112_896;
+const OCR_MAX_PIXELS: i64 = 1_003_520;
+const TARGET_PROJECTED_GLYPH_SIZE: f32 = 28.0;
+const MAX_SOURCE_UPSCALE: f32 = 4.0;
+const ANALYSIS_MAX_SIDE: u32 = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaddleOCRVLTask {
@@ -125,6 +138,13 @@ impl Processor {
             } else {
                 image.clone()
             };
+        let prepared_ocr;
+        let image = if task == PaddleOCRVLTask::Ocr {
+            prepared_ocr = prepare_ocr_image(&image)?;
+            prepared_ocr.as_ref().unwrap_or(&image)
+        } else {
+            &image
+        };
         let rgb = image.to_rgb8();
         let max_pixels = if task == PaddleOCRVLTask::Spotting {
             2048 * 28 * 28
@@ -229,6 +249,233 @@ impl Processor {
     }
 }
 
+/// Improves undersampled OCR crops before Paddle's projector applies its own
+/// aspect-preserving min/max pixel budget. The complete user-authored region is
+/// retained: this deliberately does not tile, segment, crop, or square-pad it.
+///
+/// Paddle's pixel budget is based on total image area, which does not guarantee
+/// that glyphs from a low-resolution source occupy enough vision patches. An
+/// upscale is useful only while the prepared image remains below that budget;
+/// beyond it, the projector would immediately downsample by the same amount.
+pub(crate) fn prepare_ocr_image(image: &DynamicImage) -> Result<Option<DynamicImage>> {
+    ensure!(
+        image.width() > 0 && image.height() > 0,
+        "image dimensions must be non-zero"
+    );
+    let Some(source_glyph_size) = estimate_glyph_size(image) else {
+        tracing::debug!(
+            width = image.width(),
+            height = image.height(),
+            "could not estimate Paddle OCR glyph scale; preserving the source crop"
+        );
+        return Ok(None);
+    };
+    let projected = projected_glyph_size(image.width(), image.height(), source_glyph_size)?;
+    if projected >= TARGET_PROJECTED_GLYPH_SIZE {
+        tracing::debug!(
+            width = image.width(),
+            height = image.height(),
+            source_glyph_size,
+            projected_glyph_size = projected,
+            "Paddle OCR crop already has sufficient glyph resolution"
+        );
+        return Ok(None);
+    }
+
+    let source_pixels = f64::from(image.width()) * f64::from(image.height());
+    let pixel_limited_scale = ((OCR_MAX_PIXELS as f64 / source_pixels).sqrt()) as f32;
+    let maximum_scale = pixel_limited_scale.min(MAX_SOURCE_UPSCALE);
+    if maximum_scale <= 1.0 {
+        tracing::debug!(
+            width = image.width(),
+            height = image.height(),
+            source_glyph_size,
+            projected_glyph_size = projected,
+            "Paddle OCR crop is pixel-budget limited; preserving it without a redundant upscale"
+        );
+        return Ok(None);
+    }
+
+    let maximum_projected = projected_glyph_size_at_scale(
+        image.width(),
+        image.height(),
+        source_glyph_size,
+        maximum_scale,
+    )?;
+    if maximum_projected < projected * 1.1 {
+        return Ok(None);
+    }
+
+    let scale = if maximum_projected < TARGET_PROJECTED_GLYPH_SIZE {
+        maximum_scale
+    } else {
+        let mut low = 1.0f32;
+        let mut high = maximum_scale;
+        for _ in 0..12 {
+            let candidate = (low + high) * 0.5;
+            if projected_glyph_size_at_scale(
+                image.width(),
+                image.height(),
+                source_glyph_size,
+                candidate,
+            )? >= TARGET_PROJECTED_GLYPH_SIZE
+            {
+                high = candidate;
+            } else {
+                low = candidate;
+            }
+        }
+        high
+    };
+    let width = ((image.width() as f32 * scale).round() as u32).max(1);
+    let height = ((image.height() as f32 * scale).round() as u32).max(1);
+    let prepared = image.resize_exact(width, height, image::imageops::FilterType::Lanczos3);
+    tracing::debug!(
+        source_width = image.width(),
+        source_height = image.height(),
+        prepared_width = width,
+        prepared_height = height,
+        source_glyph_size,
+        projected_glyph_size = projected,
+        prepared_projected_glyph_size =
+            projected_glyph_size(width, height, source_glyph_size * scale)?,
+        "upscaled undersampled Paddle OCR crop"
+    );
+    Ok(Some(prepared))
+}
+
+fn projected_glyph_size(width: u32, height: u32, source_glyph_size: f32) -> Result<f32> {
+    let (projected_height, projected_width) = smart_resize(
+        i64::from(height),
+        i64::from(width),
+        OCR_RESIZE_FACTOR,
+        OCR_MIN_PIXELS,
+        OCR_MAX_PIXELS,
+    )?;
+    let scale =
+        (projected_width as f32 / width as f32).min(projected_height as f32 / height as f32);
+    Ok(source_glyph_size * scale)
+}
+
+fn projected_glyph_size_at_scale(
+    width: u32,
+    height: u32,
+    source_glyph_size: f32,
+    scale: f32,
+) -> Result<f32> {
+    let width = ((width as f32 * scale).round() as u32).max(1);
+    let height = ((height as f32 * scale).round() as u32).max(1);
+    projected_glyph_size(width, height, source_glyph_size * scale)
+}
+
+fn estimate_glyph_size(image: &DynamicImage) -> Option<f32> {
+    let longest_side = image.width().max(image.height());
+    let analysis = if longest_side > ANALYSIS_MAX_SIDE {
+        image.resize(
+            ANALYSIS_MAX_SIDE,
+            ANALYSIS_MAX_SIDE,
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        image.clone()
+    };
+    let gray = analysis.to_luma8();
+    let threshold = otsu_level(&gray);
+    let border = border_median(&gray);
+    let light_background = border >= threshold;
+    let binary = GrayImage::from_fn(gray.width(), gray.height(), |x, y| {
+        let value = gray.get_pixel(x, y)[0];
+        let foreground = if light_background {
+            value <= threshold
+        } else {
+            value > threshold
+        };
+        Luma([u8::from(foreground) * u8::MAX])
+    });
+    // One analysis-space pixel joins the separated strokes of a glyph without
+    // merging the whitespace between normally spaced characters.
+    let binary = dilate(&binary, Norm::LInf, 1);
+    let labels = connected_components(&binary, Connectivity::Eight, Luma([0]));
+    let mut components = Vec::<Option<Component>>::new();
+    for (x, y, pixel) in labels.enumerate_pixels() {
+        let label = pixel[0] as usize;
+        if label == 0 {
+            continue;
+        }
+        if label >= components.len() {
+            components.resize_with(label + 1, || None);
+        }
+        if let Some(component) = &mut components[label] {
+            component.min_x = component.min_x.min(x);
+            component.min_y = component.min_y.min(y);
+            component.max_x = component.max_x.max(x);
+            component.max_y = component.max_y.max(y);
+            component.area += 1;
+        } else {
+            components[label] = Some(Component {
+                min_x: x,
+                min_y: y,
+                max_x: x,
+                max_y: y,
+                area: 1,
+            });
+        }
+    }
+
+    let image_area = u64::from(gray.width()) * u64::from(gray.height());
+    let mut sizes = components
+        .into_iter()
+        .flatten()
+        .filter_map(|component| {
+            let width = component.max_x - component.min_x + 1;
+            let height = component.max_y - component.min_y + 1;
+            let bounds_area = u64::from(width) * u64::from(height);
+            let aspect = width as f32 / height as f32;
+            (component.area >= 4
+                && width >= 3
+                && height >= 3
+                && bounds_area * 25 <= image_area
+                && (0.15..=6.0).contains(&aspect)
+                && component.area as f32 / bounds_area as f32 >= 0.08)
+                .then_some(width.max(height).saturating_sub(2).max(1))
+        })
+        .collect::<Vec<_>>();
+    if sizes.len() < 3 {
+        return None;
+    }
+    sizes.sort_unstable();
+    let analysis_glyph_size = sizes[(sizes.len() * 3 / 4).min(sizes.len() - 1)] as f32;
+    let source_scale = (image.width() as f32 / analysis.width() as f32)
+        .max(image.height() as f32 / analysis.height() as f32);
+    Some(analysis_glyph_size * source_scale)
+}
+
+fn border_median(image: &GrayImage) -> u8 {
+    let mut values = Vec::with_capacity((image.width() + image.height()) as usize * 2);
+    for x in 0..image.width() {
+        values.push(image.get_pixel(x, 0)[0]);
+        if image.height() > 1 {
+            values.push(image.get_pixel(x, image.height() - 1)[0]);
+        }
+    }
+    for y in 1..image.height().saturating_sub(1) {
+        values.push(image.get_pixel(0, y)[0]);
+        if image.width() > 1 {
+            values.push(image.get_pixel(image.width() - 1, y)[0]);
+        }
+    }
+    values.sort_unstable();
+    values[values.len() / 2]
+}
+
+struct Component {
+    min_x: u32,
+    min_y: u32,
+    max_x: u32,
+    max_y: u32,
+    area: u64,
+}
+
 fn smart_resize(
     mut height: i64,
     mut width: i64,
@@ -266,6 +513,7 @@ fn smart_resize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{Rgb, RgbImage};
 
     #[test]
     fn smart_resize_matches_transformers_fixture_shapes() -> Result<()> {
@@ -289,5 +537,64 @@ mod tests {
     #[test]
     fn smart_resize_rejects_extreme_aspect_ratios() {
         assert!(smart_resize(28, 28 * 201, 28, 112_896, 1_003_520).is_err());
+    }
+
+    #[test]
+    fn undersampled_glyphs_are_upscaled_without_changing_aspect_ratio() -> Result<()> {
+        let image = synthetic_bubble(180, 120, 6);
+
+        let prepared = prepare_ocr_image(&image)?.expect("small glyphs should be upscaled");
+
+        assert!(prepared.width() > image.width());
+        assert!(prepared.height() > image.height());
+        assert_eq!(
+            prepared.width() * image.height(),
+            prepared.height() * image.width()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn adequately_sampled_glyphs_preserve_the_source_crop() -> Result<()> {
+        let image = synthetic_bubble(600, 400, 32);
+
+        assert!(prepare_ocr_image(&image)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn an_upscale_is_not_added_when_paddle_would_downsample_it_again() -> Result<()> {
+        let image = synthetic_bubble(1600, 800, 8);
+
+        assert!(prepare_ocr_image(&image)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn blank_regions_are_left_unchanged() -> Result<()> {
+        let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(160, 100, Rgb([255; 3])));
+
+        assert!(prepare_ocr_image(&image)?.is_none());
+        Ok(())
+    }
+
+    fn synthetic_bubble(width: u32, height: u32, glyph: u32) -> DynamicImage {
+        let mut image = RgbImage::from_pixel(width, height, Rgb([255; 3]));
+        let gap = glyph.max(4);
+        let mut x = gap;
+        let mut y = gap;
+        for _ in 0..12 {
+            for py in y..(y + glyph).min(height) {
+                for px in x..(x + glyph).min(width) {
+                    image.put_pixel(px, py, Rgb([0; 3]));
+                }
+            }
+            x += glyph + gap;
+            if x + glyph >= width {
+                x = gap;
+                y += glyph + gap;
+            }
+        }
+        DynamicImage::ImageRgb8(image)
     }
 }
