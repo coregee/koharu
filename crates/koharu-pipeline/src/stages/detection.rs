@@ -49,6 +49,8 @@ const COLOR_CLUSTER_COUNT: usize = 4;
 const MIN_EXTREME_COLOR_PIXELS: u32 = 4;
 const MIN_MEASURED_STROKE_WIDTH: u8 = 2;
 const DIALOGUE_MASK_CONTAINMENT_THRESHOLD: f32 = 0.9;
+const DUPLICATE_BOUNDS_CONTAINMENT_THRESHOLD: f32 = 0.9;
+const DUPLICATE_MASK_CONTAINMENT_THRESHOLD: f32 = 0.8;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
 #[serde(default)]
@@ -278,6 +280,7 @@ async fn write_page(
     if let Some(region) = input.region {
         detections.retain(|detection| intersects(detection.bbox, region));
     }
+    collapse_nested_detections(&mut detections);
     non_maximum_suppression(&mut detections, 0.5);
     sort_by_layout(&mut detections);
 
@@ -1688,6 +1691,61 @@ fn non_maximum_suppression(detections: &mut Vec<KoharuLayoutDetection>, threshol
     *detections = kept;
 }
 
+fn collapse_nested_detections(detections: &mut Vec<KoharuLayoutDetection>) {
+    let mut parents = (0..detections.len()).collect::<Vec<_>>();
+    parents.sort_by(|&left, &right| {
+        area(detections[right].bbox)
+            .total_cmp(&area(detections[left].bbox))
+            .then_with(|| detections[right].score.total_cmp(&detections[left].score))
+            .then_with(|| detection_order(&detections[left], &detections[right]))
+            .then_with(|| left.cmp(&right))
+    });
+    let mut collapsed = vec![false; detections.len()];
+    for &parent in &parents {
+        if collapsed[parent] || !collapsible_label(&detections[parent].label) {
+            continue;
+        }
+        let parent_area = area(detections[parent].bbox);
+        for child in 0..detections.len() {
+            if child == parent
+                || collapsed[child]
+                || detections[child].label != detections[parent].label
+                || parent_area <= area(detections[child].bbox)
+                || containment(detections[parent].bbox, detections[child].bbox)
+                    < DUPLICATE_BOUNDS_CONTAINMENT_THRESHOLD
+            {
+                continue;
+            }
+            let masks_confirm_duplicate = if detections[parent].area > 0
+                && detections[child].area > 0
+                && valid_mask(&detections[parent].mask)
+                && valid_mask(&detections[child].mask)
+            {
+                mask_containment(
+                    &detections[parent].mask,
+                    &detections[child].mask,
+                    detections[child].bbox,
+                ) >= DUPLICATE_MASK_CONTAINMENT_THRESHOLD
+            } else {
+                true
+            };
+            if masks_confirm_duplicate {
+                collapsed[child] = true;
+            }
+        }
+    }
+    let mut index = 0usize;
+    detections.retain(|_| {
+        let keep = !collapsed[index];
+        index += 1;
+        keep
+    });
+}
+
+fn collapsible_label(label: &str) -> bool {
+    matches!(label, "bubble" | "text" | "onomatopoeia")
+}
+
 fn sort_by_layout(detections: &mut Vec<KoharuLayoutDetection>) {
     let order = layout_order(detections);
     let mut values = std::mem::take(detections)
@@ -1885,9 +1943,9 @@ mod tests {
     use super::{
         DIALOGUE_MASK_CONTAINMENT_THRESHOLD, DetectedRegion, DetectedText, DetectionModel,
         ImageSize, KoharuLayoutRFDetrSeg2XLConfig, MaskPixel, PageRegions, Processor, RegionOutput,
-        StageInput, StageProcessor, closed_mask_for, color_palette, generation, infer_typography,
-        layout_order, link_dialogue_regions, mask_containment, mask_for, mask_geometry,
-        non_maximum_suppression, normalize_text_color, write_region,
+        StageInput, StageProcessor, closed_mask_for, collapse_nested_detections, color_palette,
+        generation, infer_typography, layout_order, link_dialogue_regions, mask_containment,
+        mask_for, mask_geometry, non_maximum_suppression, normalize_text_color, write_region,
     };
 
     #[test]
@@ -2119,6 +2177,27 @@ mod tests {
                 width: 1,
                 height: 1,
                 pixels: vec![0],
+            },
+        }
+    }
+
+    fn filled_detection(label: &str, score: f32, bbox: [f32; 4]) -> KoharuLayoutDetection {
+        let x = bbox[0] as u32;
+        let y = bbox[1] as u32;
+        let width = (bbox[2] - bbox[0]) as u32;
+        let height = (bbox[3] - bbox[1]) as u32;
+        KoharuLayoutDetection {
+            label_id: 0,
+            label: label.to_owned(),
+            score,
+            bbox,
+            area: width * height,
+            mask: KoharuLayoutMask {
+                x,
+                y,
+                width,
+                height,
+                pixels: vec![u8::MAX; width as usize * height as usize],
             },
         }
     }
@@ -2403,6 +2482,90 @@ mod tests {
                 .iter()
                 .any(|detection| detection.label == "bubble")
         );
+    }
+
+    #[test]
+    fn nested_bubbles_collapse_into_the_larger_parent() {
+        let mut detections = vec![
+            filled_detection("bubble", 0.6, [0.0, 0.0, 100.0, 100.0]),
+            filled_detection("bubble", 0.95, [20.0, 20.0, 80.0, 80.0]),
+            filled_detection("bubble", 0.8, [110.0, 0.0, 180.0, 70.0]),
+        ];
+
+        collapse_nested_detections(&mut detections);
+
+        assert_eq!(detections.len(), 2);
+        assert_eq!(detections[0].bbox, [0.0, 0.0, 100.0, 100.0]);
+        assert_eq!(detections[1].bbox, [110.0, 0.0, 180.0, 70.0]);
+    }
+
+    #[test]
+    fn granular_text_detections_collapse_into_the_large_block() {
+        let mut detections = vec![
+            filled_detection("text", 0.7, [10.0, 10.0, 90.0, 190.0]),
+            filled_detection("text", 0.9, [20.0, 20.0, 80.0, 60.0]),
+            filled_detection("text", 0.85, [20.0, 70.0, 80.0, 110.0]),
+            filled_detection("text", 0.8, [20.0, 120.0, 80.0, 180.0]),
+        ];
+
+        collapse_nested_detections(&mut detections);
+
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].bbox, [10.0, 10.0, 90.0, 190.0]);
+    }
+
+    #[test]
+    fn adjacent_partially_overlapping_text_blocks_remain_independent() {
+        let mut detections = vec![
+            detection("text", 0.9, [0.0, 0.0, 100.0, 100.0]),
+            detection("text", 0.8, [80.0, 0.0, 180.0, 100.0]),
+        ];
+
+        collapse_nested_detections(&mut detections);
+
+        assert_eq!(detections.len(), 2);
+    }
+
+    #[test]
+    fn nested_bounds_remain_independent_when_instance_masks_do_not_overlap() {
+        let mut parent_pixels = vec![0; 100];
+        for y in 0..10 {
+            parent_pixels[y * 10 + 8] = u8::MAX;
+        }
+        let mut detections = vec![
+            KoharuLayoutDetection {
+                label_id: 0,
+                label: "text".to_owned(),
+                score: 0.7,
+                bbox: [0.0, 0.0, 10.0, 10.0],
+                area: 10,
+                mask: KoharuLayoutMask {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 10,
+                    pixels: parent_pixels,
+                },
+            },
+            KoharuLayoutDetection {
+                label_id: 0,
+                label: "text".to_owned(),
+                score: 0.9,
+                bbox: [2.0, 2.0, 4.0, 4.0],
+                area: 4,
+                mask: KoharuLayoutMask {
+                    x: 2,
+                    y: 2,
+                    width: 2,
+                    height: 2,
+                    pixels: vec![u8::MAX; 4],
+                },
+            },
+        ];
+
+        collapse_nested_detections(&mut detections);
+
+        assert_eq!(detections.len(), 2);
     }
 
     #[test]
