@@ -147,6 +147,7 @@ const fn prerequisite(stage: Stage) -> Option<Stage> {
         Stage::Detection => None,
         Stage::Ocr | Stage::Inpainting => Some(Stage::Detection),
         Stage::Translation => Some(Stage::Ocr),
+        Stage::Decensor => Some(Stage::Inpainting),
     }
 }
 

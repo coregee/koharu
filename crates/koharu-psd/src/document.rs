@@ -164,7 +164,7 @@ pub(crate) async fn build(
                 ImageKind::Source | ImageKind::Embedded => "Image".to_owned(),
                 ImageKind::Cleanup => "Cleanup".to_owned(),
                 ImageKind::Paint => "Paint".to_owned(),
-                ImageKind::Segmentation => "Segmentation".to_owned(),
+                ImageKind::Censor => "Censor".to_owned(),
             });
             validate_pixels(&name, &rendered.image)?;
             layers.push(Layer {

@@ -10,10 +10,10 @@ Koharu uses a fixed, explicit workflow:
 ```mermaid
 flowchart LR
   detection["Detection"] --> ocr["OCR"] --> translation["Translation"]
-  detection --> inpainting["Inpainting"]
+  detection --> inpainting["Inpainting"] --> decensor["Decensor"]
 ```
 
-Detection creates analysis regions and removal masks. OCR reads detected text. Translation writes target-language content. Inpainting reconstructs artwork beneath the source lettering.
+Detection creates analysis regions and removal masks. OCR reads detected text. Translation writes target-language content. Inpainting reconstructs artwork beneath the source lettering. Decensor reconstructs artwork beneath user-painted censor masks.
 
 ## Choose a scope
 
@@ -29,9 +29,9 @@ Translation proceeds in page order. Each page uses prior project text for contin
 
 ## Choose stages
 
-Select any non-empty subset of detection, OCR, translation, and inpainting. Selecting all stages runs the complete workflow. Selecting one stage runs only that stage. Multiple selected stages run in the fixed workflow order. Omitted prerequisites are not added automatically, so include detection or OCR when a downstream stage needs fresh input.
+Select any non-empty subset of detection, OCR, translation, inpainting, and decensor. Selecting all stages runs the complete workflow. Selecting one stage runs only that stage. Multiple selected stages run in the fixed workflow order. Omitted prerequisites are not added automatically, so include detection or OCR when a downstream stage needs fresh input.
 
-Use **Run through Detection/OCR/Translation/Inpainting** in the Process menu for common stage groups. **Run through Inpainting** means detection plus inpainting; it does not also run OCR and translation.
+Use **Run through Detection/OCR/Translation/Inpainting/Decensor** in the Process menu for common stage groups. **Run through Inpainting** means detection plus inpainting; it does not also run OCR and translation. **Run through Decensor** runs the complete five-stage workflow, while **Only Decensor** processes existing painted censor masks without rerunning earlier stages.
 
 ## Progress and partial results
 

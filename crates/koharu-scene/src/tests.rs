@@ -371,6 +371,7 @@ async fn project_and_relation_metadata_use_typed_components() {
     let settings = Project {
         source_locale: Some(LanguageTag::new("ja").unwrap()),
         target_locales: vec![LanguageTag::new("en").unwrap()],
+        translation_system_prompt: None,
     };
     let kind = RelationKind::new("dev.koharu.test.link").unwrap();
     let mut relation = None;

@@ -329,6 +329,13 @@ function RuntimeSelector({
               selected={stages.includes('inpainting')}
               onSelect={toggleStage}
             />
+            <SelectorOption
+              value='decensor'
+              label={t('phase.decensor')}
+              detail={t('phaseDescription.decensor')}
+              selected={stages.includes('decensor')}
+              onSelect={toggleStage}
+            />
           </SelectorPanel>
         )}
 

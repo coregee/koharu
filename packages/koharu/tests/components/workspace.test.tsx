@@ -248,6 +248,28 @@ describe('canvas interaction adapter', () => {
     })
   })
 
+  it('paints a dedicated green censor mask layer', async () => {
+    installProject()
+    useKoharuStore.setState({ tool: 'censor', brush: { diameter: 32, color: '#FFFFFF' } })
+    const commit = vi
+      .spyOn(commands, 'commitCensor')
+      .mockResolvedValue({ revision: 2, layer: 'censor' })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 17, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 17, clientX: 30, clientY: 40 })
+
+    await waitFor(() => expect(commit).toHaveBeenCalledOnce())
+    expect(canvas.beginStroke).toHaveBeenCalledWith({
+      kind: 'paint',
+      layer: null,
+      point: { x: 20, y: 20 },
+      diameter: 32,
+      color: [0, 255, 0, 180],
+    })
+    expect(commit).toHaveBeenCalledWith(1, null, expect.arrayContaining([{ x: 20, y: 20 }]), 32)
+  })
+
   it.each([
     ['revision', { canvasRevision: 2 }],
     ['generation', { canvasGeneration: 2 }],

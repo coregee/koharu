@@ -221,7 +221,7 @@ async fn rasterized_png_contains_source_and_cleanup_pixels() {
 }
 
 #[tokio::test]
-async fn hidden_segmentation_is_inspectable_without_changing_page_pixels() {
+async fn visible_censor_mask_is_inspectable_and_composited() {
     let mut session = Session::memory().await.unwrap();
     let source = AssetRole::new("source").unwrap();
     let mut page = None;
@@ -242,25 +242,25 @@ async fn hidden_segmentation_is_inspectable_without_changing_page_pixels() {
                     },
                 ),
             )?;
-            let segmentation = edit.add_entity(created, At::End)?;
+            let censor = edit.add_entity(created, At::End)?;
             edit.set(
-                segmentation,
+                censor,
                 &RasterLayer {
                     origin: Origin::User,
-                    name: "Segmentation".to_owned(),
-                    kind: RasterLayerKind::Segmentation,
+                    name: "Censor".to_owned(),
+                    kind: RasterLayerKind::Censor,
                 },
             )?;
             edit.set(
-                segmentation,
+                censor,
                 &Visibility {
                     origin: Origin::User,
-                    visible: false,
+                    visible: true,
                     opacity: 1.0,
                 },
             )?;
             edit.set_asset(
-                segmentation,
+                censor,
                 &source,
                 AssetInput::new(
                     png(2, 2, [255, 255, 255, 255]),
@@ -279,13 +279,13 @@ async fn hidden_segmentation_is_inspectable_without_changing_page_pixels() {
     let snapshot = session.commit(patch).await.unwrap().snapshot;
     let renderer = Renderer::new().unwrap();
     let frame = renderer.render(&snapshot, page.unwrap()).await.unwrap();
-    let segmentation = frame
+    let censor = frame
         .layers()
         .iter()
         .find(|layer| {
             matches!(
                 layer.kind(),
-                LayerKind::Image(metadata) if metadata.kind == ImageKind::Segmentation
+                LayerKind::Image(metadata) if metadata.kind == ImageKind::Censor
             )
         })
         .unwrap();
@@ -294,12 +294,12 @@ async fn hidden_segmentation_is_inspectable_without_changing_page_pixels() {
         .rasterize(&frame.raster_frame().unwrap(), RasterOptions::default())
         .unwrap();
 
-    assert!(!segmentation.presentation().visible);
+    assert!(censor.presentation().visible);
     assert!(
         raster
             .image
             .pixels()
-            .all(|pixel| pixel.0 == [10, 20, 200, 255])
+            .all(|pixel| pixel.0 == [255, 255, 255, 255])
     );
 }
 

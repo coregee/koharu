@@ -21,14 +21,15 @@ Open the processing selector above the canvas. Choose a translation model, targe
 
 ## 4. Run the pipeline
 
-Keep the scope on **Current page**, leave all four stages selected, and choose **Run**.
+Keep the scope on **Current page**, leave all five stages selected, and choose **Run**.
 
 Koharu performs:
 
 1. detection of text, bubbles, and panels;
 2. OCR of detected text regions;
 3. translation of recognized text;
-4. inpainting of source lettering.
+4. inpainting of source lettering;
+5. reconstruction beneath any censor masks you painted with the **Censor** tool.
 
 The translation and inpainting branches both depend on detection, while translation also depends on OCR. Watch the activity center for the current page, stage, and model.
 
@@ -36,7 +37,7 @@ The translation and inpainting branches both depend on detection, while translat
 
 Select a text layer and compare its source text with the translation in the inspector. Correct OCR or translation directly. Use undo if an edit is not useful.
 
-If the cleanup mask missed lettering, use the **Remove** tool. Use **Brush** or **Eraser** for authored raster corrections, and use **Text** to add a missing text box.
+If the cleanup mask missed lettering, use the **Remove** tool. Use **Brush** or **Eraser** for authored raster corrections, **Censor** to mark bars for the Decensor stage, and **Text** to add a missing text box.
 
 ## 6. Typeset
 

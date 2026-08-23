@@ -1,3 +1,4 @@
+mod decensor;
 mod detection;
 mod inpainting;
 mod ocr;
@@ -78,6 +79,7 @@ pub(crate) struct Stages {
     ocr: ocr::Processor,
     translation: translation::Processor,
     inpainting: inpainting::Processor,
+    decensor: decensor::Processor,
 }
 
 impl Stages {
@@ -91,6 +93,7 @@ impl Stages {
             ocr: ocr::Processor::new(config.ocr.clone(), device.clone()),
             translation: translation::Processor::new(config.translation.clone(), translator),
             inpainting: inpainting::Processor::new(config.inpainting()?, device.clone())?,
+            decensor: decensor::Processor::new(device.clone()),
         })
     }
 
@@ -100,6 +103,7 @@ impl Stages {
             Stage::Ocr => &self.ocr,
             Stage::Translation => &self.translation,
             Stage::Inpainting => &self.inpainting,
+            Stage::Decensor => &self.decensor,
         }
     }
 
@@ -171,6 +175,7 @@ mod tests {
                 "paddleocr-vl-1.6",
                 "local",
                 "lama",
+                "diffusioncreampy-bar-sdxl",
             ]
         );
     }

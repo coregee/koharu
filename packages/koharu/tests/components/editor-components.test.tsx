@@ -819,7 +819,7 @@ describe('greenfield editor', () => {
     expect(screen.getByRole('button', { name: 'Edit Caption' })).toHaveTextContent('Narration')
   })
 
-  it('lists the inpainting segmentation mask and toggles its visibility', async () => {
+  it('lists the censor mask and toggles its visibility', async () => {
     installProject()
     useKoharuStore.setState({ selectedLayers: [] })
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
@@ -828,23 +828,21 @@ describe('greenfield editor', () => {
         ...page.layers,
         {
           type: 'raster',
-          id: 'segmentation',
+          id: 'censor',
           parent: 'page',
           visibility: { visible: false, opacity: 1 },
-          image: 'segmentation-mask',
-          name: 'Segmentation',
-          kind: 'segmentation',
+          image: 'censor-mask',
+          name: 'Censor',
+          kind: 'censor',
         },
       ],
     }))
     const setVisibility = vi.spyOn(commands, 'setVisibility').mockResolvedValue(null)
     render(<Inspector />)
 
-    expect(screen.getByRole('button', { name: 'Edit Segmentation' })).toHaveTextContent(
-      'Segmentation',
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Show Segmentation' }))
-    await waitFor(() => expect(setVisibility).toHaveBeenCalledWith(['segmentation'], true, null))
+    expect(screen.getByRole('button', { name: 'Edit Censor' })).toHaveTextContent('Censor')
+    fireEvent.click(screen.getByRole('button', { name: 'Show Censor' }))
+    await waitFor(() => expect(setVisibility).toHaveBeenCalledWith(['censor'], true, null))
   })
 
   it('edits detected-region metadata and reruns OCR for one text box', async () => {
@@ -942,9 +940,10 @@ describe('greenfield editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Processing settings' }))
     fireEvent.click(screen.getByRole('button', { name: /Scope Page/ }))
     fireEvent.click(screen.getByRole('button', { name: /Entire project/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Stages 4 stages/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Stages 5 stages/ }))
     fireEvent.click(screen.getByRole('button', { name: /Translation/ }))
     fireEvent.click(screen.getByRole('button', { name: /Inpainting/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Decensor/, pressed: true }))
     fireEvent.click(screen.getByRole('button', { name: 'Run processing' }))
     await waitFor(() =>
       expect(run).toHaveBeenLastCalledWith(
@@ -959,6 +958,7 @@ describe('greenfield editor', () => {
     fireEvent.click(screen.getByRole('button', { name: /Stages 2 stages/ }))
     fireEvent.click(screen.getByRole('button', { name: /Translation/ }))
     fireEvent.click(screen.getByRole('button', { name: /Inpainting/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Decensor/, pressed: false }))
     fireEvent.click(screen.getByRole('button', { name: 'Run processing' }))
     await waitFor(() =>
       expect(run).toHaveBeenLastCalledWith(
@@ -989,7 +989,7 @@ describe('greenfield editor', () => {
     await waitFor(() => expect(commands.getTranslationModels).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: /Model Gemma 4 E2B Instruct/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Scope Page/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Stages 4 stages/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Stages 5 stages/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Output English/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
     expect(useKoharuStore.getState().settingsOpen).toBe(true)
@@ -1010,6 +1010,7 @@ describe('greenfield editor', () => {
       ['OCR', 'ocr'],
       ['Inpaint', 'inpainting'],
       ['Translate', 'translation'],
+      ['Decensor', 'decensor'],
     ] as const) {
       const shortcut = screen.getByRole('button', { name: label })
       expect(shortcut.querySelector('svg')).not.toBeNull()
@@ -1147,9 +1148,10 @@ describe('greenfield editor', () => {
     await user.click(screen.getByRole('button', { name: 'Processing settings' }))
     await user.click(screen.getByRole('button', { name: /Scope Page/ }))
     await user.click(screen.getByRole('button', { name: /Entire project/ }))
-    await user.click(screen.getByRole('button', { name: /Stages 4 stages/ }))
+    await user.click(screen.getByRole('button', { name: /Stages 5 stages/ }))
     await user.click(screen.getByRole('button', { name: /Translation/ }))
     await user.click(screen.getByRole('button', { name: /Inpainting/ }))
+    await user.click(screen.getByRole('button', { name: /Decensor/, pressed: true }))
     await user.click(screen.getByRole('button', { name: 'Back' }))
     await user.click(screen.getByRole('button', { name: /Output English/ }))
     await user.click(screen.getByRole('combobox', { name: 'Target language' }))

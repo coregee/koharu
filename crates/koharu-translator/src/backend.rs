@@ -16,6 +16,7 @@ pub struct TranslationRequest {
     pub source_language: Option<Language>,
     pub target_language: Language,
     pub instructions: Option<String>,
+    pub system_prompt_template: Option<String>,
     pub context: Vec<TranslationContext>,
     pub context_window: usize,
     pub response_reserve_percent: u8,
@@ -34,6 +35,7 @@ impl TranslationRequest {
             source_language: None,
             target_language,
             instructions: None,
+            system_prompt_template: None,
             context: Vec::new(),
             context_window: 32_768,
             response_reserve_percent: 30,
@@ -51,6 +53,12 @@ impl TranslationRequest {
     #[must_use]
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
         self.instructions = Some(instructions.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_system_prompt_template(mut self, template: impl Into<String>) -> Self {
+        self.system_prompt_template = Some(template.into());
         self
     }
 

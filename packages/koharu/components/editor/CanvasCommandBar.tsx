@@ -1,6 +1,14 @@
 'use client'
 
-import { ChevronDown, Eraser, FileText, Languages, Search, type LucideIcon } from 'lucide-react'
+import {
+  ChevronDown,
+  Eraser,
+  FileText,
+  Languages,
+  ScanLine,
+  Search,
+  type LucideIcon,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -102,6 +110,17 @@ export function CanvasCommandBar() {
           disabled={!page || selectedPages.length === 0 || Boolean(running)}
           onRun={() => run('selected-pages', ['translation'])}
         />
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7 px-2 text-[11px] font-normal text-muted-foreground hover:bg-primary/10 hover:text-foreground'
+          disabled={!page || selectedPages.length === 0 || Boolean(running)}
+          onClick={() => run('selected-pages', ['decensor'])}
+        >
+          <ScanLine data-icon='inline-start' />
+          {t('inference.quickStage.decensor')}
+        </Button>
       </div>
       <Separator
         orientation='vertical'

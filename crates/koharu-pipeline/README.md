@@ -1,8 +1,8 @@
 # koharu-pipeline
 
-`koharu-pipeline` coordinates detection, OCR, translation, and inpainting over a
-`koharu_scene` project. It owns model lifetime and scheduling; the caller owns
-durability through the `Committer` trait.
+`koharu-pipeline` coordinates detection, OCR, translation, inpainting, and
+decensoring over a `koharu_scene` project. It owns model lifetime and
+scheduling; the caller owns durability through the `Committer` trait.
 
 The execution unit is one stage on one page. A stage result is committed as
 soon as it finishes, so the application can refresh that page immediately and
@@ -53,8 +53,9 @@ translation does not require a separate application-owned runtime path.
 Translation is a normal pipeline processor. Its model selection, target
 language, instructions, and generation options live under
 `[pipeline.translation]` and are captured in the same immutable runner
-generation as detection, OCR, and inpainting. Provider connection settings are
-owned by `koharu-translator` under `[providers]`.
+generation as detection, OCR, inpainting, and decensoring. Provider connection
+settings are owned by `koharu-translator` under `[providers]`. A project may
+replace the complete translation system-prompt template in its scene settings.
 
 The translation processor delegates provider execution and local-model
 residency to `koharu_translator::Translator`, but the translator does not load
@@ -69,7 +70,7 @@ The workflow is small and explicit:
 
 ```text
 detection -> OCR -> translation
-         \-> inpainting
+         \-> inpainting -> decensor
 ```
 
 There is no runtime graph or graph library. `Operation` selects a subset of
@@ -110,8 +111,8 @@ small rolling window instead of filling an unbounded upstream queue.
 
 Stages return an empty patch when their page has no applicable input. A page
 with no detected text skips OCR and translation work; an empty removal mask
-skips inpainting inference. These are normal completed work items, not
-preflight failures.
+skips inpainting inference, and an empty censor layer skips decensor inference.
+These are normal completed work items, not preflight failures.
 
 ## Stop semantics
 
@@ -190,7 +191,7 @@ src/
   scope.rs        validated project/page/region/entity scope
   stage.rs        stable stage identifiers
   stage_runner.rs model loading, processing, progress, and retry classification
-  stages/         detection, OCR, translation, and inpainting processors
+  stages/         detection, OCR, translation, inpainting, and decensor processors
 ```
 
 ## Validation

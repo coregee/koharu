@@ -16,12 +16,20 @@ import type {
 } from '@koharu/bridge/protocol'
 import { toast } from '@koharu/ui/components/toast'
 
-export type CanvasTool = 'select' | 'text' | 'draw' | 'eraser' | 'color_picker' | 'remove' | 'pan'
+export type CanvasTool =
+  | 'select'
+  | 'text'
+  | 'draw'
+  | 'eraser'
+  | 'color_picker'
+  | 'remove'
+  | 'censor'
+  | 'pan'
 export const MIN_BRUSH_DIAMETER = 1
 export const MAX_BRUSH_DIAMETER = 128
 
 export function isBrushTool(tool: CanvasTool): boolean {
-  return tool === 'draw' || tool === 'eraser' || tool === 'remove'
+  return tool === 'draw' || tool === 'eraser' || tool === 'remove' || tool === 'censor'
 }
 
 export interface CanvasBrush {
@@ -38,7 +46,13 @@ export interface TextSelection {
   start: number
   end: number
 }
-export const pipelineStages: readonly Stage[] = ['detection', 'ocr', 'translation', 'inpainting']
+export const pipelineStages: readonly Stage[] = [
+  'detection',
+  'ocr',
+  'translation',
+  'inpainting',
+  'decensor',
+]
 
 interface KoharuStore {
   initialized: boolean
@@ -86,6 +100,7 @@ export const defaultShortcuts: Shortcuts = {
   eraser: 'e',
   color_picker: 'i',
   remove: 'j',
+  censor: 'c',
   pan: 'h',
   fit: '0',
 }

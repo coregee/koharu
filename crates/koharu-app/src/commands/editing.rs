@@ -58,6 +58,19 @@ pub(crate) async fn rename_page(
     Ok(())
 }
 
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_translation_system_prompt(
+    template: Option<String>,
+    project: State<'_, CurrentProject>,
+) -> Result<(), Error> {
+    let mut project = project.project.lock().await;
+    let project = project.as_mut().context("no project is open")?;
+    let commit = project.set_translation_system_prompt(template).await?;
+    project.record_commit(&commit);
+    Ok(())
+}
+
 #[tracing::instrument(
     target = "koharu_metrics",
     name = "pages_deleted",

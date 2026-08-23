@@ -233,7 +233,7 @@
       "group": "グループ",
       "image": "画像",
       "paint": "ペイント",
-      "segmentation": "セグメンテーション",
+      "censor": "検閲マスク",
       "text": "テキスト",
       "textGroup": "テキストグループ"
     },

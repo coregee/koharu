@@ -217,14 +217,14 @@ function TypeInspector() {
     update: (value: Typography) => Typography = (value) => value,
   ) => {
     if (!current || !activeRange) return false
-    const typography = update(current.typography ?? defaultTypography)
+    const next = update(typography)
     submit([
       {
         layer: current.id,
         typography: {
-          ...typography,
+          ...next,
           style_ranges: setStyleRange(
-            typography.style_ranges,
+            next.style_ranges,
             activeRange.start,
             activeRange.end,
             property,

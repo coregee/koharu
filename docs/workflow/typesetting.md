@@ -27,9 +27,12 @@ The inspector controls:
 - explicit size or automatic fitting;
 - horizontal or vertical writing mode;
 - alignment;
+- paragraph spacing after authored returns;
 - fill color;
 - stroke color and width;
 - layer visibility and opacity.
+
+Select part of a translation before choosing a fill or stroke color to create a local color override. With no highlighted text, the color applies to the whole selected text layer (or every text layer in a selected text group) and clears overrides for that color channel.
 
 Automatic fitting chooses a size that stays within the presentation frame. Turning it off gives you a fixed authored size. Reset automatic fitting after changing the translation substantially.
 

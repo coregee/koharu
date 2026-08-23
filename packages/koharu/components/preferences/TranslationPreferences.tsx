@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, RotateCcw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -18,6 +18,7 @@ import type {
   Model,
   ProviderPreference,
   TranslationConfig as TranslationSettings,
+  TranslationPromptSettings,
 } from '@koharu/bridge/protocol'
 import { Badge } from '@koharu/ui/components/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@koharu/ui/components/popover'
@@ -36,12 +37,18 @@ export function TranslationPreferences({
   providers,
   languages,
   onChange,
+  systemPrompt,
+  systemPromptDraft,
+  onSystemPromptChange,
 }: {
   value: TranslationSettings
   modelChoices: Model[]
   providers: ProviderPreference[]
   languages: LanguageChoice[]
   onChange: (value: TranslationSettings) => void
+  systemPrompt: TranslationPromptSettings | null
+  systemPromptDraft: string | null
+  onSystemPromptChange: (value: string) => void
 }) {
   const { t } = useTranslation()
   const [modelOpen, setModelOpen] = useState(false)
@@ -217,6 +224,38 @@ export function TranslationPreferences({
               onChange({ ...value, instructions: event.currentTarget.value || null })
             }
           />
+        </PreferenceRow>
+      </PreferenceSection>
+
+      <PreferenceSection
+        title={t('settings.translation.systemPrompt')}
+        description={t('settings.translation.systemPromptDescription')}
+      >
+        <PreferenceRow
+          title={t('settings.translation.systemPromptTemplate')}
+          description={t('settings.translation.systemPromptTemplateDescription')}
+          align='start'
+        >
+          <div className='grid gap-2'>
+            <Textarea
+              aria-label={t('settings.translation.systemPromptTemplate')}
+              value={systemPromptDraft ?? ''}
+              disabled={!systemPrompt?.project_open}
+              className='field-sizing-fixed min-h-80 resize-y overflow-y-auto font-mono text-[11px] leading-5'
+              onChange={(event) => onSystemPromptChange(event.currentTarget.value)}
+            />
+            <button
+              type='button'
+              disabled={
+                !systemPrompt?.project_open || systemPromptDraft === systemPrompt.default_template
+              }
+              className='inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-input px-2.5 text-[11px] disabled:opacity-50'
+              onClick={() => systemPrompt && onSystemPromptChange(systemPrompt.default_template)}
+            >
+              <RotateCcw className='size-3.5' />
+              {t('settings.translation.resetSystemPrompt')}
+            </button>
+          </div>
         </PreferenceRow>
       </PreferenceSection>
 

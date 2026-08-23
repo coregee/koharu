@@ -233,7 +233,7 @@
       "group": "群組",
       "image": "影像",
       "paint": "繪製",
-      "segmentation": "分割",
+      "censor": "審查遮罩",
       "text": "文字",
       "textGroup": "文字群組"
     },

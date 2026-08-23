@@ -59,6 +59,7 @@ const canvasCursors = {
   eraser: 'none',
   color_picker: 'crosshair',
   remove: 'none',
+  censor: 'none',
   pan: 'grab',
 } as const satisfies Record<CanvasTool, string | undefined>
 
@@ -70,7 +71,7 @@ type Gesture =
   | StrokeGesture
 
 interface StrokeGesture {
-  kind: 'paint' | 'erase' | 'inpaint'
+  kind: 'paint' | 'erase' | 'inpaint' | 'censor'
   pointer: number
   revision: number
   layer: string | null
@@ -85,7 +86,7 @@ interface CanvasView {
 }
 
 interface StrokeUpdate {
-  kind: 'paint' | 'erase' | 'inpaint'
+  kind: 'paint' | 'erase' | 'inpaint' | 'censor'
   points: Point[]
 }
 
@@ -133,8 +134,14 @@ export function CanvasWorkspace() {
   const pageHeight = canvasSize[1] || page?.size.height
   const activeRaster =
     selected.length === 1
-      ? page?.layers.find((layer) => layer.id === selected[0] && layer.type === 'raster')
+      ? page?.layers.find(
+          (layer): layer is Extract<Page['layers'][number], { type: 'raster' }> =>
+            layer.id === selected[0] && layer.type === 'raster',
+        )
       : undefined
+  const activePaintRaster =
+    activeRaster && activeRaster.kind !== 'censor' ? activeRaster : undefined
+  const activeCensorRaster = activeRaster?.kind === 'censor' ? activeRaster : undefined
 
   const enqueue = useCallback(<Result,>(operation: () => Promise<Result>): Promise<Result> => {
     const pending = commandQueue.current.then(operation)
@@ -521,7 +528,12 @@ export function CanvasWorkspace() {
     } else if (current.kind === 'text') {
       current.frame = draftFrame(current.start, point)
       setDraft(current.frame)
-    } else if (current.kind === 'paint' || current.kind === 'erase' || current.kind === 'inpaint') {
+    } else if (
+      current.kind === 'paint' ||
+      current.kind === 'erase' ||
+      current.kind === 'inpaint' ||
+      current.kind === 'censor'
+    ) {
       current.points.push(...points)
       strokeUpdates.schedule({ kind: current.kind, points })
     }
@@ -563,7 +575,12 @@ export function CanvasWorkspace() {
           return refresh(projectKey, pagesKey, pageKey)
         })
         .catch(() => undefined)
-    } else if (current.kind === 'paint' || current.kind === 'erase' || current.kind === 'inpaint') {
+    } else if (
+      current.kind === 'paint' ||
+      current.kind === 'erase' ||
+      current.kind === 'inpaint' ||
+      current.kind === 'censor'
+    ) {
       strokeUpdates.commit()
       try {
         canvas?.finishStroke()
@@ -582,12 +599,12 @@ export function CanvasWorkspace() {
               selectLayers([result.layer])
               return refresh(projectKey, pagesKey, pageKey)
             })
-          : current.kind === 'erase'
+          : current.kind === 'censor'
             ? enqueue(() =>
                 call(
-                  commands.commitErase,
+                  commands.commitCensor,
                   current.revision,
-                  current.layer!,
+                  current.layer,
                   current.points,
                   current.diameter,
                 ),
@@ -595,9 +612,22 @@ export function CanvasWorkspace() {
                 selectLayers([result.layer])
                 return refresh(projectKey, pagesKey, pageKey)
               })
-            : enqueue(() =>
-                call(commands.commitInpaint, current.revision, current.points, current.diameter),
-              )
+            : current.kind === 'erase'
+              ? enqueue(() =>
+                  call(
+                    commands.commitErase,
+                    current.revision,
+                    current.layer!,
+                    current.points,
+                    current.diameter,
+                  ),
+                ).then((result) => {
+                  selectLayers([result.layer])
+                  return refresh(projectKey, pagesKey, pageKey)
+                })
+              : enqueue(() =>
+                  call(commands.commitInpaint, current.revision, current.points, current.diameter),
+                )
       commitPending.current = true
       void operation
         .catch(() => canvas?.cancelStroke())
@@ -700,7 +730,7 @@ export function CanvasWorkspace() {
                 kind: 'paint',
                 pointer: event.pointerId,
                 revision: canvasRevision,
-                layer: activeRaster?.id ?? null,
+                layer: activePaintRaster?.id ?? null,
                 points: [point],
                 diameter: brush.diameter,
                 color,
@@ -708,7 +738,7 @@ export function CanvasWorkspace() {
               try {
                 canvas.beginStroke({
                   kind: 'paint',
-                  layer: activeRaster?.id ?? null,
+                  layer: activePaintRaster?.id ?? null,
                   point,
                   diameter: brush.diameter,
                   color,
@@ -758,6 +788,28 @@ export function CanvasWorkspace() {
                   layer: null,
                   point,
                   diameter: brush.diameter,
+                })
+              } catch (error) {
+                gesture.current = null
+                receiveError(errorMessage(error))
+              }
+            } else if (tool === 'censor') {
+              strokeUpdates.clear()
+              gesture.current = {
+                kind: 'censor',
+                pointer: event.pointerId,
+                revision: canvasRevision,
+                layer: activeCensorRaster?.id ?? null,
+                points: [point],
+                diameter: brush.diameter,
+              }
+              try {
+                canvas.beginStroke({
+                  kind: 'paint',
+                  layer: activeCensorRaster?.id ?? null,
+                  point,
+                  diameter: brush.diameter,
+                  color: [0, 255, 0, 180],
                 })
               } catch (error) {
                 gesture.current = null

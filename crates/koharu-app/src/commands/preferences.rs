@@ -7,8 +7,9 @@ use koharu_secrets::ExposeSecret as _;
 use koharu_translator::{Language, Model, Provider, ProviderConfig, ProvidersConfig};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use tauri::State;
 
-use super::Error;
+use super::{Error, project::CurrentProject};
 
 #[derive(Clone, Debug, Serialize, Type)]
 pub struct Preferences {
@@ -16,6 +17,13 @@ pub struct Preferences {
     pub providers: ProviderPreferences,
     pub typesetting: TypesettingConfig,
     pub languages: Vec<LanguageChoice>,
+}
+
+#[derive(Clone, Debug, Serialize, Type)]
+pub struct TranslationPromptSettings {
+    pub default_template: String,
+    pub project_template: Option<String>,
+    pub project_open: bool,
 }
 
 impl Preferences {
@@ -211,4 +219,28 @@ pub(crate) async fn get_preferences() -> std::result::Result<Preferences, Error>
 #[specta::specta]
 pub(crate) async fn get_translation_models() -> std::result::Result<Vec<Model>, Error> {
     Ok(koharu_translator::Translator::models().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn get_translation_prompt_settings(
+    project: State<'_, CurrentProject>,
+) -> std::result::Result<TranslationPromptSettings, Error> {
+    let project = project.project.lock().await;
+    let project_open = project.is_some();
+    let project_template = project
+        .as_ref()
+        .map(|project| {
+            project
+                .snapshot()
+                .project_component::<koharu_scene::Project>()
+                .map(|settings| settings.and_then(|settings| settings.translation_system_prompt))
+        })
+        .transpose()?
+        .flatten();
+    Ok(TranslationPromptSettings {
+        default_template: koharu_translator::DEFAULT_SYSTEM_PROMPT_TEMPLATE.to_owned(),
+        project_template,
+        project_open,
+    })
 }

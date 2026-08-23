@@ -233,7 +233,7 @@
       "group": "Grupo",
       "image": "Imagem",
       "paint": "Pintura",
-      "segmentation": "Segmentação",
+      "censor": "Máscara de censura",
       "text": "Texto",
       "textGroup": "Grupo de texto"
     },

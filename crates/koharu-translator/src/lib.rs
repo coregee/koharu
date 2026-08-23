@@ -7,6 +7,8 @@ mod language;
 mod local;
 mod model;
 mod prompt;
+
+pub use prompt::DEFAULT_SYSTEM_PROMPT_TEMPLATE;
 mod provider;
 mod remote;
 
@@ -18,8 +20,7 @@ use error::{Error, Result};
 use local::LocalTranslator;
 
 pub use backend::{
-    TranslationContext, TranslationPurpose, TranslationRequest, TranslationRole,
-    TranslationSegment,
+    TranslationContext, TranslationPurpose, TranslationRequest, TranslationRole, TranslationSegment,
 };
 pub use language::Language;
 pub use model::{GenerationConfig, Model, ModelSelection, Quantization};
@@ -138,11 +139,9 @@ impl Translator {
             .saturating_mul(usize::from(request.response_reserve_percent.min(90)))
             / 100;
         let response_budget = u32::try_from(response_budget.max(1)).unwrap_or(u32::MAX);
-        generation.max_tokens = Some(
-            generation
-                .max_tokens
-                .map_or(response_budget, |configured| configured.min(response_budget)),
-        );
+        generation.max_tokens = Some(generation.max_tokens.map_or(response_budget, |configured| {
+            configured.min(response_budget)
+        }));
 
         if Self::supports_vision(selection, &generation) {
             request.prepare_image()?;

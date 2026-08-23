@@ -18,7 +18,7 @@ use super::Origin;
 pub enum RasterLayerKind {
     Cleanup,
     Paint,
-    Segmentation,
+    Censor,
 }
 
 /// A full-page transparent pixel layer composited above the page source.

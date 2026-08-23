@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use async_trait::async_trait;
 use koharu_scene::{
-    Authored, EntityId, LanguageTag, OcrCandidate, Origin, Snapshot, SourceText, TextRole,
+    Authored, EntityId, LanguageTag, OcrCandidate, Origin, Project, Snapshot, SourceText, TextRole,
     Translation,
 };
 use koharu_translator::{
@@ -33,6 +33,7 @@ impl Processor {
         purpose: TranslationPurpose,
         context: Vec<TranslationContext>,
         image: Option<Arc<image::DynamicImage>>,
+        system_prompt_template: Option<&str>,
     ) -> Result<(&'static str, Vec<String>)> {
         let mut request = TranslationRequest::new(
             targets
@@ -54,6 +55,9 @@ impl Processor {
         }
         if let Some(instructions) = self.config.instructions.as_deref() {
             request = request.with_instructions(instructions);
+        }
+        if let Some(template) = system_prompt_template {
+            request = request.with_system_prompt_template(template);
         }
         if let Some(image) = image {
             request = request.with_image(image);
@@ -121,9 +125,20 @@ impl StageProcessor for Processor {
         };
         let mut translated = BTreeMap::new();
         let mut provider = None;
+        let project = input
+            .scene
+            .project_component::<Project>()?
+            .unwrap_or_default();
+        let system_prompt_template = project.translation_system_prompt.as_deref();
         if !dialogue.is_empty() {
             let (used_provider, values) = self
-                .translate(&dialogue, TranslationPurpose::Dialogue, context, image)
+                .translate(
+                    &dialogue,
+                    TranslationPurpose::Dialogue,
+                    context,
+                    image,
+                    system_prompt_template,
+                )
                 .await?;
             provider = Some(used_provider);
             translated.extend(dialogue.iter().map(|target| target.content).zip(values));
@@ -135,6 +150,7 @@ impl StageProcessor for Processor {
                     TranslationPurpose::SoundEffects,
                     Vec::new(),
                     None,
+                    system_prompt_template,
                 )
                 .await?;
             provider = Some(used_provider);

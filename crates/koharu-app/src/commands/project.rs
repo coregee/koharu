@@ -6,12 +6,12 @@ use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin, FitsTo,
     Geometry as SceneGeometry, Group as SceneGroup, OcrCandidate as SceneOcrCandidate, Origin,
-    PageDraft, Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
-    RecognizedFrom, Region as SceneRegion, RegionShape as SceneRegionShape, RegionShapeKind,
-    RemovePolicy, Revision, Session, Snapshot, SourceText as SceneSourceText,
-    TextGroup as SceneTextGroup, TextLayout as SceneTextLayout, TextLayoutKind,
-    TextRegion as SceneTextRegion, TextRole as SceneTextRole, Translation as SceneTranslation,
-    Typography as SceneTypography, Visibility as SceneVisibility,
+    PageDraft, Point as ScenePoint, Presents, Project as SceneProject,
+    RasterLayer as SceneRasterLayer, RasterLayerKind, RecognizedFrom, Region as SceneRegion,
+    RegionShape as SceneRegionShape, RegionShapeKind, RemovePolicy, Revision, Session, Snapshot,
+    SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
+    TextLayoutKind, TextRegion as SceneTextRegion, TextRole as SceneTextRole,
+    Translation as SceneTranslation, Typography as SceneTypography, Visibility as SceneVisibility,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -354,6 +354,19 @@ impl Project {
         }
     }
 
+    pub(crate) async fn set_translation_system_prompt(
+        &mut self,
+        template: Option<String>,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let mut settings = snapshot
+            .project_component::<SceneProject>()?
+            .unwrap_or_default();
+        settings.translation_system_prompt = template;
+        let patch = snapshot.patch(|edit| edit.set_project(&settings))?;
+        self.commit(patch).await
+    }
+
     pub(crate) fn pages(snapshot: &Snapshot) -> Result<Vec<PageSummary>> {
         snapshot
             .pages()
@@ -561,14 +574,18 @@ impl Project {
         let old_text = translation
             .map(|value| value.text.value)
             .unwrap_or_default();
-        let mut typography = snapshot.component::<SceneTypography>(layer)?;
-        if let Some(typography) = &mut typography {
-            reconcile_style_ranges(
-                &mut typography.style_ranges,
-                &old_text,
-                text.as_deref().unwrap_or_default(),
-            );
-        }
+        let typography =
+            snapshot
+                .component::<SceneTypography>(layer)?
+                .and_then(|mut typography| {
+                    let previous = typography.style_ranges.clone();
+                    reconcile_style_ranges(
+                        &mut typography.style_ranges,
+                        &old_text,
+                        text.as_deref().unwrap_or_default(),
+                    );
+                    (typography.style_ranges != previous).then_some(typography)
+                });
         let patch = snapshot.patch(|edit| {
             edit.promote_entity_to_user(layer)?;
             edit.promote_entity_to_user(content)?;
@@ -843,6 +860,7 @@ impl Project {
         page: EntityId,
         layer: Option<EntityId>,
         mode: RasterStrokeMode,
+        new_layer_kind: RasterLayerKind,
         color: [u8; 4],
         diameter: f32,
         points: Vec<ScenePoint>,
@@ -872,6 +890,9 @@ impl Project {
             let target = snapshot
                 .component::<SceneRasterLayer>(layer)?
                 .context("the raster target must be a layer on the active page")?;
+            if mode == RasterStrokeMode::Paint && target.kind != new_layer_kind {
+                bail!("the raster target kind does not match the selected brush");
+            }
             promote_layer = target.origin != Origin::User
                 || snapshot
                     .component::<EntityOrigin>(layer)?
@@ -897,8 +918,13 @@ impl Project {
         let mut bytes = Cursor::new(Vec::new());
         DynamicImage::ImageRgba8(image).write_to(&mut bytes, ImageFormat::Png)?;
         let source = AssetRole::new("source")?;
+        let layer_label = match new_layer_kind {
+            RasterLayerKind::Censor => "Censor",
+            RasterLayerKind::Paint => "Paint",
+            RasterLayerKind::Cleanup => "Cleanup",
+        };
         let name = format!(
-            "Paint {}",
+            "{layer_label} {}",
             snapshot
                 .children(page)?
                 .filter(|entity| {
@@ -906,7 +932,7 @@ impl Project {
                         .component::<SceneRasterLayer>(*entity)
                         .ok()
                         .flatten()
-                        .is_some_and(|layer| layer.kind == RasterLayerKind::Paint)
+                        .is_some_and(|layer| layer.kind == new_layer_kind)
                 })
                 .count()
                 + 1
@@ -934,7 +960,7 @@ impl Project {
                     &SceneRasterLayer {
                         origin: Origin::User,
                         name,
-                        kind: RasterLayerKind::Paint,
+                        kind: new_layer_kind,
                     },
                 )?;
                 committed_layer = Some(layer);
@@ -1470,10 +1496,16 @@ fn reconcile_style_ranges(
     let old_suffix_start = utf16_len(&old).saturating_sub(suffix);
     let new_suffix_start = utf16_len(&new).saturating_sub(suffix);
     let map = |position: u32, end: bool| {
-        if position <= prefix {
+        if position < prefix {
             position
-        } else if position >= old_suffix_start {
+        } else if position > old_suffix_start {
             new_suffix_start.saturating_add(position - old_suffix_start)
+        } else if prefix == old_suffix_start {
+            if end { prefix } else { new_suffix_start }
+        } else if position == prefix {
+            prefix
+        } else if position == old_suffix_start {
+            new_suffix_start
         } else if end {
             new_suffix_start
         } else {
@@ -1490,9 +1522,33 @@ fn reconcile_style_ranges(
 
 #[cfg(test)]
 mod tests {
-    use koharu_scene::{Generation, OcrCandidate, ProducerId, WritingMode};
+    use koharu_scene::{Generation, OcrCandidate, ProducerId, TextStyleRange, WritingMode};
 
     use super::*;
+
+    #[test]
+    fn text_edits_reconcile_utf16_style_ranges() {
+        let color = Some([255, 0, 0, 255]);
+        let mut ranges = vec![TextStyleRange {
+            start: 3,
+            end: 5,
+            color,
+            stroke_color: None,
+        }];
+
+        reconcile_style_ranges(&mut ranges, "A🙂BC", "A🙂xBC");
+        assert_eq!(ranges[0].start, 4);
+        assert_eq!(ranges[0].end, 6);
+
+        let mut deleted = vec![TextStyleRange {
+            start: 1,
+            end: 3,
+            color,
+            stroke_color: None,
+        }];
+        reconcile_style_ranges(&mut deleted, "A🙂BC", "ABC");
+        assert!(deleted.is_empty());
+    }
 
     #[test]
     fn only_user_authored_direction_is_projected_as_an_override() {

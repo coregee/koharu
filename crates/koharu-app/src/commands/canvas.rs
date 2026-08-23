@@ -4,7 +4,7 @@ use anyhow::{Context as _, anyhow, bail};
 use image::{GrayImage, ImageEncoder as _, codecs::png::PngEncoder};
 use koharu_desktop::{CanvasState, Desktop, Frame, TransformFrame};
 use koharu_rasterizer::ResourceId;
-use koharu_scene::{EntityId, Revision};
+use koharu_scene::{EntityId, RasterLayerKind, Revision};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -192,6 +192,39 @@ pub(crate) async fn commit_paint(
         brush.diameter,
         brush.color,
         RasterStrokeMode::Paint,
+        RasterLayerKind::Paint,
+        &desktop,
+        &project,
+        &canvas_channel,
+    )
+    .await
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "censor_mask_committed",
+    skip_all,
+    fields(origin = "user", point_count = points.len(), size = f64::from(diameter)),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn commit_censor(
+    expected_revision: Revision,
+    layer: Option<EntityId>,
+    points: Vec<Point>,
+    diameter: f32,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<LayerCommit, Error> {
+    commit_raster_stroke(
+        expected_revision,
+        layer,
+        points,
+        diameter,
+        [0, 255, 0, 180],
+        RasterStrokeMode::Paint,
+        RasterLayerKind::Censor,
         &desktop,
         &project,
         &canvas_channel,
@@ -223,6 +256,7 @@ pub(crate) async fn commit_erase(
         diameter,
         [0; 4],
         RasterStrokeMode::Erase,
+        RasterLayerKind::Paint,
         &desktop,
         &project,
         &canvas_channel,
@@ -238,6 +272,7 @@ async fn commit_raster_stroke(
     diameter: f32,
     color: [u8; 4],
     mode: RasterStrokeMode,
+    new_layer_kind: RasterLayerKind,
     desktop: &Desktop,
     project: &CurrentProject,
     canvas_channel: &CanvasChannel,
@@ -254,6 +289,7 @@ async fn commit_raster_stroke(
                 page,
                 layer,
                 mode,
+                new_layer_kind,
                 color,
                 diameter,
                 points

@@ -5,6 +5,26 @@ use serde_json::{Value, json};
 
 use crate::{Language, TranslationContext, TranslationPurpose, TranslationRequest};
 
+pub const DEFAULT_SYSTEM_PROMPT_TEMPLATE: &str = indoc! {"
+    You are a professional manga translator.
+
+    Translation requirements:
+    - Translate every input segment from {source} into natural {target}.
+    {purpose_requirements}
+    - Use surrounding segments only for disambiguation and continuity; never merge or split segments.
+    - Write every translated `text` value only in {target}; do not include source text, notes, explanations, or alternatives.
+    - Never preserve or repeat original-language text; translate names and terms using natural {target} conventions.
+
+    Output requirements:
+    - The JSON input array delimits the text areas. Each segment has a numeric `id`, a `role`, and its OCR `text`.
+    - Return only a JSON object whose `translations` array contains one object with `id` and translated `text` for every input segment.
+    - Copy every input ID exactly once; order does not matter.
+    - Never merge, split, omit, duplicate, or add segments.
+    {context_requirements}
+    {image_requirements}
+    {additional_instructions}
+"};
+
 pub(crate) fn prompts(request: &TranslationRequest) -> anyhow::Result<(String, String)> {
     let system = translation_system_prompt(request);
     let context = budgeted_context(request, &system)?;
@@ -98,58 +118,45 @@ fn translation_system_prompt(request: &TranslationRequest) -> String {
             - Prefer the target language's established onomatopoeia conventions.
         "},
     };
-    let mut prompt = format!(
+    let context_requirements = if request.context.is_empty() {
+        ""
+    } else {
         indoc! {"
-            You are a professional manga translator.
-
-            Translation requirements:
-            - Translate every input segment from {source} into natural {target}.
-            {purpose_requirements}
-            - Use surrounding segments only for disambiguation and continuity; never merge or split segments.
-            - Write every translated `text` value only in {target}; do not include source text, notes, explanations, or alternatives.
-            - Never preserve or repeat original-language text; translate names and terms using natural {target} conventions.
-
-            Output requirements:
-            - The JSON input array delimits the text areas. Each segment has a numeric `id`, a `role`, and its OCR `text`.
-            - Return only a JSON object whose `translations` array contains one object with `id` and translated `text` for every input segment.
-            - Copy every input ID exactly once; order does not matter.
-            - Never merge, split, omit, duplicate, or add segments.
-        "},
-        source = source,
-        target = request.target_language,
-        purpose_requirements = purpose_requirements.trim_end(),
-    )
-    .trim_end()
-    .to_owned();
-
-    if !request.context.is_empty() {
-        prompt.push_str("\n\n");
-        prompt.push_str(indoc! {"
             Context requirements:
             Use the supplied context only to preserve terminology, character voice, and dialogue continuity.
             Do not translate or return the context entries.
-        "}.trim_end());
-    }
-
-    if request.image.is_some() {
-        prompt.push_str("\n\n");
-        prompt.push_str(indoc! {"
+        "}
+        .trim_end()
+    };
+    let image_requirements = if request.image.is_some() {
+        indoc! {"
             Image requirements:
             Use the attached original page image as visual context for speaker identity, tone, layout, and ambiguous OCR.
             Translate only the supplied segments; do not add text seen in the image that is absent from the input segments.
-        "}.trim_end());
-    }
-
-    if let Some(instructions) = request
+        "}
+        .trim_end()
+    } else {
+        ""
+    };
+    let additional_instructions = request
         .instructions
         .as_deref()
         .map(str::trim)
         .filter(|instructions| !instructions.is_empty())
-    {
-        prompt.push_str("\n\nAdditional instructions:\n");
-        prompt.push_str(instructions);
-    }
-    prompt
+        .map(|instructions| format!("Additional instructions:\n{instructions}"))
+        .unwrap_or_default();
+    request
+        .system_prompt_template
+        .as_deref()
+        .unwrap_or(DEFAULT_SYSTEM_PROMPT_TEMPLATE)
+        .replace("{source}", &source)
+        .replace("{target}", &request.target_language.to_string())
+        .replace("{purpose_requirements}", purpose_requirements.trim_end())
+        .replace("{context_requirements}", context_requirements)
+        .replace("{image_requirements}", image_requirements)
+        .replace("{additional_instructions}", &additional_instructions)
+        .trim()
+        .to_owned()
 }
 
 #[derive(Serialize)]
@@ -370,6 +377,25 @@ mod tests {
         assert!(prompt.contains("from Japanese into natural Korean"));
         assert!(prompt.contains("Copy every input ID exactly once"));
         assert!(prompt.contains("Use informal speech."));
+    }
+
+    #[test]
+    fn custom_system_prompt_template_resolves_request_fields() {
+        let request = TranslationRequest::new(
+            [segment(crate::TranslationRole::Speech, "hello")],
+            Language::Korean,
+        )
+        .with_source_language(Language::Japanese)
+        .with_instructions("Use informal speech.")
+        .with_system_prompt_template(
+            "Translate {source} into {target}.\n{purpose_requirements}\n{additional_instructions}",
+        );
+
+        let prompt = translation_system_prompt(&request);
+
+        assert!(prompt.contains("Translate Japanese into Korean."));
+        assert!(prompt.contains("Preserve meaning, character voice"));
+        assert!(prompt.contains("Additional instructions:\nUse informal speech."));
     }
 
     #[test]

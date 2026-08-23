@@ -26,6 +26,7 @@ import { ProviderPreferences } from '@/components/preferences/ProviderPreference
 import { TranslationPreferences } from '@/components/preferences/TranslationPreferences'
 import { TypesettingPreferences } from '@/components/preferences/TypesettingPreferences'
 import { refreshPreferences, refreshTranslationModels, savePreferences } from '@/lib/backend'
+import { call } from '@/lib/backend'
 import { supportedLanguages } from '@/lib/i18n'
 import { receivePreferences, useKoharuStore, type ShortcutAction } from '@/lib/store'
 import {
@@ -33,6 +34,8 @@ import {
   type Preferences,
   type ProviderPreferences as ProviderSettings,
   type TypesettingConfig,
+  type TranslationPromptSettings,
+  commands,
 } from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
 import { Input } from '@koharu/ui/components/input'
@@ -69,6 +72,9 @@ export function SettingsPage() {
   const [typesetting, setTypesetting] = useState<TypesettingConfig | null>(
     preferences?.typesetting ?? null,
   )
+  const [translationPrompt, setTranslationPrompt] = useState<TranslationPromptSettings | null>(null)
+  const [translationPromptDraft, setTranslationPromptDraft] = useState<string | null>(null)
+  const savedTranslationPrompt = useRef<string | null>(null)
   const translation = pipeline?.translation ?? null
   const lastSaved = useRef<string | null>(null)
   const lastSavedProviders = useRef<string | null>(null)
@@ -120,10 +126,34 @@ export function SettingsPage() {
     [],
   )
 
+  const saveTranslationPrompt = useCallback(async () => {
+    if (
+      !translationPrompt ||
+      !translationPrompt.project_open ||
+      translationPromptDraft === null ||
+      translationPromptDraft === savedTranslationPrompt.current
+    ) {
+      return
+    }
+    const value =
+      translationPromptDraft === translationPrompt.default_template ? null : translationPromptDraft
+    await call(commands.setTranslationSystemPrompt, value)
+    savedTranslationPrompt.current = translationPromptDraft
+    setTranslationPrompt((current) => (current ? { ...current, project_template: value } : current))
+  }, [translationPrompt, translationPromptDraft])
+
   useEffect(() => {
     if (!open) return
     void refreshPreferences().catch(() => undefined)
     void refreshTranslationModels().catch(() => undefined)
+    void call(commands.getTranslationPromptSettings)
+      .then((settings) => {
+        setTranslationPrompt(settings)
+        const value = settings.project_template ?? settings.default_template
+        savedTranslationPrompt.current = value
+        setTranslationPromptDraft(value)
+      })
+      .catch(() => undefined)
   }, [open])
 
   useEffect(() => {
@@ -151,6 +181,20 @@ export function SettingsPage() {
     return () => window.clearTimeout(timeout)
   }, [open, pipeline, providers, saveDraft, typesetting])
 
+  useEffect(() => {
+    if (
+      !open ||
+      !translationPrompt ||
+      !translationPrompt.project_open ||
+      translationPromptDraft === null ||
+      translationPromptDraft === savedTranslationPrompt.current
+    ) {
+      return
+    }
+    const timeout = window.setTimeout(() => void saveTranslationPrompt(), 260)
+    return () => window.clearTimeout(timeout)
+  }, [open, saveTranslationPrompt, translationPrompt, translationPromptDraft])
+
   if (!open) return null
 
   return (
@@ -165,7 +209,7 @@ export function SettingsPage() {
               setOpen(false)
               return
             }
-            void saveDraft(pipeline, providers, typesetting)
+            void Promise.all([saveDraft(pipeline, providers, typesetting), saveTranslationPrompt()])
               .then(() => setOpen(false))
               .catch(() => undefined)
           }}
@@ -217,6 +261,9 @@ export function SettingsPage() {
                   modelChoices={translationModels}
                   providers={providers?.entries ?? []}
                   languages={preferences?.languages ?? []}
+                  systemPrompt={translationPrompt}
+                  systemPromptDraft={translationPromptDraft}
+                  onSystemPromptChange={setTranslationPromptDraft}
                   onChange={(translation) =>
                     setPipeline((current) => (current ? { ...current, translation } : current))
                   }
@@ -309,6 +356,7 @@ function ShortcutPreferences() {
     'eraser',
     'color_picker',
     'remove',
+    'censor',
     'pan',
     'fit',
   ]
@@ -346,6 +394,7 @@ const shortcutKeys: Record<ShortcutAction, string> = {
   eraser: 'tools.eraser',
   color_picker: 'tools.color_picker',
   remove: 'tools.remove',
+  censor: 'tools.censor',
   pan: 'tools.pan',
   fit: 'canvas.fit',
 }

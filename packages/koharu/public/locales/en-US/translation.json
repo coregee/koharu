@@ -141,6 +141,7 @@
       "ocr": "OCR Provider"
     },
     "quickStage": {
+      "decensor": "Decensor",
       "detection": "Detection",
       "inpainting": "Inpaint",
       "ocr": "OCR",
@@ -236,7 +237,7 @@
       "group": "Group",
       "image": "Image",
       "paint": "Paint",
-      "segmentation": "Segmentation",
+      "censor": "Censor mask",
       "text": "Text",
       "textGroup": "Text group"
     },
@@ -340,12 +341,14 @@
     "sourceLanguage": "Source language"
   },
   "phase": {
+    "decensor": "Decensor",
     "detection": "Detection",
     "inpainting": "Inpainting",
     "ocr": "OCR",
     "translation": "Translation"
   },
   "phaseDescription": {
+    "decensor": "Reconstruct artwork beneath painted censor masks.",
     "detection": "Locate text on the page.",
     "inpainting": "Rebuild the artwork behind removed text.",
     "ocr": "Read the text inside each region.",
@@ -471,6 +474,11 @@
       "instructionsDescription": "Names, tone, terminology, or formatting guidance.",
       "instructionsLabel": "Translation instructions",
       "instructionsPlaceholder": "Optional project-wide guidance",
+      "systemPrompt": "System prompt",
+      "systemPromptDescription": "Edit the complete translation prompt template for the open project. Placeholders in braces are resolved for each request.",
+      "systemPromptTemplate": "Project system prompt template",
+      "systemPromptTemplateDescription": "This override is stored in the project. Reset it to inherit Koharu's default template.",
+      "resetSystemPrompt": "Reset to default",
       "model": "Model",
       "modelDescription": "Provider labels identify where each model runs; connections are configured separately.",
       "modelQuantization": "Model quantization",
@@ -535,6 +543,7 @@
     "zoom": "Zoom"
   },
   "tools": {
+    "censor": "Censor mask",
     "brushSize": "Brush size",
     "brushSizeInput": "Brush size",
     "brushSizePixels": "Brush size: {{size}} pixels",

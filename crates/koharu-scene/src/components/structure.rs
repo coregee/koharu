@@ -12,11 +12,21 @@ use crate::{
 
 use super::{LanguageTag, Origin};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Type)]
 pub struct Project {
     pub source_locale: Option<LanguageTag>,
     pub target_locales: Vec<LanguageTag>,
+    #[revision(start = 2, default_fn = "default_translation_system_prompt")]
+    pub translation_system_prompt: Option<String>,
+}
+
+impl Project {
+    fn default_translation_system_prompt(
+        _revision: u16,
+    ) -> std::result::Result<Option<String>, revision::Error> {
+        Ok(None)
+    }
 }
 
 impl Component for Project {
@@ -28,6 +38,13 @@ impl Component for Project {
         }
         for locale in &self.target_locales {
             locale.validate()?;
+        }
+        if self
+            .translation_system_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.len() > 256 * 1024 || prompt.contains('\0'))
+        {
+            return Err(Error::invalid("translation system prompt is invalid"));
         }
         let mut targets = self.target_locales.clone();
         targets.sort();
