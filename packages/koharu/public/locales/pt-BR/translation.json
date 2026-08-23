@@ -233,6 +233,7 @@
       "group": "Grupo",
       "image": "Imagem",
       "paint": "Pintura",
+      "segmentation": "Segmentação",
       "text": "Texto",
       "textGroup": "Grupo de texto"
     },

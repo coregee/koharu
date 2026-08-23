@@ -233,6 +233,7 @@
       "group": "그룹",
       "image": "이미지",
       "paint": "페인트",
+      "segmentation": "세그멘테이션",
       "text": "텍스트",
       "textGroup": "텍스트 그룹"
     },

@@ -233,6 +233,7 @@
       "group": "グループ",
       "image": "画像",
       "paint": "ペイント",
+      "segmentation": "セグメンテーション",
       "text": "テキスト",
       "textGroup": "テキストグループ"
     },

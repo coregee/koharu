@@ -452,7 +452,7 @@ export type Quantization = {
 	name: string,
 };
 
-export type RasterLayerKind = "cleanup" | "paint";
+export type RasterLayerKind = "cleanup" | "paint" | "segmentation";
 
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 

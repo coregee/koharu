@@ -19,7 +19,7 @@ use koharu_ml::{
 };
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, EntityOrigin, Geometry, Origin,
-    RasterLayer, RasterLayerKind, Region, RegionSpec,
+    RasterLayer, RasterLayerKind, Region, RegionSpec, Visibility,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -183,6 +183,7 @@ impl Model {
         let original = prepared.original.clone();
         let cleanup = prepared.cleanup.take();
         let cleanup_entity = prepared.cleanup_entity;
+        let segmentation_entity = prepared.segmentation_entity;
         let (model_name, image) = match self {
             Self::LaMa(model) => {
                 let model = model.clone();
@@ -303,6 +304,9 @@ impl Model {
             edit.observe::<RasterLayer>(entity)?;
             edit.observe_assets(entity)?;
         }
+        if let Some(entity) = segmentation_entity {
+            edit.observe_assets(entity)?;
+        }
         let image = image.to_rgba8();
         if image.dimensions() != original.dimensions() || image.dimensions() != mask.dimensions() {
             bail!("inpainted image dimensions do not match page {page}");
@@ -368,8 +372,55 @@ impl Model {
                 },
             ),
         )?;
+        write_segmentation_layer(&mut edit, page, segmentation_entity, &mask)?;
         finish(edit)
     }
+}
+
+fn write_segmentation_layer(
+    edit: &mut koharu_scene::Edit,
+    page: koharu_scene::EntityId,
+    existing: Option<koharu_scene::EntityId>,
+    mask: &GrayImage,
+) -> Result<koharu_scene::EntityId> {
+    let mut bytes = Cursor::new(Vec::new());
+    DynamicImage::ImageLuma8(mask.clone()).write_to(&mut bytes, ImageFormat::Png)?;
+    let layer = if let Some(layer) = existing {
+        layer
+    } else {
+        let layer = edit.add_entity(page, At::End)?;
+        edit.set(
+            layer,
+            &RasterLayer {
+                origin: Origin::User,
+                name: "Segmentation".to_owned(),
+                kind: RasterLayerKind::Segmentation,
+            },
+        )?;
+        edit.set(
+            layer,
+            &Visibility {
+                origin: Origin::User,
+                visible: false,
+                opacity: 1.0,
+            },
+        )?;
+        layer
+    };
+    edit.set_asset(
+        layer,
+        &AssetRole::new("source")?,
+        AssetInput::new(
+            Arc::<[u8]>::from(bytes.into_inner()),
+            "image/png",
+            AssetMetadata {
+                width: Some(mask.width()),
+                height: Some(mask.height()),
+                attributes: BTreeMap::new(),
+            },
+        ),
+    )?;
+    Ok(layer)
 }
 
 #[derive(Clone, Debug)]
@@ -425,6 +476,7 @@ struct InpaintInput {
     image: Arc<DynamicImage>,
     original: Arc<DynamicImage>,
     cleanup_entity: Option<koharu_scene::EntityId>,
+    segmentation_entity: Option<koharu_scene::EntityId>,
     cleanup: Option<RgbaImage>,
     mask: GrayImage,
     text_mask: GrayImage,
@@ -445,6 +497,14 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
             .ok()
             .flatten()
             .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
+    });
+    let segmentation_entity = input.scene.children(page)?.find(|entity| {
+        input
+            .scene
+            .component::<RasterLayer>(*entity)
+            .ok()
+            .flatten()
+            .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
     });
     let cleanup = if let Some(entity) = cleanup_entity {
         input
@@ -513,6 +573,7 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
         image: source,
         original,
         cleanup_entity,
+        segmentation_entity,
         cleanup,
         mask,
         text_mask,
@@ -897,6 +958,50 @@ fn composite_generated(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn segmentation_layer_preserves_the_exact_inpainting_mask() {
+        let mut session = koharu_scene::Session::memory().await.unwrap();
+        let mut mask = GrayImage::new(8, 8);
+        mask.put_pixel(3, 4, Luma([255]));
+        mask.put_pixel(5, 6, Luma([127]));
+        let mut edit = session
+            .snapshot()
+            .edit_as(generation(PRODUCER, "test").unwrap());
+        let id = edit
+            .add_page(
+                koharu_scene::PageDraft::new("page", 8.0, 8.0),
+                koharu_scene::At::End,
+            )
+            .unwrap();
+        let page = id;
+        let segmentation = write_segmentation_layer(&mut edit, id, None, &mask).unwrap();
+        let patch = edit.finish().unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+
+        assert_eq!(snapshot.parent(segmentation).unwrap(), Some(page));
+        assert_eq!(
+            snapshot
+                .component::<RasterLayer>(segmentation)
+                .unwrap()
+                .unwrap()
+                .kind,
+            RasterLayerKind::Segmentation
+        );
+        let visibility = snapshot
+            .component::<Visibility>(segmentation)
+            .unwrap()
+            .unwrap();
+        assert!(!visibility.visible);
+        let asset = snapshot
+            .asset(segmentation, &AssetRole::new("source").unwrap())
+            .unwrap()
+            .unwrap();
+        let stored = image::load_from_memory(&snapshot.read_blob(asset.blob).await.unwrap())
+            .unwrap()
+            .to_luma8();
+        assert_eq!(stored, mask);
+    }
 
     #[tokio::test]
     async fn transient_inpainting_mask_replaces_persistent_page_masks() {

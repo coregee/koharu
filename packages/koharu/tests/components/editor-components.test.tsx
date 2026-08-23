@@ -762,6 +762,34 @@ describe('greenfield editor', () => {
     expect(screen.getByRole('button', { name: 'Edit Caption' })).toHaveTextContent('Narration')
   })
 
+  it('lists the inpainting segmentation mask and toggles its visibility', async () => {
+    installProject()
+    useKoharuStore.setState({ selectedLayers: [] })
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        ...page.layers,
+        {
+          type: 'raster',
+          id: 'segmentation',
+          parent: 'page',
+          visibility: { visible: false, opacity: 1 },
+          image: 'segmentation-mask',
+          name: 'Segmentation',
+          kind: 'segmentation',
+        },
+      ],
+    }))
+    const setVisibility = vi.spyOn(commands, 'setVisibility').mockResolvedValue(null)
+    render(<Inspector />)
+
+    expect(screen.getByRole('button', { name: 'Edit Segmentation' })).toHaveTextContent(
+      'Segmentation',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Show Segmentation' }))
+    await waitFor(() => expect(setVisibility).toHaveBeenCalledWith(['segmentation'], true, null))
+  })
+
   it('edits detected-region metadata and reruns OCR for one text box', async () => {
     installProject()
     const user = userEvent.setup()

@@ -79,10 +79,14 @@ export function CanvasOverlay({
   const sourceRegion = selectedTextLayer?.content.source_region
     ? page.regions.find((region) => region.id === selectedTextLayer.content.source_region)
     : undefined
-  const textRegions = useMemo(
-    () => page.regions.filter((region) => region.kind === 'dev.koharu.region.text'),
-    [page.regions],
-  )
+  const textRegions = useMemo(() => {
+    const referenced = new Set(
+      page.layers.flatMap((layer) =>
+        isTextLayer(layer) && layer.content.source_region ? [layer.content.source_region] : [],
+      ),
+    )
+    return page.regions.filter((region) => referenced.has(region.id))
+  }, [page.layers, page.regions])
   const regionControlFrame = sourceRegion
     ? (regionPreviews[sourceRegion.id] ?? geometryFrame(sourceRegion.geometry))
     : null

@@ -4,7 +4,7 @@ use koharu_rasterizer::{PREPARED_RASTER_TILE_DIMENSION, RasterOptions, Rasterize
 use koharu_renderer::{ImageKind, LayerKind, Renderer};
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Origin, PageDraft, RasterLayer, RasterLayerKind,
-    Session,
+    Session, Visibility,
 };
 
 fn png(width: u32, height: u32, color: [u8; 4]) -> Arc<[u8]> {
@@ -218,6 +218,89 @@ async fn rasterized_png_contains_source_and_cleanup_pixels() {
     )));
     assert_eq!(raster.image.get_pixel(0, 0).0, [10, 20, 200, 255]);
     assert_eq!(raster.image.get_pixel(2, 1).0, [240, 30, 20, 255]);
+}
+
+#[tokio::test]
+async fn hidden_segmentation_is_inspectable_without_changing_page_pixels() {
+    let mut session = Session::memory().await.unwrap();
+    let source = AssetRole::new("source").unwrap();
+    let mut page = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let created = edit.add_page(PageDraft::new("page", 2.0, 2.0), At::End)?;
+            edit.set_asset(
+                created,
+                &source,
+                AssetInput::new(
+                    png(2, 2, [10, 20, 200, 255]),
+                    "image/png",
+                    AssetMetadata {
+                        width: Some(2),
+                        height: Some(2),
+                        attributes: BTreeMap::new(),
+                    },
+                ),
+            )?;
+            let segmentation = edit.add_entity(created, At::End)?;
+            edit.set(
+                segmentation,
+                &RasterLayer {
+                    origin: Origin::User,
+                    name: "Segmentation".to_owned(),
+                    kind: RasterLayerKind::Segmentation,
+                },
+            )?;
+            edit.set(
+                segmentation,
+                &Visibility {
+                    origin: Origin::User,
+                    visible: false,
+                    opacity: 1.0,
+                },
+            )?;
+            edit.set_asset(
+                segmentation,
+                &source,
+                AssetInput::new(
+                    png(2, 2, [255, 255, 255, 255]),
+                    "image/png",
+                    AssetMetadata {
+                        width: Some(2),
+                        height: Some(2),
+                        attributes: BTreeMap::new(),
+                    },
+                ),
+            )?;
+            page = Some(created);
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    let renderer = Renderer::new().unwrap();
+    let frame = renderer.render(&snapshot, page.unwrap()).await.unwrap();
+    let segmentation = frame
+        .layers()
+        .iter()
+        .find(|layer| {
+            matches!(
+                layer.kind(),
+                LayerKind::Image(metadata) if metadata.kind == ImageKind::Segmentation
+            )
+        })
+        .unwrap();
+    let raster = Rasterizer::new()
+        .unwrap()
+        .rasterize(&frame.raster_frame().unwrap(), RasterOptions::default())
+        .unwrap();
+
+    assert!(!segmentation.presentation().visible);
+    assert!(
+        raster
+            .image
+            .pixels()
+            .all(|pixel| pixel.0 == [10, 20, 200, 255])
+    );
 }
 
 #[test]
