@@ -61,6 +61,7 @@ impl Serialize for PipelineConfig {
         };
         let ocr = match &self.ocr {
             OcrModel::PaddleOcrVl1_6 => "paddleocr-vl-1.6",
+            OcrModel::PaddleOcrVlManga => "paddleocr-vl-manga",
             OcrModel::MangaOcr => "manga-ocr",
             OcrModel::BaberuOcr => "baberu-ocr",
         };
@@ -122,6 +123,7 @@ impl<'de> Deserialize<'de> for PipelineConfig {
         };
         let ocr = match file.ocr.model.as_str() {
             "paddleocr-vl-1.6" => OcrModel::PaddleOcrVl1_6,
+            "paddleocr-vl-manga" => OcrModel::PaddleOcrVlManga,
             "manga-ocr" => OcrModel::MangaOcr,
             "baberu-ocr" => OcrModel::BaberuOcr,
             model => {
@@ -169,8 +171,7 @@ impl Default for PipelineConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
-#[serde(default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Type)]
 pub struct TranslationConfig {
     pub model: koharu_translator::ModelSelection,
     pub generation: GenerationConfig,
@@ -181,6 +182,51 @@ pub struct TranslationConfig {
     pub instructions: Option<String>,
     pub context_window: Option<u32>,
     pub response_reserve_percent: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+struct TranslationConfigFile {
+    model: koharu_translator::ModelSelection,
+    generation: GenerationConfig,
+    source_language: Option<Language>,
+    target_language: Language,
+    instructions: Option<String>,
+    context_window: Option<u32>,
+    response_reserve_percent: u8,
+}
+
+impl Default for TranslationConfigFile {
+    fn default() -> Self {
+        let config = TranslationConfig::default();
+        Self {
+            model: config.model,
+            generation: config.generation,
+            source_language: config.source_language,
+            target_language: config.target_language,
+            instructions: config.instructions,
+            context_window: config.context_window,
+            response_reserve_percent: config.response_reserve_percent,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TranslationConfig {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let config = TranslationConfigFile::deserialize(deserializer)?;
+        Ok(Self {
+            model: config.model,
+            generation: config.generation,
+            source_language: config.source_language,
+            target_language: config.target_language,
+            instructions: config.instructions,
+            context_window: config.context_window,
+            response_reserve_percent: config.response_reserve_percent,
+        })
+    }
 }
 
 impl Default for TranslationConfig {
@@ -239,7 +285,10 @@ impl PipelineConfig {
         let _ = self.inpainting()?;
         if !matches!(
             self.ocr,
-            OcrModel::PaddleOcrVl1_6 | OcrModel::MangaOcr | OcrModel::BaberuOcr
+            OcrModel::PaddleOcrVl1_6
+                | OcrModel::PaddleOcrVlManga
+                | OcrModel::MangaOcr
+                | OcrModel::BaberuOcr
         ) {
             bail!("unsupported OCR model")
         }
@@ -280,6 +329,8 @@ pub enum DetectionModel {
 pub enum OcrModel {
     #[serde(rename = "paddleocr-vl-1.6")]
     PaddleOcrVl1_6,
+    #[serde(rename = "paddleocr-vl-manga")]
+    PaddleOcrVlManga,
     #[serde(rename = "manga-ocr")]
     MangaOcr,
     #[serde(rename = "baberu-ocr")]
@@ -353,6 +404,21 @@ mod tests {
         let config = toml::from_str::<PipelineConfig>("").unwrap();
 
         assert_eq!(config, PipelineConfig::default());
+    }
+
+    #[test]
+    fn selects_manga_tuned_paddle_ocr() {
+        let config = toml::from_str::<PipelineConfig>(
+            r#"
+                [ocr]
+                model = "paddleocr-vl-manga"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(config.ocr, OcrModel::PaddleOcrVlManga));
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(serialized.contains("model = \"paddleocr-vl-manga\""));
     }
 
     #[test]

@@ -91,6 +91,7 @@ The detection model finds text regions, speech bubbles, and segmentation masks.
 OCR reads source text from detected regions.
 
 - [PaddleOCR VL 1.6](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6)
+- [PaddleOCR VL for Manga](https://huggingface.co/jzhang533/PaddleOCR-VL-For-Manga)
 - [Manga OCR](https://huggingface.co/mayocream/manga-ocr)
 - [Baberu OCR](https://huggingface.co/genshiai-daichi/baberu-ocr)
 

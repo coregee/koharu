@@ -18,6 +18,7 @@ Its optional text, bubble, and panel thresholds control how much evidence is req
 Current OCR choices are:
 
 - **PaddleOCR-VL 1.6** — the default general vision-language OCR path;
+- **PaddleOCR-VL Manga** — a PaddleOCR-VL checkpoint fine-tuned for Japanese manga regions;
 - **Manga OCR** — specialized for Japanese manga text;
 - **Baberu OCR** — an alternative manga-oriented recognizer.
 

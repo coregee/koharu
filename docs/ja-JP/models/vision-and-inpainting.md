@@ -16,6 +16,7 @@ description: 検出、OCR、インペイントのモデルとトレードオフ�
 ## OCR
 
 - **PaddleOCR-VL 1.6** — 既定の汎用 VLM OCR
+- **PaddleOCR-VL Manga** — 日本語マンガ領域向けに微調整された PaddleOCR-VL
 - **Manga OCR** — 日本語マンガ文字向け
 - **Baberu OCR** — 別のマンガ向け認識器
 

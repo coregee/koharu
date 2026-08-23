@@ -16,6 +16,7 @@ description: 选择检测、OCR、图像修复处理器并了解其取舍。
 ## OCR
 
 - **PaddleOCR-VL 1.6** — 默认通用视觉语言 OCR
+- **PaddleOCR-VL Manga** — 针对日文漫画区域微调的 PaddleOCR-VL
 - **Manga OCR** — 面向日文漫画文字
 - **Baberu OCR** — 另一种漫画识别器
 

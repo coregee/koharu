@@ -2,7 +2,7 @@ use std::{hint::black_box, path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use criterion::Criterion;
-use koharu_ml::paddle_ocr_vl::{PaddleOCRVL, PaddleOCRVLTask};
+use koharu_ml::paddle_ocr_vl::{PaddleOCRVL, PaddleOCRVLTask, PaddleOCRVLVariant};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,7 +19,8 @@ async fn main() -> Result<()> {
 
     koharu_ml::init().await?;
     let image = image::open(&input)?;
-    let model = PaddleOCRVL::load(koharu_ml::Device::default()).await?;
+    let model =
+        PaddleOCRVL::load(koharu_ml::Device::default(), PaddleOCRVLVariant::General).await?;
 
     let warmup = model.inference(&image, PaddleOCRVLTask::Ocr)?;
     assert_eq!(warmup.text, "対策委員会です！");

@@ -1,5 +1,5 @@
-//! PaddleOCR-VL-1.6 element recognition backed by the checkpoint revision
-//! `66317acc4c9fc17bd154591ce650735cd2855f3e`.
+//! PaddleOCR-VL element recognition backed by commit-pinned general-purpose and
+//! manga-tuned checkpoints.
 
 mod config;
 mod model;
@@ -56,11 +56,52 @@ fn pathological_unknown_run_start(text: &str) -> Option<usize> {
 }
 
 crate::model_repository!("PaddlePaddle/PaddleOCR-VL-1.6" @ "66317acc4c9fc17bd154591ce650735cd2855f3e" {
-    CONFIG = "config.json",
-    WEIGHTS = "model.safetensors",
-    PROCESSOR = "preprocessor_config.json",
-    TOKENIZER = "tokenizer.json",
+    BASE_CONFIG = "config.json",
+    BASE_WEIGHTS = "model.safetensors",
+    BASE_PROCESSOR = "preprocessor_config.json",
+    BASE_TOKENIZER = "tokenizer.json",
 });
+
+crate::model_repository!("jzhang533/PaddleOCR-VL-For-Manga" @ "1e8aa5f1dd90cc86fe9137c9c0b26ebde613cfe8" {
+    MANGA_CONFIG = "config.json",
+    MANGA_WEIGHTS = "model.safetensors",
+    MANGA_PROCESSOR = "preprocessor_config.json",
+    MANGA_TOKENIZER = "tokenizer.json",
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaddleOCRVLVariant {
+    General,
+    Manga,
+}
+
+impl PaddleOCRVLVariant {
+    fn repository(self) -> &'static str {
+        match self {
+            Self::General => "PaddlePaddle/PaddleOCR-VL-1.6",
+            Self::Manga => "jzhang533/PaddleOCR-VL-For-Manga",
+        }
+    }
+
+    fn files(
+        self,
+    ) -> (
+        koharu_runtime::HuggingFaceFile<'static>,
+        koharu_runtime::HuggingFaceFile<'static>,
+        koharu_runtime::HuggingFaceFile<'static>,
+        koharu_runtime::HuggingFaceFile<'static>,
+    ) {
+        match self {
+            Self::General => (BASE_CONFIG, BASE_WEIGHTS, BASE_PROCESSOR, BASE_TOKENIZER),
+            Self::Manga => (
+                MANGA_CONFIG,
+                MANGA_WEIGHTS,
+                MANGA_PROCESSOR,
+                MANGA_TOKENIZER,
+            ),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct PaddleOCRVL {
@@ -70,24 +111,26 @@ pub struct PaddleOCRVL {
 }
 
 impl PaddleOCRVL {
-    pub async fn load(device: crate::Device) -> Result<Self> {
+    pub async fn load(device: crate::Device, variant: PaddleOCRVLVariant) -> Result<Self> {
         let device: Device = device.try_into_device()?;
-        let config_path = CONFIG
+        let repository = variant.repository();
+        let (config, weights, processor, tokenizer) = variant.files();
+        let config_path = config
             .resolve()
             .await
-            .context("failed to resolve PaddleOCR-VL-1.6 config")?;
-        let weights_path = WEIGHTS
+            .with_context(|| format!("failed to resolve {repository} config"))?;
+        let weights_path = weights
             .resolve()
             .await
-            .context("failed to resolve PaddleOCR-VL-1.6 weights")?;
-        let processor_path = PROCESSOR
+            .with_context(|| format!("failed to resolve {repository} weights"))?;
+        let processor_path = processor
             .resolve()
             .await
-            .context("failed to resolve PaddleOCR-VL-1.6 image processor")?;
-        let tokenizer_path = TOKENIZER
+            .with_context(|| format!("failed to resolve {repository} image processor"))?;
+        let tokenizer_path = tokenizer
             .resolve()
             .await
-            .context("failed to resolve PaddleOCR-VL-1.6 tokenizer")?;
+            .with_context(|| format!("failed to resolve {repository} tokenizer"))?;
 
         let config = PaddleOCRVLConfig::from_file(&config_path)
             .with_context(|| format!("failed to read {}", config_path.display()))?;
