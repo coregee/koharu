@@ -1,6 +1,6 @@
 use anyhow::Context;
 use koharu_llama::llama_backend::LlamaBackend;
-use koharu_runtime::{Feature, Hardware, Runtime};
+use koharu_runtime::{Feature, Hardware, Runtime, RuntimeDevices};
 use tokio::sync::OnceCell;
 
 mod backend;
@@ -34,7 +34,7 @@ pub use koharu_torch as torch;
 
 static LLAMA: OnceCell<LlamaBackend> = OnceCell::const_new();
 static DIFFUSION: OnceCell<()> = OnceCell::const_new();
-static READY: OnceCell<Device> = OnceCell::const_new();
+static READY: OnceCell<RuntimeDevices> = OnceCell::const_new();
 
 /// Initializes every process-wide native runtime used by Koharu.
 ///
@@ -47,7 +47,7 @@ pub async fn init() -> anyhow::Result<()> {
     READY
         .get_or_try_init(|| async {
             let runtime = Runtime::discover([Feature::Torch, Feature::Llama, Feature::Diffusion])?;
-            let device = runtime
+            let devices = runtime
                 .initialize()
                 .await
                 .context("failed to initialize runtimes")?;
@@ -65,25 +65,39 @@ pub async fn init() -> anyhow::Result<()> {
                     Ok::<(), anyhow::Error>(())
                 })
                 .await?;
-            Ok::<Device, anyhow::Error>(device)
+            Ok::<RuntimeDevices, anyhow::Error>(devices)
         })
         .await?;
     Ok(())
 }
 
-/// Returns the runtime-owned device selected for every model backend.
+/// Returns the runtime-owned primary device selected for Torch models.
 #[must_use]
 pub fn device(cpu: bool) -> Device {
     if cpu {
         Device::cpu()
-    } else if let Some(device) = READY.get() {
-        device.clone()
+    } else if let Some(devices) = READY.get() {
+        devices.primary().clone()
     } else if let Some(device) = Hardware::discover().device() {
         device.clone()
     } else {
         tracing::warn!("GPU is not available, falling back to CPU");
         Device::cpu()
     }
+}
+
+/// Resolves a model's accelerator request against the initialized runtime plan.
+/// Explicit CPU requests remain model-local overrides.
+pub(crate) fn device_for_feature(requested: Device, feature: Feature) -> Device {
+    if requested.backend == Backend::Cpu {
+        return requested;
+    }
+
+    READY
+        .get()
+        .and_then(|devices| devices.device(feature))
+        .cloned()
+        .unwrap_or(requested)
 }
 
 /// Returns the initialized process-wide llama.cpp backend.

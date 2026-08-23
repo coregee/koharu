@@ -15,6 +15,7 @@ use koharu_diffusion::{
     Context, ContextParams, GuidanceParams, ImageGenerationParams, SampleMethod, SampleParams,
     Scheduler,
 };
+use koharu_runtime::Feature;
 
 use crate::Backend;
 
@@ -30,6 +31,7 @@ pub struct Decensor {
 
 impl Decensor {
     pub async fn load(device: crate::Device) -> Result<Self> {
+        let device = crate::device_for_feature(device, Feature::Diffusion);
         let checkpoint = CHECKPOINT
             .resolve()
             .await

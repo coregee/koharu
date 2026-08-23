@@ -4,7 +4,7 @@ use anyhow::Result;
 use strum::EnumProperty;
 
 use crate::{
-    Hardware, Store, download,
+    Backend, Hardware, Store, download,
     runtime::{
         DiscoverablePackage, Package, RuntimePackage,
         graph::Component,
@@ -91,6 +91,15 @@ impl Diffusion {
     fn complete(self, path: &Path) -> bool {
         path.join(self.library()).is_file()
     }
+
+    pub(crate) fn backend(self) -> Backend {
+        match self {
+            Self::WindowsCuda | Self::LinuxCuda => Backend::Cuda,
+            Self::WindowsHip | Self::LinuxHip => Backend::Rocm,
+            Self::WindowsVulkan | Self::LinuxVulkan => Backend::Vulkan,
+            Self::MacosMetal => Backend::Metal,
+        }
+    }
 }
 
 impl sealed::Sealed for Diffusion {}
@@ -128,7 +137,10 @@ impl DiscoverablePackage for Diffusion {
             if hardware.supports_cuda() {
                 return Some(Self::WindowsCuda);
             }
-            if Rocm::discover(hardware).is_ok() {
+            if let Ok(rocm) = Rocm::discover(hardware) {
+                if rocm.routes_ggml_through_vulkan(hardware) {
+                    return Some(Self::WindowsVulkan);
+                }
                 return Some(Self::WindowsHip);
             }
             if hardware.supports_vulkan() {

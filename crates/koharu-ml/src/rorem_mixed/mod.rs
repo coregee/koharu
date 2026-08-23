@@ -13,6 +13,7 @@ use image::{DynamicImage, GrayImage, RgbImage};
 use koharu_diffusion::{
     GuidanceParams, ImageGenerationParams, SampleMethod, SampleParams, Scheduler,
 };
+use koharu_runtime::Feature;
 
 use self::{
     model::{Model, ModelPaths},
@@ -41,6 +42,7 @@ pub struct RoremMixed {
 
 impl RoremMixed {
     pub async fn load(device: crate::Device) -> Result<Self> {
+        let device = crate::device_for_feature(device, Feature::Diffusion);
         let (diffusion_model, version_marker, vae, clip_l, clip_g) = tokio::try_join!(
             DIFFUSION_MODEL.resolve(),
             SDXL_VERSION_MARKER.resolve(),

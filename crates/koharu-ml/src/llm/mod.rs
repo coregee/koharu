@@ -6,6 +6,7 @@ use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
 use image::DynamicImage;
+use koharu_runtime::Feature;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -42,6 +43,7 @@ impl Llm {
         options: LoadOptions,
     ) -> Result<Self> {
         let model_path = model_path.into();
+        let device = crate::device_for_feature(device, Feature::Llama);
         let model = tokio::task::spawn_blocking(move || Model::new(&device, model_path, options))
             .await
             .context("LLM loading task panicked")??;

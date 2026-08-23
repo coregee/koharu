@@ -100,13 +100,16 @@ pub(crate) struct Plan {
 }
 
 impl Plan {
-    pub(crate) fn require<P>(&mut self, hardware: &Hardware) -> Result<Option<NodeIndex>>
+    pub(crate) fn require<P>(&mut self, hardware: &Hardware) -> Result<Option<(NodeIndex, P)>>
     where
         P: DiscoverablePackage,
         Component: From<P>,
     {
         P::discover(hardware)
-            .map(|package| self.insert(package.into(), hardware))
+            .map(|package| {
+                self.insert(package.into(), hardware)
+                    .map(|node| (node, package))
+            })
             .transpose()
     }
 

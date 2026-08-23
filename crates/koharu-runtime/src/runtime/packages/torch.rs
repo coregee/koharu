@@ -97,6 +97,16 @@ impl Torch {
         }
     }
 
+    pub(crate) fn device_backend(self, hardware: &Hardware) -> crate::Backend {
+        match self.0 {
+            Backend::Cpu => hardware
+                .device()
+                .map_or(crate::Backend::Cpu, |device| device.backend.clone()),
+            Backend::Cuda13 => crate::Backend::Cuda,
+            Backend::Rocm(_) => crate::Backend::Rocm,
+        }
+    }
+
     fn urls(self) -> Result<Vec<String>> {
         let backend = match self.0 {
             Backend::Cpu => "cpu",

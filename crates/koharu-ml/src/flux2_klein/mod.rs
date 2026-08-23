@@ -12,6 +12,7 @@ use image::{DynamicImage, RgbImage};
 use koharu_diffusion::{
     GuidanceParams, ImageGenerationParams, SampleMethod, SampleParams, Scheduler,
 };
+use koharu_runtime::Feature;
 
 use self::{
     model::{Model, ModelPaths},
@@ -37,6 +38,7 @@ pub struct Flux2Klein {
 
 impl Flux2Klein {
     pub async fn load(device: crate::Device) -> Result<Self> {
+        let device = crate::device_for_feature(device, Feature::Diffusion);
         let (transformer, text_encoder, vae) = tokio::try_join!(
             TRANSFORMER_WEIGHTS.resolve(),
             TEXT_ENCODER_WEIGHTS.resolve(),
@@ -129,6 +131,7 @@ pub struct Flux2KleinInpaint {
 
 impl Flux2KleinInpaint {
     pub async fn load(device: crate::Device) -> Result<Self> {
+        let device = crate::device_for_feature(device, Feature::Diffusion);
         let (transformer, text_encoder, vae) = tokio::try_join!(
             TRANSFORMER_WEIGHTS.resolve(),
             TEXT_ENCODER_WEIGHTS.resolve(),
