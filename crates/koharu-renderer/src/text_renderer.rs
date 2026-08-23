@@ -1,5 +1,6 @@
 //! Text layout and portable glyph recording.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -38,6 +39,8 @@ pub(crate) struct TextNodeDescriptor {
     pub(crate) foreground_color: [u8; 4],
     pub(crate) stroke: Option<StrokeOptions>,
     pub(crate) line_height: f32,
+    pub(crate) paragraph_spacing: f32,
+    pub(crate) style_ranges: Vec<koharu_scene::TextStyleRange>,
     pub(crate) letter_spacing: f32,
     pub(crate) word_spacing: f32,
     pub(crate) text_inset: [f32; 4],
@@ -74,6 +77,14 @@ pub(crate) struct TextRenderOptions {
     pub padding: f32,
     pub baseline_shift: f32,
     pub stroke: Option<StrokeOptions>,
+    style_ranges: Vec<PaintOverride>,
+}
+
+#[derive(Debug, Clone)]
+struct PaintOverride {
+    range: Range<usize>,
+    color: Option<[u8; 4]>,
+    stroke_color: Option<[u8; 4]>,
 }
 
 impl Default for TextRenderOptions {
@@ -84,6 +95,7 @@ impl Default for TextRenderOptions {
             padding: 0.0,
             baseline_shift: 0.0,
             stroke: None,
+            style_ranges: Vec::new(),
         }
     }
 }
@@ -115,10 +127,14 @@ impl TextRenderer {
         // `draw_layout`), then the ordinary fill is drawn on top in the foreground color. Unlike a
         // centered stroke, a dilation never grows inward, so it can't punch a hole through small
         // features (e.g. dots) once the border width exceeds their radius.
-        if let Some(stroke) = options
-            .stroke
-            .filter(|stroke| stroke.width_px > 0.0 && stroke.color[3] > 0)
-        {
+        if let Some(stroke) = options.stroke.filter(|stroke| {
+            stroke.width_px > 0.0
+                && (stroke.color[3] > 0
+                    || options
+                        .style_ranges
+                        .iter()
+                        .any(|range| range.stroke_color.is_some_and(|color| color[3] > 0)))
+        }) {
             draw_layout(
                 scene,
                 resources,
@@ -127,8 +143,9 @@ impl TextRenderer {
                 options,
                 transform,
                 GlyphPaint {
-                    color: stroke.color,
+                    base_color: stroke.color,
                     dilation_px: stroke.width_px,
+                    kind: PaintKind::Stroke,
                 },
             );
         }
@@ -140,8 +157,9 @@ impl TextRenderer {
             options,
             transform,
             GlyphPaint {
-                color: options.color,
+                base_color: options.color,
                 dilation_px: 0.0,
+                kind: PaintKind::Fill,
             },
         );
     }
@@ -197,6 +215,7 @@ impl TextRenderer {
             .with_writing_mode(descriptor.writing_mode)
             .with_alignment(descriptor.alignment)
             .with_line_height(descriptor.line_height)
+            .with_paragraph_spacing(descriptor.paragraph_spacing)
             .with_spacing(descriptor.letter_spacing, descriptor.word_spacing)
             .with_cjk_punctuation_layout(
                 is_chinese_or_japanese_text(&descriptor.text)
@@ -266,6 +285,7 @@ impl TextRenderer {
         let mut options = TextRenderOptions {
             color,
             stroke: None,
+            style_ranges: resolve_style_ranges(&descriptor.text, &descriptor.style_ranges),
             ..TextRenderOptions::default()
         };
         let mut scene = PreparedScene::default();
@@ -376,8 +396,43 @@ fn placement(rect: LayoutBox, width: f32, height: f32) -> (f32, f32) {
 
 /// Color and outward dilation for one glyph draw pass (border or ordinary fill).
 struct GlyphPaint {
-    color: [u8; 4],
+    base_color: [u8; 4],
     dilation_px: f32,
+    kind: PaintKind,
+}
+
+#[derive(Clone, Copy)]
+enum PaintKind {
+    Fill,
+    Stroke,
+}
+
+fn resolve_style_ranges(text: &str, ranges: &[koharu_scene::TextStyleRange]) -> Vec<PaintOverride> {
+    let byte_offset = |utf16_offset: u32| {
+        let mut utf16 = 0u32;
+        for (byte, character) in text.char_indices() {
+            if utf16 >= utf16_offset {
+                return byte;
+            }
+            utf16 += character.len_utf16() as u32;
+            if utf16 > utf16_offset {
+                return byte;
+            }
+        }
+        text.len()
+    };
+    ranges
+        .iter()
+        .filter_map(|range| {
+            let start = byte_offset(range.start);
+            let end = byte_offset(range.end);
+            (start < end).then(|| PaintOverride {
+                range: start..end,
+                color: range.color,
+                stroke_color: range.stroke_color,
+            })
+        })
+        .collect()
 }
 
 fn draw_layout(
@@ -400,8 +455,12 @@ fn draw_layout(
         while start < line.glyphs.len() {
             let font = line.glyphs[start].font;
             let key = font_key(font);
+            let color = paint_color(&line.glyphs[start], options, &paint);
             let mut end = start + 1;
-            while end < line.glyphs.len() && font_key(line.glyphs[end].font) == key {
+            while end < line.glyphs.len()
+                && font_key(line.glyphs[end].font) == key
+                && paint_color(&line.glyphs[end], options, &paint) == color
+            {
                 end += 1;
             }
 
@@ -440,12 +499,28 @@ fn draw_layout(
                     // to that same zoom instead of being rendered at a fixed pixel size.
                     hint: options.hint_glyphs && paint.dilation_px == 0.0,
                     embolden: [synthetic_bold + paint.dilation_px; 2],
-                    color: paint.color,
+                    color,
                     glyphs,
                 }));
             start = end;
         }
     }
+}
+
+fn paint_color(
+    glyph: &crate::shape::PositionedGlyph<'_>,
+    options: &TextRenderOptions,
+    paint: &GlyphPaint,
+) -> [u8; 4] {
+    let override_color = options
+        .style_ranges
+        .iter()
+        .find(|range| range.range.contains(&(glyph.cluster as usize)))
+        .and_then(|range| match paint.kind {
+            PaintKind::Fill => range.color,
+            PaintKind::Stroke => range.stroke_color,
+        });
+    override_color.unwrap_or(paint.base_color)
 }
 
 #[cfg(test)]
@@ -482,6 +557,8 @@ mod tests {
             foreground_color: [0, 0, 0, 255],
             stroke: None,
             line_height: 1.2,
+            paragraph_spacing: 0.0,
+            style_ranges: Vec::new(),
             letter_spacing: 0.0,
             word_spacing: 0.0,
             text_inset: [0.0; 4],
@@ -581,5 +658,43 @@ mod tests {
             compiled.composition_commands(1).as_slice(),
             [CompositionCommand::Vector(_)]
         ));
+    }
+
+    #[test]
+    fn text_rendering_records_fill_overrides_for_selected_ranges() {
+        let font = FontSystem::new().first_font().unwrap();
+        let layout = TextLayout::new(&font)
+            .with_font_size(24.0)
+            .run("AB")
+            .unwrap();
+        let options = TextRenderOptions {
+            style_ranges: vec![PaintOverride {
+                range: 1..2,
+                color: Some([255, 0, 0, 255]),
+                stroke_color: None,
+            }],
+            ..TextRenderOptions::default()
+        };
+        let mut scene = PreparedScene::default();
+        let mut resources = Vec::new();
+
+        TextRenderer::new().render(
+            &mut scene,
+            &mut resources,
+            &layout,
+            WritingMode::Horizontal,
+            &options,
+            Affine::IDENTITY,
+        );
+
+        let colors = scene
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                PreparedSceneCommand::GlyphRun(run) => Some(run.color),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(colors, vec![[0, 0, 0, 255], [255, 0, 0, 255]]);
     }
 }

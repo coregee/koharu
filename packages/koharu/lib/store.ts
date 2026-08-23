@@ -32,6 +32,12 @@ export type InspectorSection = 'copy' | 'type' | 'layers'
 export type ShortcutAction = CanvasTool | 'fit'
 export type Shortcuts = Record<ShortcutAction, string>
 export type PipelineScope = 'page' | 'selected-pages' | 'project'
+export interface TextSelection {
+  layer: EntityId
+  content: 'source' | 'translation'
+  start: number
+  end: number
+}
 export const pipelineStages: readonly Stage[] = ['detection', 'ocr', 'translation', 'inpainting']
 
 interface KoharuStore {
@@ -50,6 +56,7 @@ interface KoharuStore {
   layerFrames: Record<EntityId, Frame>
   selectedLayers: EntityId[]
   selectedPages: EntityId[]
+  textSelection: TextSelection | null
   tool: CanvasTool
   brush: CanvasBrush
   inspector: InspectorSection
@@ -63,6 +70,7 @@ interface KoharuStore {
   setProcessingStages: (stages: Stage[]) => void
   setSettingsOpen: (open: boolean) => void
   selectLayers: (layers: EntityId[]) => void
+  setTextSelection: (selection: TextSelection | null) => void
   setTool: (tool: CanvasTool) => void
   setBrush: (brush: CanvasBrush) => void
   setShortcut: (action: ShortcutAction, key: string) => void
@@ -98,6 +106,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   layerFrames: {},
   selectedLayers: [],
   selectedPages: [],
+  textSelection: null,
   tool: 'select',
   brush: { diameter: 48, color: '#111111' },
   inspector: 'copy',
@@ -110,7 +119,9 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   setProcessingScope: (processingScope) => set({ processingScope }),
   setProcessingStages: (processingStages) => set({ processingStages }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
-  selectLayers: (selectedLayers) => set({ selectedLayers: [...new Set(selectedLayers)] }),
+  selectLayers: (selectedLayers) =>
+    set({ selectedLayers: [...new Set(selectedLayers)], textSelection: null }),
+  setTextSelection: (textSelection) => set({ textSelection }),
   setTool: (tool) => set({ tool }),
   setBrush: (brush) => set({ brush }),
   setShortcut: (action, key) =>

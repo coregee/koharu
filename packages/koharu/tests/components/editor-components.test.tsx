@@ -82,6 +82,8 @@ const textLayer: Layer = {
     color: [0, 0, 0, 255],
     stroke_color: [255, 255, 255, 255],
     stroke_width: 0,
+    paragraph_spacing: null,
+    style_ranges: [],
     alignment: 'Center',
     writing_mode: null,
   },
@@ -187,6 +189,7 @@ function installProject() {
     ],
     selectedPages: ['page'],
     selectedLayers: ['element'],
+    textSelection: null,
     layerFrames: {
       element: { x: 10, y: 20, width: 100, height: 50, angle_degrees: 0 },
     },
@@ -638,6 +641,60 @@ describe('greenfield editor', () => {
             stroke_color: [255, 0, 0, 255],
             stroke_width: 1.5,
           }),
+        }),
+      ]),
+    )
+  })
+
+  it('applies text color only to the highlighted translation range', async () => {
+    const user = userEvent.setup()
+    installProject()
+    const setTypography = vi.spyOn(commands, 'setTypography').mockResolvedValue(null)
+    render(<Inspector />)
+    const translation = screen.getByTestId('edit-translation-element') as HTMLTextAreaElement
+    translation.focus()
+    translation.setSelectionRange(1, 4)
+    fireEvent.select(translation)
+
+    await user.click(screen.getByRole('button', { name: 'Text color' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Hex color code' }), {
+      target: { value: '#FF0000' },
+    })
+
+    await waitFor(() =>
+      expect(setTypography).toHaveBeenCalledWith([
+        expect.objectContaining({
+          layer: 'element',
+          typography: expect.objectContaining({
+            color: [0, 0, 0, 255],
+            style_ranges: [
+              {
+                start: 1,
+                end: 4,
+                color: [255, 0, 0, 255],
+                stroke_color: null,
+              },
+            ],
+          }),
+        }),
+      ]),
+    )
+  })
+
+  it('sets paragraph spacing for the selected text layer', async () => {
+    installProject()
+    const setTypography = vi.spyOn(commands, 'setTypography').mockResolvedValue(null)
+    render(<Inspector />)
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Paragraph gap' }), {
+      target: { value: '12' },
+    })
+
+    await waitFor(() =>
+      expect(setTypography).toHaveBeenCalledWith([
+        expect.objectContaining({
+          layer: 'element',
+          typography: expect.objectContaining({ paragraph_spacing: 12 }),
         }),
       ]),
     )

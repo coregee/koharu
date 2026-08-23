@@ -176,6 +176,32 @@ struct ContourConstraint {
     air_scale: f32,
 }
 
+fn paragraph_offsets(text: &str, lines: &[LayoutLine<'_>], spacing: f32) -> Vec<f32> {
+    if spacing <= 0.0 {
+        return vec![0.0; lines.len()];
+    }
+    let mut break_ends = Vec::new();
+    let mut characters = text.char_indices().peekable();
+    while let Some((index, character)) = characters.next() {
+        match character {
+            '\r' => {
+                let mut end = index + character.len_utf8();
+                if let Some(&(next, '\n')) = characters.peek() {
+                    characters.next();
+                    end = next + 1;
+                }
+                break_ends.push(end);
+            }
+            '\n' | '\u{2028}' | '\u{2029}' => break_ends.push(index + character.len_utf8()),
+            _ => {}
+        }
+    }
+    lines
+        .iter()
+        .map(|line| break_ends.partition_point(|end| *end <= line.range.start) as f32 * spacing)
+        .collect()
+}
+
 #[derive(Clone)]
 pub struct TextLayout<'a> {
     writing_mode: WritingMode,
@@ -192,6 +218,7 @@ pub struct TextLayout<'a> {
     max_height: Option<f32>,
     alignment: Option<TextAlign>,
     line_height: Option<f32>,
+    paragraph_spacing: f32,
     letter_spacing: f32,
     word_spacing: f32,
     cjk_punctuation_layout: bool,
@@ -261,6 +288,7 @@ impl<'a> TextLayout<'a> {
             max_height: None,
             alignment: None,
             line_height: None,
+            paragraph_spacing: 0.0,
             letter_spacing: 0.0,
             word_spacing: 0.0,
             cjk_punctuation_layout: false,
@@ -380,6 +408,13 @@ impl<'a> TextLayout<'a> {
     #[must_use]
     pub fn with_line_height(mut self, ratio: f32) -> Self {
         self.line_height = Some(ratio);
+        self
+    }
+
+    /// Adds an absolute block-axis gap after each authored paragraph break.
+    #[must_use]
+    pub fn with_paragraph_spacing(mut self, spacing: f32) -> Self {
+        self.paragraph_spacing = spacing.max(0.0);
         self
     }
 
@@ -780,7 +815,9 @@ impl<'a> TextLayout<'a> {
         let line_count = lines.len();
         let effective_alignment = self.alignment.unwrap_or(TextAlign::Left);
 
+        let paragraph_offsets = paragraph_offsets(text, &lines, self.paragraph_spacing);
         for (i, line) in lines.iter_mut().enumerate() {
+            let paragraph_offset = paragraph_offsets[i];
             line.baseline = match self.writing_mode {
                 WritingMode::VerticalRl => (
                     self.comic_balloon
@@ -790,7 +827,8 @@ impl<'a> TextLayout<'a> {
                             (line_count.saturating_sub(1) as f32 - i as f32) * line_height
                                 + line_height * 0.5,
                             |profile| profile.block_baseline,
-                        ),
+                        )
+                        - paragraph_offset,
                     ascent,
                 ),
                 WritingMode::Horizontal => {
@@ -801,7 +839,7 @@ impl<'a> TextLayout<'a> {
                         .map_or(ascent + i as f32 * line_height, |profile| {
                             profile.block_baseline
                         });
-                    (0.0, y)
+                    (0.0, y + paragraph_offset)
                 }
             };
         }
@@ -2205,6 +2243,23 @@ mod tests {
         fonts
             .first_font()
             .expect("no system font available for tests")
+    }
+
+    #[test]
+    fn paragraph_spacing_adds_an_authored_gap_without_blank_lines() {
+        let font = any_system_font();
+        let compact = TextLayout::new(&font)
+            .with_font_size(24.0)
+            .run("First\nSecond")
+            .unwrap();
+        let spaced = TextLayout::new(&font)
+            .with_font_size(24.0)
+            .with_paragraph_spacing(12.0)
+            .run("First\nSecond")
+            .unwrap();
+
+        assert!((spaced.height - compact.height - 12.0).abs() < 0.01);
+        assert!((spaced.lines[1].baseline.1 - compact.lines[1].baseline.1 - 12.0).abs() < 0.01);
     }
 
     fn assert_approx_eq(actual: f32, expected: f32) {

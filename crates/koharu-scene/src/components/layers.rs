@@ -110,6 +110,17 @@ pub enum FontStyle {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct TextStyleRange {
+    /// Start of the styled range in UTF-16 code units, matching browser text selections.
+    pub start: u32,
+    /// End of the styled range in UTF-16 code units, exclusive.
+    pub end: u32,
+    pub color: Option<[u8; 4]>,
+    pub stroke_color: Option<[u8; 4]>,
+}
+
+#[revisioned(revision = 2)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 pub struct Typography {
     pub origin: Origin,
     pub preferred_font: Option<String>,
@@ -120,6 +131,8 @@ pub struct Typography {
     pub color: Option<[u8; 4]>,
     pub stroke_color: Option<[u8; 4]>,
     pub stroke_width: Option<f32>,
+    pub paragraph_spacing: Option<f32>,
+    pub style_ranges: Vec<TextStyleRange>,
     pub alignment: Option<TextAlignment>,
     pub writing_mode: Option<WritingMode>,
     pub extensions: BTreeMap<String, String>,
@@ -143,6 +156,17 @@ impl Component for Typography {
             || self
                 .stroke_width
                 .is_some_and(|width| !width.is_finite() || width < 0.0)
+            || self
+                .paragraph_spacing
+                .is_some_and(|spacing| !spacing.is_finite() || spacing < 0.0)
+            || self.style_ranges.len() > 4096
+            || self.style_ranges.iter().any(|range| {
+                range.start >= range.end || (range.color.is_none() && range.stroke_color.is_none())
+            })
+            || self
+                .style_ranges
+                .windows(2)
+                .any(|ranges| ranges[0].end > ranges[1].start)
         {
             return Err(Error::invalid("typography intent is invalid"));
         }

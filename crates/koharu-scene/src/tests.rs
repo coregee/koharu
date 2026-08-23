@@ -102,7 +102,7 @@ async fn components_on_new_entities_do_not_observe_missing_base_state() {
 }
 
 #[tokio::test]
-async fn built_in_component_schemas_remain_revision_one() {
+async fn built_in_component_schemas_have_expected_revisions() {
     fn schema<T: Component>() -> u16 {
         <T as revision::Revisioned>::revision()
     }
@@ -131,7 +131,9 @@ async fn built_in_component_schemas_remain_revision_one() {
             schema::<crate::components::Assets>(),
             schema::<Relation>(),
         ],
-        [1; 21]
+        [
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1
+        ]
     );
 }
 
@@ -1114,6 +1116,13 @@ async fn independent_pipeline_components_rebase() {
                     color: Some([1, 2, 3, 255]),
                     stroke_color: None,
                     stroke_width: None,
+                    paragraph_spacing: Some(8.0),
+                    style_ranges: vec![TextStyleRange {
+                        start: 0,
+                        end: 4,
+                        color: Some([255, 0, 0, 255]),
+                        stroke_color: None,
+                    }],
                     alignment: Some(TextAlignment::Center),
                     writing_mode: None,
                     extensions: BTreeMap::new(),

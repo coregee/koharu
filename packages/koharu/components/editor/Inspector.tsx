@@ -49,6 +49,7 @@ import {
   type RegionShapeKind,
   type TextClassification,
   type TextAlignment,
+  type TextStyleRange,
   type Typography,
   type WritingMode,
 } from '@koharu/bridge/protocol'
@@ -109,6 +110,8 @@ const defaultTypography: Typography = {
   color: [0, 0, 0, 255],
   stroke_color: [255, 255, 255, 255],
   stroke_width: 0,
+  paragraph_spacing: null,
+  style_ranges: [],
   alignment: null,
   writing_mode: null,
 }
@@ -136,8 +139,10 @@ export function Inspector() {
 function TypeInspector() {
   const { t } = useTranslation()
   const borderWidthId = useId()
+  const paragraphSpacingId = useId()
   const page = usePage().data
   const selectedIds = useKoharuStore((state) => state.selectedLayers)
+  const textSelection = useKoharuStore((state) => state.textSelection)
   const availableFonts = useFonts().data
   const expandedSelection = page ? expandLayerSelection(page.layers, selectedIds) : []
   const selected =
@@ -151,12 +156,7 @@ function TypeInspector() {
 
   useEffect(() => setDraft(null), [current?.id])
 
-  const apply = (update: (value: Typography) => Typography) => {
-    if (!selected.length) return
-    const updates = selected.map((layer) => ({
-      layer: layer.id,
-      typography: update(layer.typography ?? defaultTypography),
-    }))
+  const submit = (updates: { layer: EntityId; typography: Typography }[]) => {
     const optimistic = current && updates.find(({ layer }) => layer === current.id)
     if (optimistic) setDraft(optimistic)
     const sequence = ++updateSequence.current
@@ -166,6 +166,16 @@ function TypeInspector() {
       .finally(() => {
         if (updateSequence.current === sequence) setDraft(null)
       })
+  }
+
+  const apply = (update: (value: Typography) => Typography) => {
+    if (!selected.length) return
+    submit(
+      selected.map((layer) => ({
+        layer: layer.id,
+        typography: update(layer.typography ?? defaultTypography),
+      })),
+    )
   }
 
   const typography =
@@ -193,6 +203,38 @@ function TypeInspector() {
   const strokeColor = typography.stroke_color ?? defaultTypography.stroke_color!
   const strokeEnabled = strokeWidth > 0 && strokeColor[3] > 0
   const displayedStrokeWidth = strokeWidth > 0 ? strokeWidth : 1.5
+  const paragraphSpacing = typography.paragraph_spacing ?? 0
+  const activeRange =
+    current &&
+    textSelection?.layer === current.id &&
+    textSelection.content === 'translation' &&
+    textSelection.start < textSelection.end
+      ? { start: textSelection.start, end: textSelection.end }
+      : null
+  const applyRange = (
+    property: 'color' | 'stroke_color',
+    color: [number, number, number, number],
+    update: (value: Typography) => Typography = (value) => value,
+  ) => {
+    if (!current || !activeRange) return false
+    const typography = update(current.typography ?? defaultTypography)
+    submit([
+      {
+        layer: current.id,
+        typography: {
+          ...typography,
+          style_ranges: setStyleRange(
+            typography.style_ranges,
+            activeRange.start,
+            activeRange.end,
+            property,
+            color,
+          ),
+        },
+      },
+    ])
+    return true
+  }
   const writingMode = typography.writing_mode ?? 'Horizontal'
   const writingModeChoice = typography.writing_mode ?? 'Auto'
   const effectiveAlignment =
@@ -229,7 +271,15 @@ function TypeInspector() {
               size='sm'
               disabled={disabled}
               value={rgbaToHex(typography.color ?? defaultTypography.color!)}
-              onChange={(color) => apply((value) => ({ ...value, color: hexToRgba(color) }))}
+              onChange={(color) => {
+                const rgba = hexToRgba(color)
+                if (applyRange('color', rgba)) return
+                apply((value) => ({
+                  ...value,
+                  color: rgba,
+                  style_ranges: clearStyleProperty(value.style_ranges, 'color'),
+                }))
+              }}
             />
           </InspectorField>
         </div>
@@ -378,7 +428,7 @@ function TypeInspector() {
           </InspectorField>
         </div>
 
-        <div className='grid min-w-0 grid-cols-[2.75rem_minmax(5.5rem,1fr)] items-end gap-1.5'>
+        <div className='grid min-w-0 grid-cols-[2.75rem_minmax(4.75rem,1fr)_minmax(4.75rem,1fr)] items-end gap-1.5'>
           <InspectorField label={t('inspector.border')}>
             <ColorWell
               label={t('inspector.borderColor')}
@@ -387,6 +437,20 @@ function TypeInspector() {
               allowTransparent
               value={strokeEnabled ? rgbaToHex(strokeColor) : null}
               onChange={(stroke_color) => {
+                const rgba =
+                  stroke_color === null ? ([0, 0, 0, 0] as const) : hexToRgba(stroke_color)
+                if (
+                  applyRange('stroke_color', [...rgba], (value) => {
+                    const width = value.stroke_width ?? 0
+                    const base = value.stroke_color ?? defaultTypography.stroke_color!
+                    return {
+                      ...value,
+                      stroke_color: width > 0 ? base : [base[0], base[1], base[2], 0],
+                      stroke_width: width > 0 ? width : 1.5,
+                    }
+                  })
+                )
+                  return
                 apply((value) => {
                   const width = value.stroke_width ?? 0
                   if (stroke_color !== null) {
@@ -394,6 +458,7 @@ function TypeInspector() {
                       ...value,
                       stroke_color: hexToRgba(stroke_color),
                       stroke_width: width > 0 ? width : 1.5,
+                      style_ranges: clearStyleProperty(value.style_ranges, 'stroke_color'),
                     }
                   }
                   const [red, green, blue] = value.stroke_color ?? defaultTypography.stroke_color!
@@ -401,6 +466,7 @@ function TypeInspector() {
                     ...value,
                     stroke_color: [red, green, blue, 0],
                     stroke_width: width > 0 ? width : 1.5,
+                    style_ranges: clearStyleProperty(value.style_ranges, 'stroke_color'),
                   }
                 })
               }}
@@ -433,9 +499,112 @@ function TypeInspector() {
               </NumberFieldGroup>
             </NumberField>
           </InspectorField>
+          <InspectorField label={t('inspector.paragraphSpacing')}>
+            <NumberField
+              id={paragraphSpacingId}
+              name='paragraph-spacing'
+              className='min-w-0'
+              disabled={disabled}
+              value={paragraphSpacing}
+              min={0}
+              max={256}
+              step={1}
+              onValueChange={(next) => {
+                if (next !== null && next >= 0 && next <= 256) {
+                  apply((value) => ({ ...value, paragraph_spacing: next }))
+                }
+              }}
+            >
+              <NumberFieldGroup>
+                <NumberFieldDecrement aria-label={t('inspector.decreaseParagraphSpacing')}>
+                  <Minus />
+                </NumberFieldDecrement>
+                <NumberFieldInput aria-label={t('inspector.paragraphSpacing')} />
+                <NumberFieldIncrement aria-label={t('inspector.increaseParagraphSpacing')}>
+                  <Plus />
+                </NumberFieldIncrement>
+              </NumberFieldGroup>
+            </NumberField>
+          </InspectorField>
         </div>
       </div>
     </div>
+  )
+}
+
+function setStyleRange(
+  ranges: TextStyleRange[],
+  start: number,
+  end: number,
+  property: 'color' | 'stroke_color',
+  color: [number, number, number, number],
+): TextStyleRange[] {
+  const result: TextStyleRange[] = []
+  let cursor = start
+  for (const range of ranges) {
+    if (range.end <= start || range.start >= end) {
+      result.push(range)
+      continue
+    }
+    if (range.start < start) result.push({ ...range, end: start })
+    const overlapStart = Math.max(range.start, start)
+    const overlapEnd = Math.min(range.end, end)
+    if (cursor < overlapStart) {
+      result.push({
+        start: cursor,
+        end: overlapStart,
+        color: null,
+        stroke_color: null,
+        [property]: color,
+      })
+    }
+    result.push({ ...range, start: overlapStart, end: overlapEnd, [property]: color })
+    cursor = overlapEnd
+    if (range.end > end) result.push({ ...range, start: end })
+  }
+  if (cursor < end) {
+    result.push({ start: cursor, end, color: null, stroke_color: null, [property]: color })
+  }
+  return mergeStyleRanges(result)
+}
+
+function clearStyleProperty(
+  ranges: TextStyleRange[],
+  property: 'color' | 'stroke_color',
+): TextStyleRange[] {
+  return mergeStyleRanges(
+    ranges
+      .map((range) => ({ ...range, [property]: null }))
+      .filter((range) => range.color !== null || range.stroke_color !== null),
+  )
+}
+
+function mergeStyleRanges(ranges: TextStyleRange[]): TextStyleRange[] {
+  const sorted = ranges.toSorted((left, right) => left.start - right.start)
+  const merged: TextStyleRange[] = []
+  for (const range of sorted) {
+    if (range.start >= range.end || (range.color === null && range.stroke_color === null)) continue
+    const previous = merged.at(-1)
+    if (
+      previous &&
+      previous.end === range.start &&
+      rgbaEqual(previous.color, range.color) &&
+      rgbaEqual(previous.stroke_color, range.stroke_color)
+    ) {
+      previous.end = range.end
+    } else {
+      merged.push({ ...range })
+    }
+  }
+  return merged
+}
+
+function rgbaEqual(
+  left: [number, number, number, number] | null,
+  right: [number, number, number, number] | null,
+): boolean {
+  return (
+    left === right || Boolean(left && right && left.every((value, index) => value === right[index]))
   )
 }
 
@@ -943,6 +1112,15 @@ function LayerEditor({
               wrap='soft'
               className='max-h-44 min-h-8 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
               value={layer.content.source?.text ?? ''}
+              onSelect={(event) => {
+                const field = event.currentTarget
+                useKoharuStore.getState().setTextSelection({
+                  layer: layer.id,
+                  content: 'source',
+                  start: field.selectionStart,
+                  end: field.selectionEnd,
+                })
+              }}
               onCommit={(text) =>
                 void call(commands.setSourceText, layer.id, text)
                   .then(() => refresh(projectKey, pageKey))
@@ -970,6 +1148,15 @@ function LayerEditor({
                 wrap='soft'
                 className='max-h-44 min-h-9 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md border-primary/25 bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
                 value={layer.content.translation?.text ?? ''}
+                onSelect={(event) => {
+                  const field = event.currentTarget
+                  useKoharuStore.getState().setTextSelection({
+                    layer: layer.id,
+                    content: 'translation',
+                    start: field.selectionStart,
+                    end: field.selectionEnd,
+                  })
+                }}
                 onCommit={(text) =>
                   void call(commands.setTranslation, layer.id, text.trim() ? text : null)
                     .then(() => refresh(projectKey, pageKey))

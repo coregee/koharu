@@ -359,6 +359,17 @@ impl Host for KoharuHost {
                     color: arguments.color,
                     stroke_color: arguments.stroke_color,
                     stroke_width: arguments.stroke_width,
+                    paragraph_spacing: arguments.paragraph_spacing,
+                    style_ranges: arguments
+                        .style_ranges
+                        .into_iter()
+                        .map(|range| koharu_scene::TextStyleRange {
+                            start: range.start,
+                            end: range.end,
+                            color: range.color,
+                            stroke_color: range.stroke_color,
+                        })
+                        .collect(),
                     alignment: arguments.alignment.map(Into::into),
                     writing_mode: arguments.writing_mode.map(Into::into),
                 };
@@ -613,8 +624,18 @@ struct SetTypography {
     color: Option<[u8; 4]>,
     stroke_color: Option<[u8; 4]>,
     stroke_width: Option<f32>,
+    paragraph_spacing: Option<f32>,
+    style_ranges: Vec<AgentTextStyleRange>,
     alignment: Option<AgentTextAlignment>,
     writing_mode: Option<AgentWritingMode>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct AgentTextStyleRange {
+    start: u32,
+    end: u32,
+    color: Option<[u8; 4]>,
+    stroke_color: Option<[u8; 4]>,
 }
 
 #[derive(Deserialize, JsonSchema)]

@@ -28,8 +28,8 @@ pub use components::{
     EntityOrigin, FontStyle, Generation, Geometry, Group, LanguageTag, OcrAnalysis, OcrCandidate,
     Origin, Page, PageDraft, Point, Project, RasterLayer, RasterLayerKind, Region, RegionKind,
     RegionShape, RegionShapeKind, Relation, RelationKind, SourceText, TextAlignment, TextContent,
-    TextDirection, TextGroup, TextLayout, TextLayoutKind, TextRole, Translation, Typography,
-    Visibility, WritingMode,
+    TextDirection, TextGroup, TextLayout, TextLayoutKind, TextRole, TextStyleRange, Translation,
+    Typography, Visibility, WritingMode,
 };
 pub use document::{AnalysisRegionRef, GroupRef, TextContentRef, TextLayerRef};
 pub use edit::{At, Edit, RemovePolicy};

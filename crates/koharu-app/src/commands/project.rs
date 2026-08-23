@@ -196,6 +196,8 @@ pub struct Typography {
     pub color: Option<[u8; 4]>,
     pub stroke_color: Option<[u8; 4]>,
     pub stroke_width: Option<f32>,
+    pub paragraph_spacing: Option<f32>,
+    pub style_ranges: Vec<koharu_scene::TextStyleRange>,
     pub alignment: Option<koharu_scene::TextAlignment>,
     pub writing_mode: Option<koharu_scene::WritingMode>,
 }
@@ -458,6 +460,8 @@ impl Project {
                     color: None,
                     stroke_color: None,
                     stroke_width: None,
+                    paragraph_spacing: None,
+                    style_ranges: Vec::new(),
                     alignment: None,
                     writing_mode: None,
                     extensions: Default::default(),
@@ -550,12 +554,27 @@ impl Project {
     ) -> Result<Commit> {
         let snapshot = self.snapshot();
         let content = Self::text_content(&snapshot, layer)?;
-        let language = snapshot
-            .component::<SceneTranslation>(content)?
-            .and_then(|translation| translation.language);
+        let translation = snapshot.component::<SceneTranslation>(content)?;
+        let language = translation
+            .as_ref()
+            .and_then(|value| value.language.clone());
+        let old_text = translation
+            .map(|value| value.text.value)
+            .unwrap_or_default();
+        let mut typography = snapshot.component::<SceneTypography>(layer)?;
+        if let Some(typography) = &mut typography {
+            reconcile_style_ranges(
+                &mut typography.style_ranges,
+                &old_text,
+                text.as_deref().unwrap_or_default(),
+            );
+        }
         let patch = snapshot.patch(|edit| {
             edit.promote_entity_to_user(layer)?;
             edit.promote_entity_to_user(content)?;
+            if let Some(typography) = typography {
+                edit.set(layer, &typography)?;
+            }
             match text {
                 Some(text) => edit.set(
                     content,
@@ -598,6 +617,8 @@ impl Project {
                         color: update.typography.color,
                         stroke_color: update.typography.stroke_color,
                         stroke_width: update.typography.stroke_width,
+                        paragraph_spacing: update.typography.paragraph_spacing,
+                        style_ranges: update.typography.style_ranges,
                         alignment: update.typography.alignment,
                         writing_mode: update.typography.writing_mode,
                         extensions: Default::default(),
@@ -1192,6 +1213,8 @@ impl Project {
             color: typography.color,
             stroke_color: typography.stroke_color,
             stroke_width: typography.stroke_width,
+            paragraph_spacing: typography.paragraph_spacing,
+            style_ranges: typography.style_ranges,
             alignment: typography.alignment,
             writing_mode,
         }
@@ -1415,6 +1438,56 @@ fn rasterize_stroke(
     }
 }
 
+fn reconcile_style_ranges(
+    ranges: &mut Vec<koharu_scene::TextStyleRange>,
+    old_text: &str,
+    new_text: &str,
+) {
+    if old_text == new_text || ranges.is_empty() {
+        return;
+    }
+
+    let old = old_text.chars().collect::<Vec<_>>();
+    let new = new_text.chars().collect::<Vec<_>>();
+    let common_prefix = old
+        .iter()
+        .zip(&new)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let common_suffix = old[common_prefix..]
+        .iter()
+        .rev()
+        .zip(new[common_prefix..].iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let utf16_len = |text: &[char]| {
+        text.iter()
+            .map(|value| value.len_utf16() as u32)
+            .sum::<u32>()
+    };
+    let prefix = utf16_len(&old[..common_prefix]);
+    let suffix = utf16_len(&old[old.len() - common_suffix..]);
+    let old_suffix_start = utf16_len(&old).saturating_sub(suffix);
+    let new_suffix_start = utf16_len(&new).saturating_sub(suffix);
+    let map = |position: u32, end: bool| {
+        if position <= prefix {
+            position
+        } else if position >= old_suffix_start {
+            new_suffix_start.saturating_add(position - old_suffix_start)
+        } else if end {
+            new_suffix_start
+        } else {
+            prefix
+        }
+    };
+
+    for range in ranges.iter_mut() {
+        range.start = map(range.start, false);
+        range.end = map(range.end, true);
+    }
+    ranges.retain(|range| range.start < range.end);
+}
+
 #[cfg(test)]
 mod tests {
     use koharu_scene::{Generation, OcrCandidate, ProducerId, WritingMode};
@@ -1435,6 +1508,8 @@ mod tests {
             color: None,
             stroke_color: None,
             stroke_width: None,
+            paragraph_spacing: None,
+            style_ranges: Vec::new(),
             alignment: None,
             writing_mode: Some(WritingMode::Vertical),
             extensions: Default::default(),

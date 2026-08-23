@@ -843,6 +843,14 @@ impl Traversal<'_> {
                 .unwrap_or([0, 0, 0, 255]),
             stroke: resolve_stroke(typography.as_ref()),
             line_height: 1.2,
+            paragraph_spacing: typography
+                .as_ref()
+                .and_then(|value| value.paragraph_spacing)
+                .unwrap_or(0.0),
+            style_ranges: typography
+                .as_ref()
+                .map(|value| value.style_ranges.clone())
+                .unwrap_or_default(),
             letter_spacing: 0.0,
             word_spacing: 0.0,
             text_inset: [4.0; 4],
@@ -1722,6 +1730,8 @@ mod tests {
             color: None,
             stroke_color: None,
             stroke_width: None,
+            paragraph_spacing: None,
+            style_ranges: Vec::new(),
             alignment: None,
             writing_mode: Some(koharu_scene::WritingMode::Vertical),
             extensions: BTreeMap::new(),
@@ -1758,6 +1768,8 @@ mod tests {
             color: None,
             stroke_color: None,
             stroke_width: None,
+            paragraph_spacing: None,
+            style_ranges: Vec::new(),
             alignment: None,
             writing_mode: Some(koharu_scene::WritingMode::Vertical),
             extensions: BTreeMap::new(),

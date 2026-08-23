@@ -48,7 +48,7 @@ export const commands = {
 	setTextClassification: (layer: EntityId, classification: "speech" | "narration" | "sfx" | null) => __TAURI_INVOKE<null>("set_text_classification", { layer, classification }),
 	setOcrInclusion: (layer: EntityId, included: boolean) => __TAURI_INVOKE<null>("set_ocr_inclusion", { layer, included }),
 	setTranslation: (layer: EntityId, text: string | null) => __TAURI_INVOKE<null>("set_translation", { layer, text }),
-	setTypography: (updates: TypographyUpdate[]) => __TAURI_INVOKE<null>("set_typography", { updates: updates.map(i=>({...i,typography:({...i.typography,size:i.typography.size==null?i.typography.size:i.typography.size,stroke_width:i.typography.stroke_width==null?i.typography.stroke_width:i.typography.stroke_width})})) }),
+	setTypography: (updates: TypographyUpdate[]) => __TAURI_INVOKE<null>("set_typography", { updates: updates.map(i=>({...i,typography:({...i.typography,size:i.typography.size==null?i.typography.size:i.typography.size,stroke_width:i.typography.stroke_width==null?i.typography.stroke_width:i.typography.stroke_width,paragraph_spacing:i.typography.paragraph_spacing==null?i.typography.paragraph_spacing:i.typography.paragraph_spacing})})) }),
 	setGeometry: (updates: GeometryUpdate[]) => __TAURI_INVOKE<null>("set_geometry", { updates: updates.map(i=>({...i,points:i.points==null?i.points:i.points.map(i=>i)})) }),
 	setRegionGeometry: (region: EntityId, frame: Frame) => __TAURI_INVOKE<null>("set_region_geometry", { region, frame }),
 	setRegionShape: (region: EntityId, shape: RegionShapeKind) => __TAURI_INVOKE<null>("set_region_shape", { region, shape }),
@@ -500,6 +500,15 @@ export type TextContent = {
 
 export type TextLayoutKind = "point" | "paragraph";
 
+export type TextStyleRange = {
+	/**  Start of the styled range in UTF-16 code units, matching browser text selections. */
+	start: number,
+	/**  End of the styled range in UTF-16 code units, exclusive. */
+	end: number,
+	color: [number, number, number, number] | null,
+	stroke_color: [number, number, number, number] | null,
+};
+
 export type ThumbnailBytes = number[];
 
 export type TransformFrame = {
@@ -535,6 +544,8 @@ export type Typography = {
 	color: [number, number, number, number] | null,
 	stroke_color: [number, number, number, number] | null,
 	stroke_width: number | null,
+	paragraph_spacing: number | null,
+	style_ranges: TextStyleRange[],
 	alignment: TextAlignment | null,
 	writing_mode: WritingMode | null,
 };

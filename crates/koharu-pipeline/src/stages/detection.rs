@@ -444,6 +444,8 @@ fn write_region<'a>(
                 .and_then(|value| value.stroke_color)
                 .map(|color| [color[0], color[1], color[2], u8::MAX]),
             stroke_width: inferred.and_then(|value| value.stroke_width),
+            paragraph_spacing: None,
+            style_ranges: Vec::new(),
             alignment: None,
             writing_mode: inferred.map(|value| value.writing_mode),
             extensions: Default::default(),
