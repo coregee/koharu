@@ -3,11 +3,12 @@ use koharu_desktop::{CanvasState, Desktop, Frame};
 use koharu_scene::{EntityId, RegionShapeKind};
 use serde::Deserialize;
 use specta::Type;
-use tauri::State;
+use tauri::{Cef, State, WebviewWindow};
 
 use super::{
     ChannelExt as _, Error,
     canvas::{CanvasChannel, Point},
+    import,
     project::{CurrentProject, Page, Project, TextClassification, Typography},
 };
 async fn synchronize_canvas(
@@ -371,6 +372,78 @@ pub(crate) async fn set_visibility(
     let canvas = synchronize_canvas(&desktop, &commit, page).await?;
     canvas_channel.channel.publish(canvas);
     Ok(())
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "layer_lock_edited",
+    skip_all,
+    fields(origin = "user", entity_count = layers.len()),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_layer_locked(
+    layers: Vec<EntityId>,
+    locked: bool,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<Page, Error> {
+    let (commit, page, view) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.set_layer_locked(layers, locked).await?;
+        project.record_commit(&commit);
+        let page = project.active_page().context("no active page")?;
+        let view = Project::page(&commit.snapshot, page)?;
+        (commit, page, view)
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, Some(page)).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(view)
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "image_layer_added",
+    skip_all,
+    fields(origin = "user")
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn add_image_layer(
+    page: EntityId,
+    window: WebviewWindow<Cef>,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<Option<Page>, Error> {
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
+        .set_parent(&window)
+        .pick_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    let path = file.path().to_owned();
+    let imported = tokio::task::spawn_blocking(move || import::import(vec![path]))
+        .await
+        .context("image layer import worker stopped unexpectedly")??
+        .into_iter()
+        .next()
+        .context("the selected image did not contain a page")?;
+    let (commit, view) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let (commit, _) = project.add_image_layer(page, imported).await?;
+        project.record_commit(&commit);
+        let view = Project::page(&commit.snapshot, page)?;
+        (commit, view)
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, Some(page)).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(Some(view))
 }
 
 #[tracing::instrument(

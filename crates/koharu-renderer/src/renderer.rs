@@ -12,8 +12,8 @@ use koharu_scene::{
     Asset, AssetRole, BlobId, Change, Component, ComponentOwner, EntityChange, EntityId, FitsTo,
     FlowsIn, Geometry, Group, OcrAnalysis, Origin, Page, Presents, RasterLayer, RasterLayerKind,
     RecognizedFrom, Region, RelationChange, RelationId, RelationSpec, Revision, Snapshot,
-    TextAlignment, TextDirection, TextLayout as SceneTextLayout, TextLayoutKind, Translation,
-    Typography, Visibility,
+    TextAlignment, TextDirection, TextGroupKind, TextLayout as SceneTextLayout, TextLayoutKind,
+    Translation, Typography, Visibility,
 };
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -953,7 +953,7 @@ struct FlowSeed {
 
 fn resolve_balloon_flows(snapshot: &Snapshot, page: EntityId) -> Result<BalloonFlowPlan> {
     let mut groups = BTreeMap::<EntityId, Vec<FlowSeed>>::new();
-    if let Some(group) = snapshot.page(page)?.text_group()? {
+    if let Some(group) = snapshot.page(page)?.text_group(TextGroupKind::Main)? {
         for layer in group.text_layers()? {
             let entity = layer.id();
             if snapshot.component::<Geometry>(entity)?.is_some() {

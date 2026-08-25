@@ -220,12 +220,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "画像レイヤーを追加",
+    "lockLabel": "{{name}} をロック",
+    "reorder": "{{name}} を並べ替え",
+    "unlockLabel": "{{name}} のロックを解除",
     "delete": "{{name}}を削除",
     "edit": "{{name}}を編集",
     "empty": "このページにはレイヤーがありません。",
     "hide": "{{name}}を隠す",
     "includeForOcr": "OCRに含める",
     "imageName": "画像 {{index}}",
+    "mainText": "メインテキスト",
+    "sfxText": "効果音テキスト",
     "kinds": {
       "cleanup": "クリーンアップ",
       "dialogue": "台詞",
@@ -235,7 +241,8 @@
       "paint": "ペイント",
       "censor": "検閲マスク",
       "text": "テキスト",
-      "textGroup": "テキストグループ"
+      "mainTextGroup": "メインテキストグループ",
+      "sfxTextGroup": "効果音テキストグループ"
     },
     "locked": "ロック中",
     "lockedLabel": "{{name}}はロックされています",

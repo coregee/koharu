@@ -220,12 +220,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "Добавить слой изображения",
+    "lockLabel": "Заблокировать {{name}}",
+    "reorder": "Изменить порядок {{name}}",
+    "unlockLabel": "Разблокировать {{name}}",
     "delete": "Удалить {{name}}",
     "edit": "Изменить {{name}}",
     "empty": "На этой странице нет слоёв.",
     "hide": "Скрыть {{name}}",
     "includeForOcr": "Включить в OCR",
     "imageName": "Изображение {{index}}",
+    "mainText": "Основной текст",
+    "sfxText": "Текст звуковых эффектов",
     "kinds": {
       "cleanup": "Очистка",
       "dialogue": "Диалог",
@@ -235,7 +241,8 @@
       "paint": "Рисование",
       "censor": "Маска цензуры",
       "text": "Текст",
-      "textGroup": "Группа текста"
+      "mainTextGroup": "Группа основного текста",
+      "sfxTextGroup": "Группа текста звуковых эффектов"
     },
     "locked": "Заблокировано",
     "lockedLabel": "{{name}} заблокирован",

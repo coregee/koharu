@@ -7,7 +7,7 @@ import type {
   TransformFrame,
 } from '@koharu/bridge/protocol'
 
-import { effectiveLayerVisibility, isTextLayer } from './document'
+import { effectiveLayerLocked, effectiveLayerVisibility, isTextLayer } from './document'
 
 const minimumFrameSize = 1e-6
 
@@ -138,7 +138,13 @@ export function hitTestLayers(
   for (let index = layers.length - 1; index >= 0; index -= 1) {
     const layer = layers[index]
     const visibility = effectiveLayerVisibility(layers, layer)
-    if (!selectableLayer(layer) || !visibility.visible || visibility.opacity <= 0) continue
+    if (
+      !selectableLayer(layer) ||
+      effectiveLayerLocked(layers, layer) ||
+      !visibility.visible ||
+      visibility.opacity <= 0
+    )
+      continue
     const frame = controlFrame(layer, frames)
     if (frame && frameContains(frame, point)) return layer
   }
@@ -217,7 +223,7 @@ export function resizeFrame(
   }
 }
 
-export function rotateFrame(frame: Frame, start: Point, point: Point): Frame {
+export function rotateFrame(frame: Frame, start: Point, point: Point, snapDegrees?: number): Frame {
   const center = { x: frame.x + frame.width * 0.5, y: frame.y + frame.height * 0.5 }
   const from = { x: start.x - center.x, y: start.y - center.y }
   const to = { x: point.x - center.x, y: point.y - center.y }
@@ -228,7 +234,13 @@ export function rotateFrame(frame: Frame, start: Point, point: Point): Frame {
     return frame
   }
   const delta = (Math.atan2(from.x * to.y - from.y * to.x, dot(from, to)) * 180) / Math.PI
-  return { ...frame, angle_degrees: normalizeDegrees(frame.angle_degrees + delta) }
+  const angle = normalizeDegrees(frame.angle_degrees + delta)
+  return {
+    ...frame,
+    angle_degrees: snapDegrees
+      ? normalizeDegrees(Math.round(angle / snapDegrees) * snapDegrees)
+      : angle,
+  }
 }
 
 export function translateFrames(originals: TransformFrame[], delta: Point): TransformFrame[] {

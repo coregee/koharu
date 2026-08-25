@@ -10,7 +10,12 @@ import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
 import { useCanvas } from '@/components/editor/useCanvas'
 import { call } from '@/lib/backend'
-import { effectiveLayerVisibility, expandLayerSelection, isTextLayer } from '@/lib/document'
+import {
+  effectiveLayerLocked,
+  effectiveLayerVisibility,
+  expandLayerSelection,
+  isTextLayer,
+} from '@/lib/document'
 import {
   controlFrame,
   draftFrame,
@@ -136,7 +141,9 @@ export function CanvasWorkspace() {
     selected.length === 1
       ? page?.layers.find(
           (layer): layer is Extract<Page['layers'][number], { type: 'raster' }> =>
-            layer.id === selected[0] && layer.type === 'raster',
+            layer.id === selected[0] &&
+            layer.type === 'raster' &&
+            !effectiveLayerLocked(page.layers, layer),
         )
       : undefined
   const activePaintRaster =
@@ -398,7 +405,11 @@ export function CanvasWorkspace() {
       }
       if (command && event.key.toLowerCase() === 'a' && page) {
         event.preventDefault()
-        selectLayers(page.layers.filter(selectableLayer).map((layer) => layer.id))
+        selectLayers(
+          page.layers
+            .filter((layer) => selectableLayer(layer) && !effectiveLayerLocked(page.layers, layer))
+            .map((layer) => layer.id),
+        )
         return
       }
       if (
@@ -406,7 +417,13 @@ export function CanvasWorkspace() {
         state.selectedLayers.length > 0
       ) {
         event.preventDefault()
-        void call(commands.deleteLayers, state.selectedLayers)
+        if (!page) return
+        const deletable = state.selectedLayers.filter((id) => {
+          const layer = page.layers.find((candidate) => candidate.id === id)
+          return layer && !effectiveLayerLocked(page.layers, layer)
+        })
+        if (!deletable.length) return
+        void call(commands.deleteLayers, deletable)
           .then(() => refresh(projectKey, pagesKey, pageKey))
           .catch(() => undefined)
         return
@@ -460,7 +477,10 @@ export function CanvasWorkspace() {
   const framesFor = (layers: string[]): TransformFrame[] =>
     expandLayerSelection(page?.layers ?? [], layers).flatMap((id) => {
       const layer = page?.layers.find((candidate) => candidate.id === id)
-      const frame = layer && selectableLayer(layer) ? controlFrame(layer, layerFrames) : null
+      const frame =
+        layer && page && selectableLayer(layer) && !effectiveLayerLocked(page.layers, layer)
+          ? controlFrame(layer, layerFrames)
+          : null
       return frame ? [{ element: id, frame }] : []
     })
 
@@ -976,6 +996,7 @@ function hitTestSourceRegion(page: Page, point: Point) {
   for (let index = page.layers.length - 1; index >= 0; index -= 1) {
     const layer = page.layers[index]!
     if (!isTextLayer(layer) || !layer.content.source_region) continue
+    if (effectiveLayerLocked(page.layers, layer)) continue
     const visibility = effectiveLayerVisibility(page.layers, layer)
     if (!visibility.visible || visibility.opacity <= 0) continue
     const region = page.regions.find((candidate) => candidate.id === layer.content.source_region)

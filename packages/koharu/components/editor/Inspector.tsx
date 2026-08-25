@@ -12,6 +12,7 @@ import {
   Eye,
   EyeOff,
   Folder,
+  GripVertical,
   Image as ImageIcon,
   Layers3,
   Languages,
@@ -21,8 +22,9 @@ import {
   ScanText,
   Trash2,
   Type,
+  Unlock,
 } from 'lucide-react'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ColorWell } from '@/components/controls/ColorWell'
@@ -31,12 +33,20 @@ import { FontPicker } from '@/components/controls/FontPicker'
 import { call } from '@/lib/backend'
 import {
   expandLayerSelection,
+  effectiveLayerLocked,
   isGroupLayer,
-  isLockedLayer,
   isTextLayer,
   layerChildren,
 } from '@/lib/document'
-import { pageKey, projectKey, queryClient, refresh, useFonts, usePage } from '@/lib/queries'
+import {
+  pageKey,
+  pagesKey,
+  projectKey,
+  queryClient,
+  refresh,
+  useFonts,
+  usePage,
+} from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import { previewCanvasOpacity } from '@koharu/bridge/canvas'
 import {
@@ -656,7 +666,7 @@ function displayedLayers(layers: Layer[], page: EntityId) {
     rows.push({ layer, index: indexes.get(layer.id) ?? 0, depth })
     if (!isGroupLayer(layer)) return
     const children = layerChildren(layers, layer.id)
-    const ordered = layer.role === 'text' ? children : [...children].reverse()
+    const ordered = layer.role !== null ? children : [...children].reverse()
     for (const child of ordered) append(child, depth + 1)
   }
   const roots = layers.filter((layer) => (layer.parent ?? page) === page).reverse()
@@ -673,6 +683,12 @@ function LayersInspector() {
     selected.length === 1 ? (selected[0] ?? null) : null,
   )
   const [movingLayer, setMovingLayer] = useState<EntityId | null>(null)
+  const [draggedLayer, setDraggedLayer] = useState<EntityId | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    layer: EntityId
+    edge: 'before' | 'after'
+  } | null>(null)
+  const [addingImage, setAddingImage] = useState(false)
 
   useEffect(() => {
     setExpandedLayer(selected.length === 1 ? (selected[0] ?? null) : null)
@@ -682,25 +698,32 @@ function LayersInspector() {
 
   if (!page) return <EmptyInspector>{t('inspector.selectPage')}</EmptyInspector>
 
-  const move = (layer: Layer, displayDelta: number) => {
-    if (movingLayer !== null || isLockedLayer(layer)) return
+  const shownSiblings = (layer: Layer) => {
     const parent = layer.parent ?? page.id
     const storedSiblings = page.layers.filter(
-      (candidate) => !isLockedLayer(candidate) && (candidate.parent ?? page.id) === parent,
+      (candidate) => candidate.type !== 'artwork' && (candidate.parent ?? page.id) === parent,
     )
     const parentLayer = page.layers.find((candidate) => candidate.id === parent)
-    const shownSiblings =
-      parentLayer && isGroupLayer(parentLayer) && parentLayer.role === 'text'
-        ? storedSiblings
-        : [...storedSiblings].reverse()
-    const shownSource = shownSiblings.findIndex((candidate) => candidate.id === layer.id)
-    const shownTarget = shownSource + displayDelta
-    const targetLayer = shownSiblings[shownTarget]
-    if (shownSource < 0 || !targetLayer) return
-    const target = storedSiblings.findIndex((candidate) => candidate.id === targetLayer.id)
+    return {
+      parent,
+      stored: storedSiblings,
+      shown:
+        parentLayer && isGroupLayer(parentLayer) && parentLayer.role !== null
+          ? storedSiblings
+          : [...storedSiblings].reverse(),
+      canonical: Boolean(parentLayer && isGroupLayer(parentLayer) && parentLayer.role !== null),
+    }
+  }
+
+  const commitShownOrder = (layer: Layer, shown: Layer[]) => {
+    if (movingLayer !== null || effectiveLayerLocked(page.layers, layer)) return
+    const siblings = shownSiblings(layer)
+    const stored = siblings.canonical ? shown : [...shown].reverse()
+    const target = stored.findIndex((candidate) => candidate.id === layer.id)
+    if (target < 0 || siblings.stored[target]?.id === layer.id) return
 
     setMovingLayer(layer.id)
-    void call(commands.moveLayer, layer.id, parent, target).then(
+    void call(commands.moveLayer, layer.id, siblings.parent, target).then(
       (next) => {
         queryClient.setQueryData(pageKey, next)
         setMovingLayer(null)
@@ -708,6 +731,40 @@ function LayersInspector() {
       },
       () => setMovingLayer(null),
     )
+  }
+
+  const move = (layer: Layer, displayDelta: number) => {
+    const { shown } = shownSiblings(layer)
+    const shownSource = shown.findIndex((candidate) => candidate.id === layer.id)
+    const shownTarget = shownSource + displayDelta
+    if (shownSource < 0 || shownTarget < 0 || shownTarget >= shown.length) return
+    const next = [...shown]
+    const [moving] = next.splice(shownSource, 1)
+    if (!moving) return
+    next.splice(shownTarget, 0, moving)
+    commitShownOrder(layer, next)
+  }
+
+  const drop = (target: Layer, edge: 'before' | 'after') => {
+    const moving = page.layers.find((layer) => layer.id === draggedLayer)
+    if (
+      !moving ||
+      moving.id === target.id ||
+      (moving.parent ?? page.id) !== (target.parent ?? page.id) ||
+      effectiveLayerLocked(page.layers, moving)
+    )
+      return
+    const { shown } = shownSiblings(moving)
+    const next = shown.filter((candidate) => candidate.id !== moving.id)
+    const targetIndex = next.findIndex((candidate) => candidate.id === target.id)
+    if (targetIndex < 0) return
+    next.splice(targetIndex + (edge === 'after' ? 1 : 0), 0, moving)
+    commitShownOrder(moving, next)
+  }
+
+  const clearDrag = () => {
+    setDraggedLayer(null)
+    setDropTarget(null)
   }
 
   const deleteLayer = (layer: EntityId) =>
@@ -730,6 +787,19 @@ function LayersInspector() {
     setExpandedLayer(layer)
   }
 
+  const addImageLayer = () => {
+    if (addingImage) return
+    setAddingImage(true)
+    void call(commands.addImageLayer, page.id).then(
+      (next) => {
+        if (next) queryClient.setQueryData(pageKey, next)
+        setAddingImage(false)
+        if (next) void refresh(projectKey, pagesKey)
+      },
+      () => setAddingImage(false),
+    )
+  }
+
   return (
     <div className='flex min-h-0 flex-1 flex-col'>
       <header className='flex h-8 shrink-0 items-center gap-1.5 border-b border-border/80 px-2'>
@@ -743,18 +813,17 @@ function LayersInspector() {
       <ScrollArea className='min-h-0 flex-1'>
         <div className='py-0.5'>
           {layers.map(({ layer, index, depth }) => {
-            const locked = isLockedLayer(layer)
-            const storedSiblings = page.layers.filter(
-              (candidate) =>
-                !isLockedLayer(candidate) &&
-                (candidate.parent ?? page.id) === (layer.parent ?? page.id),
-            )
-            const parentLayer = page.layers.find((candidate) => candidate.id === layer.parent)
-            const siblings =
-              parentLayer && isGroupLayer(parentLayer) && parentLayer.role === 'text'
-                ? storedSiblings
-                : [...storedSiblings].reverse()
+            const locked = effectiveLayerLocked(page.layers, layer)
+            const siblings = shownSiblings(layer).shown
             const position = siblings.findIndex((candidate) => candidate.id === layer.id)
+            const canAcceptDrop = draggedLayer
+              ? page.layers.some(
+                  (candidate) =>
+                    candidate.id === draggedLayer &&
+                    candidate.id !== layer.id &&
+                    (candidate.parent ?? page.id) === (layer.parent ?? page.id),
+                )
+              : false
             return (
               <LayerRow
                 key={`${layer.type}:${layer.id}`}
@@ -767,25 +836,73 @@ function LayersInspector() {
                 index={index}
                 depth={depth}
                 selected={selected.includes(layer.id)}
-                expanded={!locked && expandedLayer === layer.id}
+                expanded={expandedLayer === layer.id}
                 locked={locked}
+                lockable={layer.type !== 'artwork' && (!locked || layer.locked)}
                 onSelect={() => selectLayer(layer.id)}
                 onToggle={() =>
                   void call(commands.setVisibility, [layer.id], !layer.visibility.visible, null)
                     .then(() => refresh(projectKey, pageKey))
                     .catch(() => undefined)
                 }
+                onLockToggle={() =>
+                  void call(commands.setLayerLocked, [layer.id], !layer.locked).then(
+                    (next) => {
+                      queryClient.setQueryData(pageKey, next)
+                      void refresh(projectKey)
+                    },
+                    () => undefined,
+                  )
+                }
                 onMove={(delta) => move(layer, delta)}
                 canMoveUp={!locked && position > 0}
                 canMoveDown={!locked && position >= 0 && position < siblings.length - 1}
                 reordering={movingLayer !== null}
-                onDelete={isGroupLayer(layer) ? undefined : () => deleteLayer(layer.id)}
+                dragging={draggedLayer === layer.id}
+                dropEdge={dropTarget?.layer === layer.id ? dropTarget.edge : null}
+                onDragStart={(event) => {
+                  if (locked || movingLayer !== null) return
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', layer.id)
+                  setDraggedLayer(layer.id)
+                }}
+                onDragOver={(event) => {
+                  if (!canAcceptDrop) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  const bounds = event.currentTarget.getBoundingClientRect()
+                  setDropTarget({
+                    layer: layer.id,
+                    edge: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after',
+                  })
+                }}
+                onDrop={(event) => {
+                  if (!canAcceptDrop || !dropTarget || dropTarget.layer !== layer.id) return
+                  event.preventDefault()
+                  drop(layer, dropTarget.edge)
+                  clearDrag()
+                }}
+                onDragEnd={clearDrag}
+                onDelete={!locked && !isGroupLayer(layer) ? () => deleteLayer(layer.id) : undefined}
               />
             )
           })}
           {layers.length === 0 && <EmptyInspector>{t('layers.empty')}</EmptyInspector>}
         </div>
       </ScrollArea>
+      <div className='shrink-0 border-t border-border/80 p-1.5'>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7 w-full justify-start gap-1.5 text-[10px]'
+          disabled={addingImage}
+          onClick={addImageLayer}
+        >
+          <Plus className='size-3.5' />
+          {t('layers.addImageLayer')}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -798,12 +915,20 @@ function LayerRow({
   selected,
   expanded,
   locked,
+  lockable,
   onSelect,
   onToggle,
+  onLockToggle,
   onMove,
   canMoveUp,
   canMoveDown,
   reordering,
+  dragging,
+  dropEdge,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onDelete,
 }: {
   layer: Layer
@@ -813,12 +938,20 @@ function LayerRow({
   selected: boolean
   expanded: boolean
   locked: boolean
+  lockable: boolean
   onSelect: () => void
   onToggle: () => void
+  onLockToggle: () => void
   onMove: (delta: number) => void
   canMoveUp: boolean
   canMoveDown: boolean
   reordering: boolean
+  dragging: boolean
+  dropEdge: 'before' | 'after' | null
+  onDragStart: (event: DragEvent<HTMLElement>) => void
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void
+  onDrop: (event: DragEvent<HTMLDivElement>) => void
+  onDragEnd: () => void
   onDelete?: () => void
 }) {
   const { t } = useTranslation()
@@ -826,7 +959,18 @@ function LayerRow({
   const detail = localizedLayerKind(layer, t)
   const Icon = layerIcon(layer)
   return (
-    <div className='group min-w-0 px-1 py-px' style={{ paddingLeft: `${depth * 10 + 4}px` }}>
+    <div
+      data-layer-row={layer.id}
+      className={`group relative min-w-0 px-1 py-px ${dragging ? 'opacity-45' : ''}`}
+      style={{ paddingLeft: `${depth * 10 + 4}px` }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      {dropEdge && (
+        <span
+          className={`pointer-events-none absolute right-1 left-1 z-20 h-0.5 rounded-full bg-primary ${dropEdge === 'before' ? 'top-0' : 'bottom-0'}`}
+        />
+      )}
       <div
         data-selected={selected}
         data-expanded={expanded}
@@ -835,9 +979,19 @@ function LayerRow({
         <div className='relative flex min-w-0 items-center gap-0.5'>
           <button
             type='button'
+            draggable={!locked && !reordering}
+            aria-label={t('layers.reorder', { name })}
+            disabled={locked || reordering}
+            className='grid size-5 shrink-0 cursor-grab place-items-center rounded text-muted-foreground/55 hover:bg-foreground/[0.05] hover:text-muted-foreground active:cursor-grabbing disabled:cursor-default disabled:opacity-25'
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          >
+            <GripVertical className='size-3' />
+          </button>
+          <button
+            type='button'
             aria-label={t('layers.edit', { name })}
-            aria-expanded={locked ? undefined : expanded}
-            disabled={locked}
+            aria-expanded={expanded}
             className='flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/25'
             onClick={onSelect}
           >
@@ -878,28 +1032,14 @@ function LayerRow({
               {Math.round(layer.visibility.opacity * 100)}%
             </span>
           )}
-          {locked ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    role='img'
-                    className='grid size-6 shrink-0 place-items-center text-muted-foreground'
-                    aria-label={t('layers.lockedLabel', { name })}
-                  />
-                }
-              >
-                <Lock className='size-3.5' />
-              </TooltipTrigger>
-              <TooltipContent side='left'>{t('layers.locked')}</TooltipContent>
-            </Tooltip>
-          ) : (
+          <div className='flex w-6 shrink-0 flex-col items-center'>
             <button
               type='button'
               aria-label={
                 layer.visibility.visible ? t('layers.hide', { name }) : t('layers.show', { name })
               }
-              className='grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25'
+              disabled={layer.type === 'artwork'}
+              className='grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-40'
               onClick={onToggle}
             >
               {layer.visibility.visible ? (
@@ -908,7 +1048,18 @@ function LayerRow({
                 <EyeOff className='size-3.5' />
               )}
             </button>
-          )}
+            <button
+              type='button'
+              aria-label={
+                layer.locked ? t('layers.unlockLabel', { name }) : t('layers.lockLabel', { name })
+              }
+              disabled={!lockable}
+              className='grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-40'
+              onClick={onLockToggle}
+            >
+              {locked ? <Lock className='size-3.5' /> : <Unlock className='size-3.5' />}
+            </button>
+          </div>
         </div>
         {expanded && (
           <div className='animate-in duration-150 fade-in slide-in-from-top-1 motion-reduce:animate-none'>
@@ -1311,7 +1462,12 @@ function layerIcon(layer: Layer): typeof Type {
 }
 
 function localizedLayerName(layer: Layer, index: number, t: TFunction): string {
-  if (layer.type === 'group' || layer.type === 'raster') return layer.name
+  if (layer.type === 'group') {
+    if (layer.role === 'main_text') return t('layers.mainText')
+    if (layer.role === 'sfx_text') return t('layers.sfxText')
+    return layer.name
+  }
+  if (layer.type === 'raster') return layer.name
   if (layer.type === 'text') {
     const text = layer.content.translation?.text || layer.content.source?.text
     return text?.trim() || t('layers.textName', { index: index + 1 })
@@ -1322,7 +1478,9 @@ function localizedLayerName(layer: Layer, index: number, t: TFunction): string {
 
 function localizedLayerKind(layer: Layer, t: TFunction): string {
   if (layer.type === 'group') {
-    return t(layer.role === 'text' ? 'layers.kinds.textGroup' : 'layers.kinds.group')
+    if (layer.role === 'main_text') return t('layers.kinds.mainTextGroup')
+    if (layer.role === 'sfx_text') return t('layers.kinds.sfxTextGroup')
+    return t('layers.kinds.group')
   }
   if (layer.type === 'raster') {
     return t(`layers.kinds.${layer.kind}`, { defaultValue: layer.kind })

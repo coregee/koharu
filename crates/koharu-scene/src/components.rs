@@ -19,12 +19,12 @@ pub use analysis::{
 };
 pub(crate) use assets::Assets;
 pub use assets::{Asset, AssetInput, AssetMetadata, AssetRole};
-pub use groups::{Group, TextGroup};
+pub use groups::{Group, TextGroup, TextGroupKind};
 pub use layers::{
     FontStyle, RasterLayer, RasterLayerKind, TextAlignment, TextLayout, TextLayoutKind,
     TextStyleRange, Typography, WritingMode,
 };
 pub use provenance::{Authored, Generation, Origin};
-pub use spatial::{Geometry, Point, Visibility};
+pub use spatial::{Geometry, LayerLock, Point, Visibility};
 pub use structure::{EntityOrigin, Page, PageDraft, Project, Relation, RelationKind};
 pub use text::{LanguageTag, OcrCandidate, SourceText, TextContent, TextRole, Translation};

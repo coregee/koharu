@@ -220,12 +220,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "添加图像图层",
+    "lockLabel": "锁定 {{name}}",
+    "reorder": "重新排序 {{name}}",
+    "unlockLabel": "解锁 {{name}}",
     "delete": "删除 {{name}}",
     "edit": "编辑 {{name}}",
     "empty": "此页面上没有图层。",
     "hide": "隐藏 {{name}}",
     "includeForOcr": "纳入 OCR",
     "imageName": "图像 {{index}}",
+    "mainText": "主文本",
+    "sfxText": "音效文本",
     "kinds": {
       "cleanup": "清理",
       "dialogue": "对话",
@@ -235,7 +241,8 @@
       "paint": "绘制",
       "censor": "审查遮罩",
       "text": "文本",
-      "textGroup": "文本组"
+      "mainTextGroup": "主文本组",
+      "sfxTextGroup": "音效文本组"
     },
     "locked": "已锁定",
     "lockedLabel": "{{name}} 已锁定",

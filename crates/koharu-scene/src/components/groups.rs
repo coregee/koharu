@@ -38,10 +38,20 @@ impl Component for Group {
     }
 }
 
-/// Identifies the page-owned group whose child order is the canonical text order.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Type)]
-pub struct TextGroup {}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TextGroupKind {
+    Main,
+    Sfx,
+}
+
+/// Identifies a page-owned text group and the ordering responsibility it owns.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
+pub struct TextGroup {
+    pub kind: TextGroupKind,
+}
 
 impl Component for TextGroup {
     const KIND: &'static str = "dev.koharu.text.group";

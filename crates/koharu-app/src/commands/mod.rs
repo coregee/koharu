@@ -87,6 +87,8 @@ pub fn bindings() -> tauri_specta::Builder<tauri::Cef> {
             editing::set_region_geometry,
             editing::set_region_shape,
             editing::set_visibility,
+            editing::set_layer_locked,
+            editing::add_image_layer,
             editing::delete_layers,
             editing::move_layer,
             editing::undo,

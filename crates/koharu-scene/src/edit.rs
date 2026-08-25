@@ -4,8 +4,9 @@ use smallvec::SmallVec;
 
 use crate::{
     Asset, AssetInput, AssetRole, BlobId, ComponentOwner, EntityId, EntityOrigin, Error,
-    Generation, Group, OcrCandidate, Origin, Page, PageDraft, Patch, Relation, RelationId,
-    RelationKind, RelationSpec, Result, Snapshot, SourceText, TextGroup, Translation, Visibility,
+    Generation, Group, OcrCandidate, Origin, Page, PageDraft, Patch, Presents, Relation,
+    RelationId, RelationKind, RelationSpec, Result, Snapshot, SourceText, TextContent, TextGroup,
+    TextGroupKind, TextRole, Translation, Visibility,
     component::{Component, ComponentKey, ComponentRecord, ValidationContext, decode, encode, key},
     components::Assets,
     patch::{Observation, Operation},
@@ -322,10 +323,10 @@ impl Edit {
         }
         if matches!(
             T::KIND,
-            Relation::KIND | Page::KIND | EntityOrigin::KIND | TextGroup::KIND
+            Relation::KIND | Page::KIND | EntityOrigin::KIND | TextGroup::KIND | TextRole::KIND
         ) {
             return Err(Error::invalid(
-                "structural components use dedicated scene methods",
+                "structural and text-role components use dedicated scene methods",
             ));
         }
         let value = self.prepare_value(ComponentOwner::Entity(entity), value)?;
@@ -361,10 +362,10 @@ impl Edit {
     pub fn remove<T: Component>(&mut self, entity: EntityId) -> Result<()> {
         if matches!(
             T::KIND,
-            Relation::KIND | Page::KIND | EntityOrigin::KIND | TextGroup::KIND
+            Relation::KIND | Page::KIND | EntityOrigin::KIND | TextGroup::KIND | TextRole::KIND
         ) {
             return Err(Error::invalid(
-                "required structural component cannot be removed",
+                "required structural and text-role components use dedicated scene methods",
             ));
         }
         self.validate_removal_authorship::<T>(ComponentOwner::Entity(entity))?;
@@ -468,6 +469,7 @@ impl Edit {
             &ValidationContext::new(&record_exists, &blob_exists),
         )?;
         self.state.insert_relation(id, value.clone())?;
+        self.validate_entities.extend([source, target]);
         self.operations.push(Operation::InsertRelation {
             id,
             value,
@@ -495,6 +497,7 @@ impl Edit {
         let components = store_components(&relation.components);
         let value = relation.value.clone();
         self.state.remove_relation(id)?;
+        self.validate_entities.extend([value.source, value.target]);
         self.operations.push(Operation::RemoveRelation {
             id,
             value,
@@ -616,6 +619,7 @@ impl Edit {
     }
 
     fn remove_leaf(&mut self, entity: EntityId) -> Result<()> {
+        self.validate_entities.remove(&entity);
         let page = self.state.page_for(entity)?;
         let (parent, position) = self.state.parent_and_position(entity)?;
         if entity == page {
@@ -726,7 +730,58 @@ impl Edit {
         Ok((key::<T>()?, self.encode_value(value)?))
     }
 
-    pub(crate) fn ensure_text_group(&mut self, page: EntityId) -> Result<EntityId> {
+    pub fn set_text_role(&mut self, content: EntityId, role: Option<&TextRole>) -> Result<()> {
+        if self.decode_component::<TextContent>(content)?.is_none() {
+            return Err(Error::invalid(format!(
+                "entity {content} is not text content"
+            )));
+        }
+        let owner = ComponentOwner::Entity(content);
+        let marker = key::<TextRole>()?;
+        match role {
+            Some(role) => {
+                let role = self.prepare_value(owner, role)?;
+                self.replace_component(owner, marker, Some(self.encode_value(&role)?))?;
+            }
+            None => {
+                self.validate_removal_authorship::<TextRole>(owner)?;
+                self.replace_component(owner, marker, None)?;
+            }
+        }
+        self.validate_entities.insert(content);
+
+        let kind = text_group_kind(role);
+        let presentations = self
+            .state
+            .incoming
+            .get(&content)
+            .into_iter()
+            .flat_map(|relations| relations.iter())
+            .filter_map(|id| self.state.relations.get(id))
+            .filter(|relation| relation.value.kind.as_str() == Presents::KIND)
+            .map(|relation| relation.value.source)
+            .collect::<Vec<_>>();
+        for layer in presentations {
+            let page = self.state.page_for(layer)?;
+            let (main, sfx) = self.ensure_text_groups(page)?;
+            let group = match kind {
+                TextGroupKind::Main => main,
+                TextGroupKind::Sfx => sfx,
+            };
+            if self.state.parent_and_position(layer)?.0 != Some(group) {
+                self.move_entity(layer, Some(group), At::End)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn ensure_text_groups(&mut self, page: EntityId) -> Result<(EntityId, EntityId)> {
+        let main = self.ensure_text_group(page, TextGroupKind::Main)?;
+        let sfx = self.ensure_text_group(page, TextGroupKind::Sfx)?;
+        Ok((main, sfx))
+    }
+
+    fn ensure_text_group(&mut self, page: EntityId, kind: TextGroupKind) -> Result<EntityId> {
         self.state.page(page)?;
         let marker = key::<TextGroup>()?;
         let children = self
@@ -739,7 +794,10 @@ impl Edit {
             .collect::<Vec<_>>();
         let mut groups = Vec::new();
         for child in children {
-            if self.state.component(child, &marker)?.is_some() {
+            if self
+                .decode_component::<TextGroup>(child)?
+                .is_some_and(|group| group.kind == kind)
+            {
                 groups.push(child);
             }
         }
@@ -751,7 +809,11 @@ impl Edit {
                 return Ok(*group);
             }
             [] => {}
-            _ => return Err(Error::invalid("page contains multiple text groups")),
+            _ => {
+                return Err(Error::invalid(format!(
+                    "page contains multiple {kind:?} text groups"
+                )));
+            }
         }
 
         let group = self.add_entity(page, At::End)?;
@@ -759,7 +821,11 @@ impl Edit {
             group,
             &Group {
                 origin: self.lifecycle_origin(),
-                name: "Text".to_owned(),
+                name: match kind {
+                    TextGroupKind::Main => "Main Text",
+                    TextGroupKind::Sfx => "SFX Text",
+                }
+                .to_owned(),
             },
         )?;
         self.set(
@@ -773,10 +839,20 @@ impl Edit {
         self.replace_component(
             ComponentOwner::Entity(group),
             marker,
-            Some(self.encode_value(&TextGroup {})?),
+            Some(self.encode_value(&TextGroup { kind })?),
         )?;
         self.validate_entities.insert(group);
         Ok(group)
+    }
+
+    pub(crate) fn decode_component<T: Component>(&self, entity: EntityId) -> Result<Option<T>> {
+        let key = key::<T>()?;
+        let Some(value) = self.state.component(entity, &key)? else {
+            return Ok(None);
+        };
+        let record_exists = |id| self.state.contains_entity(id);
+        let blob_exists = |_id| true;
+        decode::<T>(value, &ValidationContext::new(&record_exists, &blob_exists)).map(Some)
     }
 
     fn encode_value<T: Component>(&self, value: &T) -> Result<ComponentRecord> {
@@ -939,6 +1015,14 @@ impl Edit {
             });
         }
         Ok(())
+    }
+}
+
+fn text_group_kind(role: Option<&TextRole>) -> TextGroupKind {
+    if role.is_some_and(|role| role.role == TextRole::SFX) {
+        TextGroupKind::Sfx
+    } else {
+        TextGroupKind::Main
     }
 }
 

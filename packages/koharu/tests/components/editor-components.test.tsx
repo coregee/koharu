@@ -1,5 +1,12 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  createEvent,
+  fireEvent,
+  render as testingRender,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ThemeProvider } from 'next-themes'
 import { StrictMode, type ReactNode } from 'react'
@@ -29,6 +36,7 @@ import * as canvasRuntime from '@koharu/bridge/canvas'
 import {
   commands,
   type Layer,
+  type Page,
   type PageSummary,
   type Preferences,
   type ProjectInfo,
@@ -54,6 +62,7 @@ const emptyCredential = () => ({ configured: false, value: null, clear: false })
 
 const textLayer: Layer = {
   type: 'text',
+  locked: false,
   id: 'element',
   parent: 'page',
   geometry: {
@@ -819,6 +828,124 @@ describe('greenfield editor', () => {
     expect(screen.getByRole('button', { name: 'Edit Caption' })).toHaveTextContent('Narration')
   })
 
+  it('shows separate main and SFX text groups', () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        ...page.layers.filter((layer) => layer.type === 'artwork'),
+        {
+          type: 'group',
+          locked: false,
+          id: 'main-text',
+          parent: 'page',
+          visibility: { visible: true, opacity: 1 },
+          name: 'Main Text',
+          role: 'main_text',
+        },
+        { ...textLayer, parent: 'main-text' },
+        {
+          type: 'group',
+          locked: false,
+          id: 'sfx-text',
+          parent: 'page',
+          visibility: { visible: true, opacity: 1 },
+          name: 'SFX Text',
+          role: 'sfx_text',
+        },
+        {
+          ...textLayer,
+          id: 'sfx',
+          parent: 'sfx-text',
+          content: {
+            ...textLayer.content,
+            id: 'sfx-content',
+            translation: { text: 'Boom', language: null },
+            classification: 'sfx',
+          },
+        },
+      ],
+    }))
+    render(<Inspector />)
+
+    expect(screen.getByRole('button', { name: 'Edit Main Text' })).toHaveTextContent(
+      'Main text group',
+    )
+    expect(screen.getByRole('button', { name: 'Edit SFX Text' })).toHaveTextContent(
+      'SFX text group',
+    )
+  })
+
+  it('locks layers from the control beneath visibility', async () => {
+    installProject()
+    const current = queryClient.getQueryData<Page>(pageKey)!
+    const setLayerLocked = vi.spyOn(commands, 'setLayerLocked').mockResolvedValue({
+      ...current,
+      layers: current.layers.map((layer) =>
+        layer.id === 'element' ? { ...layer, locked: true } : layer,
+      ),
+    })
+    render(<Inspector />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lock Hello' }))
+
+    await waitFor(() => expect(setLayerLocked).toHaveBeenCalledWith(['element'], true))
+    expect(await screen.findByRole('button', { name: 'Unlock Hello' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide Hello' })).toBeInTheDocument()
+  })
+
+  it('imports an image layer from the layer picker footer', async () => {
+    installProject()
+    const addImageLayer = vi.spyOn(commands, 'addImageLayer').mockResolvedValue(null)
+    render(<Inspector />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add image layer' }))
+
+    await waitFor(() => expect(addImageLayer).toHaveBeenCalledWith('page'))
+  })
+
+  it('reorders sibling layers with drag and drop', async () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: Page) => ({
+      ...page,
+      layers: [
+        ...page.layers,
+        {
+          ...textLayer,
+          id: 'second',
+          content: {
+            ...textLayer.content,
+            id: 'second-content',
+            translation: { text: 'Second', language: null },
+          },
+        },
+      ],
+    }))
+    const current = queryClient.getQueryData<Page>(pageKey)!
+    const moveLayer = vi.spyOn(commands, 'moveLayer').mockResolvedValue(current)
+    render(<Inspector />)
+    const dataTransfer = {
+      dropEffect: 'none',
+      effectAllowed: 'none',
+      setData: vi.fn(),
+    }
+    const source = screen.getByRole('button', { name: 'Reorder Hello' })
+    const target = document.querySelector<HTMLElement>('[data-layer-row="second"]')!
+    Object.defineProperty(target, 'getBoundingClientRect', {
+      value: () => ({ top: 0, height: 100 }),
+    })
+
+    fireEvent.dragStart(source, { dataTransfer })
+    await waitFor(() => expect(source.closest('[data-layer-row]')).toHaveClass('opacity-45'))
+    const dragOver = createEvent.dragOver(target, { dataTransfer })
+    Object.defineProperty(dragOver, 'clientY', { value: 1 })
+    fireEvent(target, dragOver)
+    await waitFor(() => expect(target.querySelector('.top-0.bg-primary')).toBeInTheDocument())
+    fireEvent.drop(target, { dataTransfer })
+
+    await waitFor(() => expect(moveLayer).toHaveBeenCalledWith('element', 'page', 1))
+  })
+
   it('lists the censor mask and toggles its visibility', async () => {
     installProject()
     useKoharuStore.setState({ selectedLayers: [] })
@@ -828,6 +955,7 @@ describe('greenfield editor', () => {
         ...page.layers,
         {
           type: 'raster',
+          locked: false,
           id: 'censor',
           parent: 'page',
           visibility: { visible: false, opacity: 1 },
@@ -883,11 +1011,11 @@ describe('greenfield editor', () => {
     render(<Inspector />)
 
     await user.click(screen.getByRole('combobox', { name: 'Hello text type' }))
-    await user.click(screen.getByRole('option', { name: 'Speech' }))
+    await user.click(await screen.findByRole('option', { name: 'Speech' }))
     await waitFor(() => expect(classify).toHaveBeenCalledWith('element', 'speech'))
 
     await user.click(screen.getByRole('combobox', { name: 'Hello region shape' }))
-    await user.click(screen.getByRole('option', { name: 'Circular' }))
+    await user.click(await screen.findByRole('option', { name: 'Circular' }))
     await waitFor(() => expect(reshape).toHaveBeenCalledWith('region', 'circular'))
 
     await user.click(screen.getByRole('button', { name: 'Run OCR again for Hello' }))

@@ -5,10 +5,10 @@
 //! relation endpoints.
 
 use crate::{
-    BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, OcrAnalysis,
-    OcrCandidate, Page, Project, RasterLayer, Region, RegionShape, RegionSpec, Relation, Result,
-    SourceText, TextContent, TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography,
-    Visibility,
+    BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, LayerLock,
+    OcrAnalysis, OcrCandidate, Page, Presents, Project, RasterLayer, Region, RegionShape,
+    RegionSpec, Relation, Result, SourceText, TextContent, TextGroup, TextGroupKind, TextLayout,
+    TextRegion, TextRole, Translation, Typography, Visibility,
     component::{Component, ComponentRecord, ValidationContext, decode, key},
     components::Assets,
     state::{Components, State},
@@ -63,6 +63,7 @@ component_schema! {
     ENTITY_ORIGIN = 17 => EntityOrigin,
     REGION_SHAPE = 18 => RegionShape,
     OCR_CANDIDATE = 19 => OcrCandidate,
+    LAYER_LOCK = 20 => LayerLock,
 }
 
 pub(crate) fn validate_components(
@@ -98,14 +99,13 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     let has_group = has(GROUP);
     let has_text_group = has(TEXT_GROUP);
     let parent = state.parent_and_position(id)?.0;
-    let parent_is_text_group = parent.is_some_and(|parent| {
-        state.entity(parent).is_ok_and(|entity| {
-            entity
-                .components
-                .iter()
-                .any(|(key, _)| component_mask(&key.kind) == TEXT_GROUP)
-        })
-    });
+    let parent_text_group = parent
+        .map(|parent| decode_entity::<TextGroup>(state, parent))
+        .transpose()?
+        .flatten();
+    let required_text_group = has_layout
+        .then(|| text_layer_group_kind(state, id))
+        .transpose()?;
 
     if (has_source || has_translation || has(TEXT_ROLE) || has_ocr_candidate) && !has_content {
         Err(Error::invalid(format!(
@@ -141,20 +141,41 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
                 "text group {id} is not a direct child of its page"
             )));
         }
-        let groups = state.page(page)?.entities_with(&key::<TextGroup>()?);
-        if groups.len() != 1 {
+        let group = decode_entity::<TextGroup>(state, id)?
+            .ok_or_else(|| Error::invalid(format!("text group {id} has no marker")))?;
+        let matching_groups = state
+            .page(page)?
+            .entities_with(&key::<TextGroup>()?)
+            .into_iter()
+            .map(|entity| decode_entity::<TextGroup>(state, entity))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .filter(|candidate| candidate.kind == group.kind)
+            .count();
+        if matching_groups != 1 {
             return Err(Error::invalid(format!(
-                "page {page} must not contain multiple text groups"
+                "page {page} must not contain multiple {:?} text groups",
+                group.kind,
             )));
         }
         Ok(())
-    } else if parent_is_text_group && !has_layout {
+    } else if parent_text_group.is_some() && !has_layout {
         Err(Error::invalid(format!(
             "text group child {id} is not a text layer"
         )))
-    } else if has_layout && !parent_is_text_group {
+    } else if has_layout && parent_text_group.is_none() {
         Err(Error::invalid(format!(
-            "text layer {id} is not contained by the page text group"
+            "text layer {id} is not contained by a page text group"
+        )))
+    } else if has_layout
+        && parent_text_group
+            .as_ref()
+            .zip(required_text_group)
+            .is_some_and(|(group, required)| group.kind != required)
+    {
+        Err(Error::invalid(format!(
+            "text layer {id} is not contained by the group matching its text role"
         )))
     } else if has_content
         && (has_region || has_geometry || has_layout || has_typography || has_detection || has_ocr)
@@ -191,6 +212,36 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn decode_entity<T: Component>(state: &State, entity: EntityId) -> Result<Option<T>> {
+    let marker = key::<T>()?;
+    let Some(raw) = state.component(entity, &marker)? else {
+        return Ok(None);
+    };
+    let record_exists = |id| state.contains_entity(id);
+    let blob_exists = |_id| true;
+    decode::<T>(raw, &ValidationContext::new(&record_exists, &blob_exists)).map(Some)
+}
+
+fn text_layer_group_kind(state: &State, layer: EntityId) -> Result<TextGroupKind> {
+    let content = state
+        .outgoing
+        .get(&layer)
+        .into_iter()
+        .flat_map(|relations| relations.iter())
+        .filter_map(|id| state.relations.get(id))
+        .find(|relation| relation.value.kind.as_str() == <Presents as crate::RelationSpec>::KIND)
+        .map(|relation| relation.value.target);
+    let role = content
+        .map(|content| decode_entity::<TextRole>(state, content))
+        .transpose()?
+        .flatten();
+    Ok(if role.is_some_and(|role| role.role == TextRole::SFX) {
+        TextGroupKind::Sfx
+    } else {
+        TextGroupKind::Main
+    })
 }
 
 pub(crate) fn validate_relation(

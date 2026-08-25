@@ -130,9 +130,10 @@ async fn built_in_component_schemas_have_expected_revisions() {
             schema::<TextContent>(),
             schema::<crate::components::Assets>(),
             schema::<Relation>(),
+            schema::<LayerLock>(),
         ],
         [
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1
+            2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1
         ]
     );
 }
@@ -162,6 +163,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             DetectionAnalysis::KIND,
             OcrAnalysis::KIND,
             crate::components::Assets::KIND,
+            LayerLock::KIND,
         ],
         [
             "dev.koharu.project",
@@ -185,6 +187,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu.analysis.detection",
             "dev.koharu.analysis.ocr",
             "dev.koharu.assets",
+            "dev.koharu.layer.lock",
         ]
     );
 }
@@ -720,7 +723,12 @@ async fn text_group_owns_the_canonical_text_order() {
         .unwrap();
     let snapshot = session.commit(patch).await.unwrap().snapshot;
     let (page, first, second) = ids.unwrap();
-    let group = snapshot.page(page).unwrap().text_group().unwrap().unwrap();
+    let group = snapshot
+        .page(page)
+        .unwrap()
+        .text_group(TextGroupKind::Main)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         group
             .text_layers()
@@ -738,7 +746,7 @@ async fn text_group_owns_the_canonical_text_order() {
         snapshot
             .page(page)
             .unwrap()
-            .text_group()
+            .text_group(TextGroupKind::Main)
             .unwrap()
             .unwrap()
             .text_layers()
@@ -747,6 +755,65 @@ async fn text_group_owns_the_canonical_text_order() {
             .collect::<Vec<_>>(),
         vec![second, first]
     );
+}
+
+#[tokio::test]
+async fn text_role_moves_presentations_between_main_and_sfx_groups() {
+    let mut session = Session::memory().await.unwrap();
+    let mut ids = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let page = edit.add_page(page(), At::End)?;
+            let content = edit.add_text_content(page, At::End)?;
+            let layer = edit.add_text_layer(
+                page,
+                At::End,
+                content,
+                &TextLayout {
+                    origin: Origin::User,
+                    kind: TextLayoutKind::Paragraph,
+                },
+            )?;
+            ids = Some((page, content, layer));
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    let (page, content, layer) = ids.unwrap();
+    let main = snapshot
+        .page(page)
+        .unwrap()
+        .text_group(TextGroupKind::Main)
+        .unwrap()
+        .unwrap();
+    let sfx = snapshot
+        .page(page)
+        .unwrap()
+        .text_group(TextGroupKind::Sfx)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.parent(layer).unwrap(), Some(main.id()));
+
+    let patch = snapshot
+        .patch(|edit| {
+            edit.set_text_role(
+                content,
+                Some(&TextRole {
+                    origin: Origin::User,
+                    role: TextRole::SFX.to_owned(),
+                }),
+            )
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    assert_eq!(snapshot.parent(layer).unwrap(), Some(sfx.id()));
+
+    let patch = snapshot
+        .patch(|edit| edit.set_text_role(content, None))
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    assert_eq!(snapshot.parent(layer).unwrap(), Some(main.id()));
 }
 
 #[tokio::test]

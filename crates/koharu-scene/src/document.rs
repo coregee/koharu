@@ -3,7 +3,7 @@
 use crate::{
     At, DetectionAnalysis, Edit, EntityId, Geometry, Group, OcrAnalysis, Origin, PageRef, Presents,
     Region, RegionShape, RegionShapeKind, RegionSpec, Result, Snapshot, SourceText, TextContent,
-    TextGroup, TextLayout, TextRole, Translation, Typography, Visibility,
+    TextGroup, TextGroupKind, TextLayout, TextRole, Translation, Typography, Visibility,
 };
 
 #[derive(Copy, Clone)]
@@ -213,10 +213,14 @@ impl Snapshot {
 }
 
 impl<'a> PageRef<'a> {
-    pub fn text_group(self) -> Result<Option<GroupRef<'a>>> {
+    pub fn text_group(self, kind: TextGroupKind) -> Result<Option<GroupRef<'a>>> {
         let mut groups = Vec::new();
         for id in self.snapshot.children(self.id)? {
-            if self.snapshot.component::<TextGroup>(id)?.is_some() {
+            if self
+                .snapshot
+                .component::<TextGroup>(id)?
+                .is_some_and(|group| group.kind == kind)
+            {
                 groups.push(id);
             }
         }
@@ -224,8 +228,8 @@ impl<'a> PageRef<'a> {
             [] => Ok(None),
             [id] => self.snapshot.group(*id).map(Some),
             _ => Err(crate::Error::invalid(format!(
-                "page {} contains multiple text groups",
-                self.id
+                "page {} contains multiple {kind:?} text groups",
+                self.id,
             ))),
         }
     }
@@ -250,7 +254,21 @@ impl Edit {
         content: EntityId,
         layout: &TextLayout,
     ) -> Result<EntityId> {
-        let group = self.ensure_text_group(page)?;
+        let kind = self.decode_component::<TextRole>(content)?.as_ref().map_or(
+            TextGroupKind::Main,
+            |role| {
+                if role.role == TextRole::SFX {
+                    TextGroupKind::Sfx
+                } else {
+                    TextGroupKind::Main
+                }
+            },
+        );
+        let (main, sfx) = self.ensure_text_groups(page)?;
+        let group = match kind {
+            TextGroupKind::Main => main,
+            TextGroupKind::Sfx => sfx,
+        };
         let layer = self.add_entity(group, at)?;
         self.set(layer, layout)?;
         self.relate::<Presents>(layer, content)?;

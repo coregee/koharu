@@ -220,12 +220,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "Adicionar camada de imagem",
+    "lockLabel": "Bloquear {{name}}",
+    "reorder": "Reordenar {{name}}",
+    "unlockLabel": "Desbloquear {{name}}",
     "delete": "Excluir {{name}}",
     "edit": "Editar {{name}}",
     "empty": "Não há camadas nesta página.",
     "hide": "Ocultar {{name}}",
     "includeForOcr": "Incluir no OCR",
     "imageName": "Imagem {{index}}",
+    "mainText": "Texto principal",
+    "sfxText": "Texto de efeitos sonoros",
     "kinds": {
       "cleanup": "Limpeza",
       "dialogue": "Diálogo",
@@ -235,7 +241,8 @@
       "paint": "Pintura",
       "censor": "Máscara de censura",
       "text": "Texto",
-      "textGroup": "Grupo de texto"
+      "mainTextGroup": "Grupo de texto principal",
+      "sfxTextGroup": "Grupo de texto de efeitos sonoros"
     },
     "locked": "Bloqueada",
     "lockedLabel": "{{name}} está bloqueada",

@@ -3,7 +3,12 @@
 import { useMemo, useRef } from 'react'
 
 import { SelectionControls } from '@/components/editor/SelectionControls'
-import { effectiveLayerVisibility, expandLayerSelection, isTextLayer } from '@/lib/document'
+import {
+  effectiveLayerLocked,
+  effectiveLayerVisibility,
+  expandLayerSelection,
+  isTextLayer,
+} from '@/lib/document'
 import { controlFrame, cssFrame, geometryFrame, selectableLayer, type Camera } from '@/lib/geometry'
 import type {
   AnalysisRegion,
@@ -75,7 +80,11 @@ export function CanvasOverlay({
     expandedSelection.length === 1
       ? page.layers.find((layer) => layer.id === expandedSelection[0])
       : undefined
-  const selectedTextLayer = selectedLayer && isTextLayer(selectedLayer) ? selectedLayer : undefined
+  const selectedLayerLocked = selectedLayer
+    ? effectiveLayerLocked(page.layers, selectedLayer)
+    : false
+  const selectedTextLayer =
+    selectedLayer && !selectedLayerLocked && isTextLayer(selectedLayer) ? selectedLayer : undefined
   const sourceRegion = selectedTextLayer?.content.source_region
     ? page.regions.find((region) => region.id === selectedTextLayer.content.source_region)
     : undefined
@@ -92,7 +101,12 @@ export function CanvasOverlay({
     : null
   const selectionControl = multipleSelected
     ? undefined
-    : layers.find(({ layer }) => selectedIds.has(layer.id) && selectableLayer(layer))
+    : layers.find(
+        ({ layer }) =>
+          selectedIds.has(layer.id) &&
+          selectableLayer(layer) &&
+          !effectiveLayerLocked(page.layers, layer),
+      )
   const scale = camera.zoom / window.devicePixelRatio
 
   return (

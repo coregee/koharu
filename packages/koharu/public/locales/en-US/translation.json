@@ -224,12 +224,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "Add image layer",
+    "lockLabel": "Lock {{name}}",
+    "reorder": "Reorder {{name}}",
+    "unlockLabel": "Unlock {{name}}",
     "delete": "Delete {{name}}",
     "edit": "Edit {{name}}",
     "empty": "No layers on this page.",
     "hide": "Hide {{name}}",
     "includeForOcr": "Include for OCR",
     "imageName": "Image {{index}}",
+    "mainText": "Main Text",
+    "sfxText": "SFX Text",
     "kinds": {
       "cleanup": "Cleanup",
       "dialogue": "Dialogue",
@@ -239,7 +245,8 @@
       "paint": "Paint",
       "censor": "Censor mask",
       "text": "Text",
-      "textGroup": "Text group"
+      "mainTextGroup": "Main text group",
+      "sfxTextGroup": "SFX text group"
     },
     "locked": "Locked",
     "lockedLabel": "{{name}} is locked",

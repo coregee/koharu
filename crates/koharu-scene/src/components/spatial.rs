@@ -101,3 +101,28 @@ impl Component for Visibility {
         true
     }
 }
+
+/// Prevents user-authored edits to a layer while preserving its presentation.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct LayerLock {
+    pub origin: Origin,
+    pub locked: bool,
+}
+
+impl Component for LayerLock {
+    const KIND: &'static str = "dev.koharu.layer.lock";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        self.origin.validate()
+    }
+
+    fn origin(&self) -> Option<&Origin> {
+        Some(&self.origin)
+    }
+
+    fn set_origin(&mut self, origin: Origin) -> bool {
+        self.origin = origin;
+        true
+    }
+}

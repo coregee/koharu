@@ -265,7 +265,7 @@ impl Desktop {
             let layer_presentation = layer.presentation();
             if !layer_presentation.visible
                 || layer_presentation.opacity <= 0.0
-                || !matches!(layer.kind(), LayerKind::Text(_))
+                || !matches!(layer.kind(), LayerKind::Text(_) | LayerKind::Image(_))
             {
                 bail!(
                     "canvas transform element {} is not selectable",

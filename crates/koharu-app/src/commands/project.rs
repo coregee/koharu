@@ -5,13 +5,14 @@ use image::{DynamicImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin, FitsTo,
-    Geometry as SceneGeometry, Group as SceneGroup, OcrCandidate as SceneOcrCandidate, Origin,
-    PageDraft, Point as ScenePoint, Presents, Project as SceneProject,
-    RasterLayer as SceneRasterLayer, RasterLayerKind, RecognizedFrom, Region as SceneRegion,
-    RegionShape as SceneRegionShape, RegionShapeKind, RemovePolicy, Revision, Session, Snapshot,
-    SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
-    TextLayoutKind, TextRegion as SceneTextRegion, TextRole as SceneTextRole,
-    Translation as SceneTranslation, Typography as SceneTypography, Visibility as SceneVisibility,
+    Geometry as SceneGeometry, Group as SceneGroup, LayerLock as SceneLayerLock,
+    OcrCandidate as SceneOcrCandidate, Origin, PageDraft, Point as ScenePoint, Presents,
+    Project as SceneProject, RasterLayer as SceneRasterLayer, RasterLayerKind, RecognizedFrom,
+    Region as SceneRegion, RegionShape as SceneRegionShape, RegionShapeKind, RemovePolicy,
+    Revision, Session, Snapshot, SourceText as SceneSourceText, TextGroup as SceneTextGroup,
+    TextGroupKind as SceneTextGroupKind, TextLayout as SceneTextLayout, TextLayoutKind,
+    TextRegion as SceneTextRegion, TextRole as SceneTextRole, Translation as SceneTranslation,
+    Typography as SceneTypography, Visibility as SceneVisibility,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -73,6 +74,7 @@ pub enum Layer {
     Group {
         id: EntityId,
         parent: Option<EntityId>,
+        locked: bool,
         visibility: LayerVisibility,
         name: String,
         role: Option<GroupRole>,
@@ -80,6 +82,7 @@ pub enum Layer {
     Text {
         id: EntityId,
         parent: Option<EntityId>,
+        locked: bool,
         geometry: Option<Geometry>,
         visibility: LayerVisibility,
         content: Box<TextContent>,
@@ -89,6 +92,7 @@ pub enum Layer {
     Raster {
         id: EntityId,
         parent: Option<EntityId>,
+        locked: bool,
         visibility: LayerVisibility,
         image: Option<String>,
         name: String,
@@ -97,6 +101,7 @@ pub enum Layer {
     Image {
         id: EntityId,
         parent: Option<EntityId>,
+        locked: bool,
         geometry: Geometry,
         visibility: LayerVisibility,
         image: String,
@@ -104,6 +109,7 @@ pub enum Layer {
     Artwork {
         id: EntityId,
         parent: Option<EntityId>,
+        locked: bool,
         geometry: Geometry,
         visibility: LayerVisibility,
         image: String,
@@ -113,7 +119,8 @@ pub enum Layer {
 #[derive(Clone, Copy, Debug, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum GroupRole {
-    Text,
+    MainText,
+    SfxText,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -488,6 +495,64 @@ impl Project {
         ))
     }
 
+    pub(super) async fn add_image_layer(
+        &mut self,
+        page: EntityId,
+        imported: super::import::Page,
+    ) -> Result<(Commit, EntityId)> {
+        let snapshot = self.snapshot();
+        let page_value = snapshot.page(page)?.page()?;
+        let source = AssetRole::new("source")?;
+        let mut layer = None;
+        let patch = snapshot.patch(|edit| {
+            let at = snapshot
+                .page(page)?
+                .text_group(SceneTextGroupKind::Main)?
+                .map_or(At::End, |group| At::Before(group.id()));
+            let added = edit.add_entity(page, at)?;
+            edit.set(
+                added,
+                &SceneGeometry {
+                    origin: Origin::User,
+                    points: vec![
+                        ScenePoint { x: 0.0, y: 0.0 },
+                        ScenePoint {
+                            x: page_value.width,
+                            y: 0.0,
+                        },
+                        ScenePoint {
+                            x: page_value.width,
+                            y: page_value.height,
+                        },
+                        ScenePoint {
+                            x: 0.0,
+                            y: page_value.height,
+                        },
+                    ],
+                },
+            )?;
+            edit.set_asset(
+                added,
+                &source,
+                AssetInput::new(
+                    imported.bytes,
+                    imported.format.to_mime_type(),
+                    AssetMetadata {
+                        width: Some(imported.width),
+                        height: Some(imported.height),
+                        attributes: [("name".to_owned(), imported.name)].into_iter().collect(),
+                    },
+                ),
+            )?;
+            layer = Some(added);
+            Ok(())
+        })?;
+        Ok((
+            self.commit(patch).await?,
+            layer.expect("image layer was added while building the patch"),
+        ))
+    }
+
     pub(crate) async fn set_source_text(
         &mut self,
         layer: EntityId,
@@ -523,14 +588,14 @@ impl Project {
             edit.promote_entity_to_user(layer)?;
             edit.promote_entity_to_user(content)?;
             match classification {
-                Some(classification) => edit.set(
+                Some(classification) => edit.set_text_role(
                     content,
-                    &SceneTextRole {
+                    Some(&SceneTextRole {
                         origin: Origin::User,
                         role: classification.role().to_owned(),
-                    },
+                    }),
                 ),
-                None => edit.remove::<SceneTextRole>(content),
+                None => edit.set_text_role(content, None),
             }
         })?;
         self.commit(patch).await
@@ -652,20 +717,25 @@ impl Project {
         let updates = updates
             .into_iter()
             .map(|update| {
-                if snapshot
-                    .component::<SceneTextLayout>(update.layer)?
-                    .is_none()
-                {
-                    bail!("only text layers can change geometry");
+                if !Self::is_transformable_layer(&snapshot, update.layer)? {
+                    bail!("only text and image layers can change geometry");
                 }
-                let content = Self::text_content(&snapshot, update.layer)?;
-                if update.points.is_none()
-                    && snapshot
-                        .text_layer(update.layer)?
-                        .automatic_target()?
-                        .is_none()
-                {
-                    bail!("only automatically placed text can reset its geometry");
+                if Self::is_effectively_locked(&snapshot, update.layer)? {
+                    bail!("locked layers cannot change geometry");
+                }
+                let content = snapshot
+                    .component::<SceneTextLayout>(update.layer)?
+                    .map(|_| Self::text_content(&snapshot, update.layer))
+                    .transpose()?;
+                if update.points.is_none() {
+                    if content.is_none()
+                        || snapshot
+                            .text_layer(update.layer)?
+                            .automatic_target()?
+                            .is_none()
+                    {
+                        bail!("only automatically placed text can reset its geometry");
+                    }
                 }
                 Ok((update, content))
             })
@@ -673,7 +743,9 @@ impl Project {
         let patch = snapshot.patch(|edit| {
             for (update, content) in updates {
                 edit.promote_entity_to_user(update.layer)?;
-                edit.promote_entity_to_user(content)?;
+                if let Some(content) = content {
+                    edit.promote_entity_to_user(content)?;
+                }
                 match update.points {
                     Some(points) => edit.set(
                         update.layer,
@@ -762,14 +834,53 @@ impl Project {
         self.commit(patch).await
     }
 
+    pub(crate) async fn set_layer_locked(
+        &mut self,
+        layers: Vec<EntityId>,
+        locked: bool,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        for layer in &layers {
+            if !Self::is_layer(&snapshot, *layer)? {
+                bail!("only layers can be locked");
+            }
+        }
+        let patch = snapshot.patch(|edit| {
+            for layer in layers {
+                edit.promote_entity_to_user(layer)?;
+                if locked {
+                    edit.set(
+                        layer,
+                        &SceneLayerLock {
+                            origin: Origin::User,
+                            locked: true,
+                        },
+                    )?;
+                } else {
+                    edit.remove::<SceneLayerLock>(layer)?;
+                }
+            }
+            Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
     pub(crate) async fn delete_layers(&mut self, layers: Vec<EntityId>) -> Result<Commit> {
         let snapshot = self.snapshot();
         let mut expanded = Vec::new();
         for layer in layers {
+            if Self::is_effectively_locked(&snapshot, layer)? {
+                bail!("locked layers cannot be deleted");
+            }
             if snapshot.component::<SceneTextGroup>(layer)?.is_some() {
                 expanded.extend(snapshot.children(layer)?);
             } else {
                 expanded.push(layer);
+            }
+        }
+        for layer in &expanded {
+            if Self::is_effectively_locked(&snapshot, *layer)? {
+                bail!("groups containing locked layers cannot be deleted");
             }
         }
         let layers = Self::unique_roots(&snapshot, expanded)?;
@@ -810,6 +921,12 @@ impl Project {
         index: usize,
     ) -> Result<Commit> {
         let snapshot = self.snapshot();
+        if Self::is_effectively_locked(&snapshot, layer)? {
+            bail!("locked layers cannot be reordered");
+        }
+        if snapshot.parent(layer)? != Some(parent) {
+            bail!("layers can only be reordered within their current group");
+        }
         let siblings = snapshot
             .children(parent)?
             .map(|candidate| Ok(Self::is_layer(&snapshot, candidate)?.then_some(candidate)))
@@ -836,17 +953,25 @@ impl Project {
         let geometries = geometries
             .into_iter()
             .map(|(element, geometry)| {
-                if snapshot.component::<SceneTextLayout>(element)?.is_none() {
-                    bail!("only text layers can change geometry");
+                if !Self::is_transformable_layer(&snapshot, element)? {
+                    bail!("only text and image layers can change geometry");
                 }
-                let content = Self::text_content(&snapshot, element)?;
+                if Self::is_effectively_locked(&snapshot, element)? {
+                    bail!("locked layers cannot change geometry");
+                }
+                let content = snapshot
+                    .component::<SceneTextLayout>(element)?
+                    .map(|_| Self::text_content(&snapshot, element))
+                    .transpose()?;
                 Ok((element, geometry, content))
             })
             .collect::<Result<Vec<_>>>()?;
         let patch = snapshot.patch(|edit| {
             for (element, mut geometry, content) in geometries {
                 edit.promote_entity_to_user(element)?;
-                edit.promote_entity_to_user(content)?;
+                if let Some(content) = content {
+                    edit.promote_entity_to_user(content)?;
+                }
                 geometry.origin = Origin::User;
                 edit.set(element, &geometry)?;
             }
@@ -875,6 +1000,11 @@ impl Project {
             bail!("raster stroke points must be finite");
         }
         let snapshot = self.snapshot();
+        if let Some(layer) = layer
+            && Self::is_effectively_locked(&snapshot, layer)?
+        {
+            bail!("locked raster layers cannot be edited");
+        }
         let page_value = snapshot.page(page)?.page()?;
         let width = page_value.width.round() as u32;
         let height = page_value.height.round() as u32;
@@ -952,7 +1082,7 @@ impl Project {
             } else {
                 let at = snapshot
                     .page(page)?
-                    .text_group()?
+                    .text_group(SceneTextGroupKind::Main)?
                     .map_or(At::End, |group| At::Before(group.id()));
                 let layer = edit.add_entity(page, at)?;
                 edit.set(
@@ -1063,6 +1193,7 @@ impl Project {
                 Layer::Artwork {
                     id: page,
                     parent: None,
+                    locked: true,
                     geometry: Geometry {
                         points: vec![
                             Point { x: 0.0, y: 0.0 },
@@ -1115,16 +1246,21 @@ impl Project {
 
     fn layer_view(snapshot: &Snapshot, layer: EntityId) -> Result<Layer> {
         let parent = snapshot.parent(layer)?;
+        let locked = Self::layer_locked(snapshot, layer)?;
         let visibility = Self::layer_visibility(snapshot, layer)?;
         if let Some(group) = snapshot.component::<SceneGroup>(layer)? {
             return Ok(Layer::Group {
                 id: layer,
                 parent,
+                locked,
                 visibility,
                 name: group.name,
                 role: snapshot
                     .component::<SceneTextGroup>(layer)?
-                    .map(|_| GroupRole::Text),
+                    .map(|group| match group.kind {
+                        SceneTextGroupKind::Main => GroupRole::MainText,
+                        SceneTextGroupKind::Sfx => GroupRole::SfxText,
+                    }),
             });
         }
         if let Some(layout) = snapshot.component::<SceneTextLayout>(layer)? {
@@ -1149,6 +1285,7 @@ impl Project {
             return Ok(Layer::Text {
                 id: layer,
                 parent,
+                locked,
                 geometry: snapshot
                     .component::<SceneGeometry>(layer)?
                     .map(Self::geometry_view),
@@ -1169,6 +1306,7 @@ impl Project {
             return Ok(Layer::Raster {
                 id: layer,
                 parent,
+                locked,
                 visibility,
                 image: Self::asset_id(snapshot, layer, "source")?,
                 name: raster.name,
@@ -1184,6 +1322,7 @@ impl Project {
         Ok(Layer::Image {
             id: layer,
             parent,
+            locked,
             geometry,
             visibility,
             image,
@@ -1222,6 +1361,23 @@ impl Project {
                 opacity: visibility.opacity,
             },
         ))
+    }
+
+    fn layer_locked(snapshot: &Snapshot, layer: EntityId) -> Result<bool> {
+        Ok(snapshot
+            .component::<SceneLayerLock>(layer)?
+            .is_some_and(|lock| lock.locked))
+    }
+
+    fn is_effectively_locked(snapshot: &Snapshot, layer: EntityId) -> Result<bool> {
+        let mut current = Some(layer);
+        while let Some(entity) = current {
+            if Self::layer_locked(snapshot, entity)? {
+                return Ok(true);
+            }
+            current = snapshot.parent(entity)?;
+        }
+        Ok(false)
     }
 
     fn typography_view(typography: SceneTypography) -> Typography {
@@ -1270,6 +1426,17 @@ impl Project {
             || snapshot.component::<SceneTextLayout>(entity)?.is_some()
             || snapshot.component::<SceneRasterLayer>(entity)?.is_some()
             || (snapshot.component::<SceneGeometry>(entity)?.is_some()
+                && snapshot
+                    .asset(entity, &AssetRole::new("source")?)?
+                    .is_some()))
+    }
+
+    fn is_transformable_layer(snapshot: &Snapshot, entity: EntityId) -> Result<bool> {
+        Ok(snapshot.component::<SceneTextLayout>(entity)?.is_some()
+            || (snapshot.component::<SceneGeometry>(entity)?.is_some()
+                && snapshot.component::<SceneRegion>(entity)?.is_none()
+                && snapshot.component::<SceneRasterLayer>(entity)?.is_none()
+                && snapshot.component::<SceneGroup>(entity)?.is_none()
                 && snapshot
                     .asset(entity, &AssetRole::new("source")?)?
                     .is_some()))
@@ -1522,6 +1689,8 @@ fn reconcile_style_ranges(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use koharu_scene::{Generation, OcrCandidate, ProducerId, TextStyleRange, WritingMode};
 
     use super::*;
@@ -1638,6 +1807,77 @@ mod tests {
                 .component::<OcrCandidate>(content.id())
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn imported_images_fill_the_page_and_persist_transform_locks() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 500.0, 700.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(patch).await.unwrap();
+        let page = page.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+
+        let (_, layer) = project
+            .add_image_layer(
+                page,
+                crate::commands::import::Page {
+                    name: "alternate.png".to_owned(),
+                    bytes: Arc::from([1_u8, 2, 3].as_slice()),
+                    format: ImageFormat::Png,
+                    width: 100,
+                    height: 200,
+                },
+            )
+            .await
+            .unwrap();
+        let snapshot = project.snapshot();
+        assert_eq!(snapshot.parent(layer).unwrap(), Some(page));
+        assert_eq!(
+            snapshot
+                .component::<SceneGeometry>(layer)
+                .unwrap()
+                .unwrap()
+                .points,
+            vec![
+                ScenePoint { x: 0.0, y: 0.0 },
+                ScenePoint { x: 500.0, y: 0.0 },
+                ScenePoint { x: 500.0, y: 700.0 },
+                ScenePoint { x: 0.0, y: 700.0 },
+            ]
+        );
+
+        project.set_layer_locked(vec![layer], true).await.unwrap();
+        assert!(
+            project
+                .set_geometries([(
+                    layer,
+                    SceneGeometry {
+                        origin: Origin::User,
+                        points: vec![
+                            ScenePoint { x: 0.0, y: 0.0 },
+                            ScenePoint { x: 250.0, y: 0.0 },
+                            ScenePoint { x: 250.0, y: 350.0 },
+                            ScenePoint { x: 0.0, y: 350.0 },
+                        ],
+                    },
+                )])
+                .await
+                .is_err()
+        );
+        assert!(
+            project
+                .snapshot()
+                .component::<SceneLayerLock>(layer)
+                .unwrap()
+                .is_some_and(|lock| lock.locked)
         );
     }
 

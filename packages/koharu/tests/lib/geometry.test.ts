@@ -34,4 +34,9 @@ describe('selection control geometry', () => {
       angle_degrees: 90,
     })
   })
+
+  it('snaps rotation to the requested increment', () => {
+    const result = rotateFrame(frame, { x: 60, y: -5 }, { x: 91, y: 0 }, 15)
+    expect(result.angle_degrees).toBe(30)
+  })
 })

@@ -285,7 +285,7 @@ async fn write_page(
     sort_by_layout(&mut detections);
 
     let image = image.to_rgb8();
-    let regions = write_regions(&input.scene, edit, page, &image, &detections, generation)
+    let regions = write_regions(edit, page, &image, &detections, generation)
         .context("failed to write detected regions")?;
     link_dialogue_regions(edit, &regions, generation)
         .context("failed to associate detected text with dialogue regions")?;
@@ -295,7 +295,6 @@ async fn write_page(
 }
 
 fn write_regions<'a>(
-    snapshot: &koharu_scene::Snapshot,
     edit: &mut koharu_scene::Edit,
     page: EntityId,
     image: &RgbImage,
@@ -311,25 +310,12 @@ fn write_regions<'a>(
                 .flatten()
         })
         .collect::<Vec<_>>();
-    let text_group = snapshot.page(page)?.text_group()?;
-    let managed_text_group = if let Some(group) = text_group {
-        snapshot
-            .component::<EntityOrigin>(group.id())?
-            .is_some_and(|origin| origin.origin != Origin::User)
-            .then_some(group.id())
-    } else {
-        None
-    };
     for (index, (detection, inferred)) in detections.iter().zip(inferred).enumerate() {
         match write_region(edit, page, detection, inferred, generation)
             .with_context(|| format!("failed to write {} detection {index}", detection.label))?
         {
             RegionOutput::Bubble(bubble) => regions.bubbles.push(bubble),
             RegionOutput::Text(text) => {
-                if let Some(group) = managed_text_group {
-                    edit.move_entity(text.layer, Some(group), At::End)
-                        .context("failed to place the detected text layer in its group")?;
-                }
                 regions.texts.push(text);
             }
             RegionOutput::Other => {}
@@ -412,16 +398,8 @@ fn write_region<'a>(
             origin: Origin::Generated(generation.clone()),
         },
     )?;
-    let layer = edit.add_text_layer(
-        page,
-        At::End,
-        content,
-        &TextLayout {
-            origin: Origin::Generated(generation.clone()),
-            kind: TextLayoutKind::Paragraph,
-        },
-    )?;
-    let is_sfx = detection.label == "onomatopoeia";
+    let is_sfx = detection.label == "onomatopoeia"
+        || inferred.is_some_and(|typography| typography.angle_degrees != 0.0);
     write_text_role(
         edit,
         content,
@@ -433,6 +411,15 @@ fn write_region<'a>(
         generation,
     )
     .context("failed to set the detected text role")?;
+    let layer = edit.add_text_layer(
+        page,
+        At::End,
+        content,
+        &TextLayout {
+            origin: Origin::Generated(generation.clone()),
+            kind: TextLayoutKind::Paragraph,
+        },
+    )?;
     edit.set(
         layer,
         &Typography {
@@ -509,12 +496,12 @@ fn write_text_role(
     role: &str,
     generation: &Generation,
 ) -> Result<()> {
-    edit.set(
+    edit.set_text_role(
         entity,
-        &TextRole {
+        Some(&TextRole {
             origin: Origin::Generated(generation.clone()),
             role: role.to_owned(),
-        },
+        }),
     )?;
     Ok(())
 }
@@ -1942,10 +1929,11 @@ mod tests {
 
     use super::{
         DIALOGUE_MASK_CONTAINMENT_THRESHOLD, DetectedRegion, DetectedText, DetectionModel,
-        ImageSize, KoharuLayoutRFDetrSeg2XLConfig, MaskPixel, PageRegions, Processor, RegionOutput,
-        StageInput, StageProcessor, closed_mask_for, collapse_nested_detections, color_palette,
-        generation, infer_typography, layout_order, link_dialogue_regions, mask_containment,
-        mask_for, mask_geometry, non_maximum_suppression, normalize_text_color, write_region,
+        ImageSize, InferredTypography, KoharuLayoutRFDetrSeg2XLConfig, MaskPixel, PageRegions,
+        Processor, RegionOutput, StageInput, StageProcessor, closed_mask_for,
+        collapse_nested_detections, color_palette, generation, infer_typography, layout_order,
+        link_dialogue_regions, mask_containment, mask_for, mask_geometry, non_maximum_suppression,
+        normalize_text_color, write_region,
     };
 
     #[test]
@@ -2162,6 +2150,60 @@ mod tests {
                 .target,
             region
         );
+    }
+
+    #[tokio::test]
+    async fn rotated_detected_text_is_classified_and_grouped_as_sfx() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let create = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 100.0, 100.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(create).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let detection = detection("text", 0.9, [10.0, 20.0, 60.0, 70.0]);
+        let inferred = InferredTypography {
+            color: [0, 0, 0],
+            stroke_color: None,
+            stroke_width: None,
+            angle_degrees: 12.0,
+            writing_mode: WritingMode::Horizontal,
+        };
+        let generation = generation(super::PRODUCER, super::MODEL_ID).unwrap();
+        let mut ids = None;
+        let patch = snapshot
+            .patch(|edit| {
+                let RegionOutput::Text(text) =
+                    write_region(edit, page, &detection, Some(inferred), &generation).unwrap()
+                else {
+                    panic!("rotated text must create a text region");
+                };
+                ids = Some((text.content, text.layer));
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let (content, layer) = ids.unwrap();
+        let sfx = snapshot
+            .page(page)
+            .unwrap()
+            .text_group(koharu_scene::TextGroupKind::Sfx)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            snapshot
+                .component::<TextRole>(content)
+                .unwrap()
+                .unwrap()
+                .role,
+            TextRole::SFX
+        );
+        assert_eq!(snapshot.parent(layer).unwrap(), Some(sfx.id()));
     }
 
     fn detection(label: &str, score: f32, bbox: [f32; 4]) -> KoharuLayoutDetection {

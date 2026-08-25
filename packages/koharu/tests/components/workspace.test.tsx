@@ -49,6 +49,7 @@ vi.mock('@koharu/bridge/canvas', () => ({
 
 const layer: Layer = {
   type: 'image',
+  locked: false,
   id: 'element',
   parent: 'page',
   geometry: {
@@ -65,6 +66,7 @@ const layer: Layer = {
 
 const paintLayer: Layer = {
   type: 'raster',
+  locked: false,
   id: 'paint',
   parent: 'page',
   visibility: { visible: true, opacity: 1 },
@@ -302,6 +304,7 @@ describe('canvas interaction adapter', () => {
         {
           type: 'text',
           id: 'element',
+          locked: false,
           parent: 'page',
           geometry: layer.geometry,
           visibility: { visible: true, opacity: 1 },
@@ -403,6 +406,7 @@ describe('canvas interaction adapter', () => {
         {
           type: 'text',
           id: 'element',
+          locked: false,
           parent: 'page',
           geometry: null,
           visibility: { visible: true, opacity: 1 },
@@ -470,6 +474,7 @@ describe('canvas interaction adapter', () => {
         {
           type: 'text',
           id: 'element',
+          locked: false,
           parent: 'page',
           geometry: null,
           visibility: { visible: true, opacity: 1 },
@@ -533,6 +538,7 @@ describe('canvas interaction adapter', () => {
         {
           type: 'text',
           id: 'element',
+          locked: false,
           parent: 'page',
           geometry: null,
           visibility: { visible: true, opacity: 1 },
@@ -550,6 +556,7 @@ describe('canvas interaction adapter', () => {
         {
           type: 'text',
           id: 'other-element',
+          locked: false,
           parent: 'page',
           geometry: null,
           visibility: { visible: true, opacity: 1 },

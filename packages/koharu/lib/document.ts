@@ -8,10 +8,6 @@ export function isGroupLayer(layer: Layer): layer is Extract<Layer, { type: 'gro
   return layer.type === 'group'
 }
 
-export function isLockedLayer(layer: Layer): boolean {
-  return layer.type === 'artwork'
-}
-
 export function layerChildren(layers: Layer[], parent: string): Layer[] {
   return layers.filter((layer) => layer.parent === parent)
 }
@@ -43,4 +39,16 @@ export function effectiveLayerVisibility(layers: Layer[], layer: Layer) {
     parent = group.parent
   }
   return { visible, opacity }
+}
+
+export function effectiveLayerLocked(layers: Layer[], layer: Layer): boolean {
+  if (layer.locked) return true
+  let parent = layer.parent
+  while (parent) {
+    const group = layers.find((candidate) => candidate.id === parent)
+    if (!group || !isGroupLayer(group)) break
+    if (group.locked) return true
+    parent = group.parent
+  }
+  return false
 }

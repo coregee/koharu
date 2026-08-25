@@ -100,7 +100,12 @@ export function SelectionControls({
             point,
             window.devicePixelRatio / camera.zoom,
           )
-        : rotateFrame(current.original, current.start, point)
+        : rotateFrame(
+            current.original,
+            current.start,
+            point,
+            event.ctrlKey || event.shiftKey ? 15 : undefined,
+          )
     onTransformFrame([{ element, frame: next }])
   }
 

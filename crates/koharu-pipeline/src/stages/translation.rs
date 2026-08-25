@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use async_trait::async_trait;
 use koharu_scene::{
-    Authored, EntityId, LanguageTag, OcrCandidate, Origin, Project, Snapshot, SourceText, TextRole,
-    Translation,
+    Authored, EntityId, LanguageTag, OcrCandidate, Origin, Project, Snapshot, SourceText,
+    TextGroupKind, TextRole, Translation,
 };
 use koharu_translator::{
     TranslationContext, TranslationPurpose, TranslationRequest, TranslationRole,
@@ -214,7 +214,10 @@ struct PageSegment {
 
 fn page_segments(scene: &Snapshot, page: EntityId) -> Result<Vec<PageSegment>> {
     let mut segments = Vec::new();
-    if let Some(group) = scene.page(page)?.text_group()? {
+    for kind in [TextGroupKind::Main, TextGroupKind::Sfx] {
+        let Some(group) = scene.page(page)?.text_group(kind)? else {
+            continue;
+        };
         for layer in group.text_layers()? {
             let content = layer.content()?;
             let Some(source) = content.source()? else {
@@ -321,12 +324,12 @@ mod tests {
                 language: None,
             },
         )?;
-        edit.set(
+        edit.set_text_role(
             content,
-            &TextRole {
+            Some(&TextRole {
                 origin: Origin::User,
                 role: role.to_owned(),
-            },
+            }),
         )?;
         if let Some(translation) = translation {
             edit.set(

@@ -220,12 +220,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "Görüntü katmanı ekle",
+    "lockLabel": "{{name}} katmanını kilitle",
+    "reorder": "{{name}} katmanını yeniden sırala",
+    "unlockLabel": "{{name}} katmanının kilidini aç",
     "delete": "{{name}} öğesini sil",
     "edit": "{{name}} öğesini düzenle",
     "empty": "Bu sayfada katman yok.",
     "hide": "{{name}} öğesini gizle",
     "includeForOcr": "OCR'ye dahil et",
     "imageName": "Görüntü {{index}}",
+    "mainText": "Ana Metin",
+    "sfxText": "SFX Metni",
     "kinds": {
       "cleanup": "Temizleme",
       "dialogue": "Diyalog",
@@ -235,7 +241,8 @@
       "paint": "Boyama",
       "censor": "Sansür maskesi",
       "text": "Metin",
-      "textGroup": "Metin grubu"
+      "mainTextGroup": "Ana metin grubu",
+      "sfxTextGroup": "SFX metin grubu"
     },
     "locked": "Kilitli",
     "lockedLabel": "{{name}} kilitli",

@@ -220,12 +220,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "新增影像圖層",
+    "lockLabel": "鎖定 {{name}}",
+    "reorder": "重新排序 {{name}}",
+    "unlockLabel": "解鎖 {{name}}",
     "delete": "刪除 {{name}}",
     "edit": "編輯 {{name}}",
     "empty": "此頁面沒有圖層。",
     "hide": "隱藏 {{name}}",
     "includeForOcr": "納入 OCR",
     "imageName": "影像 {{index}}",
+    "mainText": "主要文字",
+    "sfxText": "音效文字",
     "kinds": {
       "cleanup": "清理",
       "dialogue": "對話",
@@ -235,7 +241,8 @@
       "paint": "繪製",
       "censor": "審查遮罩",
       "text": "文字",
-      "textGroup": "文字群組"
+      "mainTextGroup": "主要文字群組",
+      "sfxTextGroup": "音效文字群組"
     },
     "locked": "已鎖定",
     "lockedLabel": "{{name}} 已鎖定",

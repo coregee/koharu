@@ -220,12 +220,18 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "addImageLayer": "이미지 레이어 추가",
+    "lockLabel": "{{name}} 잠그기",
+    "reorder": "{{name}} 순서 변경",
+    "unlockLabel": "{{name}} 잠금 해제",
     "delete": "{{name}} 삭제",
     "edit": "{{name}} 편집",
     "empty": "이 페이지에는 레이어가 없습니다.",
     "hide": "{{name}} 숨기기",
     "includeForOcr": "OCR에 포함",
     "imageName": "이미지 {{index}}",
+    "mainText": "메인 텍스트",
+    "sfxText": "효과음 텍스트",
     "kinds": {
       "cleanup": "정리",
       "dialogue": "대사",
@@ -235,7 +241,8 @@
       "paint": "페인트",
       "censor": "검열 마스크",
       "text": "텍스트",
-      "textGroup": "텍스트 그룹"
+      "mainTextGroup": "메인 텍스트 그룹",
+      "sfxTextGroup": "효과음 텍스트 그룹"
     },
     "locked": "잠김",
     "lockedLabel": "{{name}}이(가) 잠겨 있습니다",
