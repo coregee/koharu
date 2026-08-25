@@ -601,18 +601,17 @@ fn prepared_bounds(bounds: RenderBounds) -> PreparedBounds {
 }
 
 fn element_frame(layer: &Layer) -> Option<PreparedElementFrame> {
-    let LayerKind::Text(text) = layer.kind() else {
-        return None;
-    };
-    let bounds = text.rendered_bounds;
-    if bounds.width > 0.0 && bounds.height > 0.0 {
-        return Some(PreparedElementFrame {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height,
-            angle_degrees: text.angle_degrees,
-        });
+    if let LayerKind::Text(text) = layer.kind() {
+        let bounds = text.rendered_bounds;
+        if bounds.width > 0.0 && bounds.height > 0.0 {
+            return Some(PreparedElementFrame {
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+                angle_degrees: text.angle_degrees,
+            });
+        }
     }
     geometry_frame(layer.geometry())
 }

@@ -1393,7 +1393,7 @@ impl WebCanvas {
                 .layer(id)
                 .ok_or_else(|| js_message("transform element is not in the prepared frame"))?;
             let presentation = layer.presentation();
-            if !matches!(layer.kind(), LayerKind::Text | LayerKind::Image(_))
+            if !matches!(layer.kind(), LayerKind::Text | LayerKind::Raster)
                 || !presentation.visible
                 || presentation.opacity <= 0.0
             {
