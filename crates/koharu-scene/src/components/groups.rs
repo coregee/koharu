@@ -47,10 +47,17 @@ pub enum TextGroupKind {
 }
 
 /// Identifies a page-owned text group and the ordering responsibility it owns.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
 pub struct TextGroup {
+    #[revision(start = 2, default_fn = "default_kind")]
     pub kind: TextGroupKind,
+}
+
+impl TextGroup {
+    fn default_kind(_revision: u16) -> std::result::Result<TextGroupKind, revision::Error> {
+        Ok(TextGroupKind::Main)
+    }
 }
 
 impl Component for TextGroup {

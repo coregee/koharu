@@ -663,6 +663,74 @@ describe('canvas interaction adapter', () => {
     expect(commit).toHaveBeenCalledWith(1, 'paint', expect.arrayContaining([{ x: 20, y: 20 }]), 48)
   })
 
+  it('targets an imported image layer with the eraser', async () => {
+    installProject()
+    useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['element'] })
+    const commit = vi
+      .spyOn(commands, 'commitErase')
+      .mockResolvedValue({ revision: 2, layer: 'element' })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 12, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 12, clientX: 30, clientY: 40 })
+
+    await waitFor(() => expect(commit).toHaveBeenCalledOnce())
+    expect(canvas.beginStroke).toHaveBeenCalledWith({
+      kind: 'erase',
+      layer: 'element',
+      point: { x: 20, y: 20 },
+      diameter: 48,
+    })
+    expect(commit).toHaveBeenCalledWith(
+      1,
+      'element',
+      expect.arrayContaining([{ x: 20, y: 20 }]),
+      48,
+    )
+  })
+
+  it('targets the original artwork with the eraser', async () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        ...page.layers,
+        {
+          type: 'artwork',
+          locked: true,
+          id: 'page',
+          parent: null,
+          geometry: {
+            points: [
+              { x: 0, y: 0 },
+              { x: 1000, y: 0 },
+              { x: 1000, y: 1000 },
+              { x: 0, y: 1000 },
+            ],
+          },
+          visibility: { visible: true, opacity: 1 },
+          image: 'original-image',
+        },
+      ],
+    }))
+    useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['page'] })
+    const commit = vi
+      .spyOn(commands, 'commitErase')
+      .mockResolvedValue({ revision: 2, layer: 'page' })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 13, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 13, clientX: 30, clientY: 40 })
+
+    await waitFor(() => expect(commit).toHaveBeenCalledWith(1, 'page', expect.any(Array), 48))
+    expect(canvas.beginStroke).toHaveBeenCalledWith({
+      kind: 'erase',
+      layer: 'page',
+      point: { x: 20, y: 20 },
+      diameter: 48,
+    })
+  })
+
   it('maps the Remove tool to an inpainting mask gesture', async () => {
     installProject()
     useKoharuStore.setState({ tool: 'remove' })

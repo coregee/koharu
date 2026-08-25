@@ -6,7 +6,7 @@ use crate::{
     Asset, AssetInput, AssetRole, BlobId, ComponentOwner, EntityId, EntityOrigin, Error,
     Generation, Group, OcrCandidate, Origin, Page, PageDraft, Patch, Presents, Relation,
     RelationId, RelationKind, RelationSpec, Result, Snapshot, SourceText, TextContent, TextGroup,
-    TextGroupKind, TextRole, Translation, Visibility,
+    TextGroupKind, TextLayout, TextRole, Translation, Visibility,
     component::{Component, ComponentKey, ComponentRecord, ValidationContext, decode, encode, key},
     components::Assets,
     patch::{Observation, Operation},
@@ -781,6 +781,38 @@ impl Edit {
         Ok((main, sfx))
     }
 
+    pub(crate) fn migrate_legacy_text_groups(&mut self) -> Result<()> {
+        let pages = self.state.page_order.iter().copied().collect::<Vec<_>>();
+        let layout = key::<TextLayout>()?;
+        for page in pages {
+            let (main, sfx) = self.ensure_text_groups(page)?;
+            let layers = self.state.page(page)?.entities_with(&layout);
+            for layer in layers {
+                let content = self
+                    .state
+                    .outgoing
+                    .get(&layer)
+                    .into_iter()
+                    .flat_map(|relations| relations.iter())
+                    .filter_map(|id| self.state.relations.get(id))
+                    .find(|relation| relation.value.kind.as_str() == Presents::KIND)
+                    .map(|relation| relation.value.target)
+                    .ok_or_else(|| {
+                        Error::invalid(format!("text layer {layer} has no presented content"))
+                    })?;
+                let role = self.decode_component::<TextRole>(content)?;
+                let group = match text_group_kind(role.as_ref()) {
+                    TextGroupKind::Main => main,
+                    TextGroupKind::Sfx => sfx,
+                };
+                if self.state.parent_and_position(layer)?.0 != Some(group) {
+                    self.move_entity(layer, Some(group), At::End)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn ensure_text_group(&mut self, page: EntityId, kind: TextGroupKind) -> Result<EntityId> {
         self.state.page(page)?;
         let marker = key::<TextGroup>()?;
@@ -803,6 +835,20 @@ impl Edit {
         }
         match groups.as_slice() {
             [group] => {
+                let current = u32::from(<TextGroup as revision::Revisioned>::revision());
+                let stored = self
+                    .state
+                    .component(*group, &marker)?
+                    .expect("identified text group carries its marker");
+                if stored.schema < current {
+                    let value = self.encode_value(&TextGroup { kind })?;
+                    self.replace_component(
+                        ComponentOwner::Entity(*group),
+                        marker.clone(),
+                        Some(value),
+                    )?;
+                    self.validate_entities.insert(*group);
+                }
                 if self.generation.is_none() {
                     self.promote_entity_to_user(*group)?;
                 }

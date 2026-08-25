@@ -9,6 +9,7 @@ import {
   ArrowUp,
   Brush,
   ChevronDown,
+  ChevronRight,
   Eye,
   EyeOff,
   Folder,
@@ -659,12 +660,12 @@ function normalizeFontName(value: string): string {
   return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
-function displayedLayers(layers: Layer[], page: EntityId) {
+function displayedLayers(layers: Layer[], page: EntityId, collapsedGroups: ReadonlySet<EntityId>) {
   const indexes = new Map(layers.map((layer, index) => [layer.id, index]))
   const rows: { layer: Layer; index: number; depth: number }[] = []
   const append = (layer: Layer, depth: number) => {
     rows.push({ layer, index: indexes.get(layer.id) ?? 0, depth })
-    if (!isGroupLayer(layer)) return
+    if (!isGroupLayer(layer) || collapsedGroups.has(layer.id)) return
     const children = layerChildren(layers, layer.id)
     const ordered = layer.role !== null ? children : [...children].reverse()
     for (const child of ordered) append(child, depth + 1)
@@ -682,6 +683,7 @@ function LayersInspector() {
   const [expandedLayer, setExpandedLayer] = useState<EntityId | null>(
     selected.length === 1 ? (selected[0] ?? null) : null,
   )
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<EntityId>>(() => new Set())
   const [movingLayer, setMovingLayer] = useState<EntityId | null>(null)
   const [draggedLayer, setDraggedLayer] = useState<EntityId | null>(null)
   const [dropTarget, setDropTarget] = useState<{
@@ -694,7 +696,10 @@ function LayersInspector() {
     setExpandedLayer(selected.length === 1 ? (selected[0] ?? null) : null)
   }, [selected])
 
-  const layers = useMemo(() => (page ? displayedLayers(page.layers, page.id) : []), [page])
+  const layers = useMemo(
+    () => (page ? displayedLayers(page.layers, page.id, collapsedGroups) : []),
+    [collapsedGroups, page],
+  )
 
   if (!page) return <EmptyInspector>{t('inspector.selectPage')}</EmptyInspector>
 
@@ -787,6 +792,15 @@ function LayersInspector() {
     setExpandedLayer(layer)
   }
 
+  const toggleGroup = (group: EntityId) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }
+
   const addImageLayer = () => {
     if (addingImage) return
     setAddingImage(true)
@@ -837,9 +851,11 @@ function LayersInspector() {
                 depth={depth}
                 selected={selected.includes(layer.id)}
                 expanded={expandedLayer === layer.id}
+                childrenExpanded={!isGroupLayer(layer) || !collapsedGroups.has(layer.id)}
                 locked={locked}
                 lockable={layer.type !== 'artwork' && (!locked || layer.locked)}
                 onSelect={() => selectLayer(layer.id)}
+                onToggleChildren={isGroupLayer(layer) ? () => toggleGroup(layer.id) : undefined}
                 onToggle={() =>
                   void call(commands.setVisibility, [layer.id], !layer.visibility.visible, null)
                     .then(() => refresh(projectKey, pageKey))
@@ -914,9 +930,11 @@ function LayerRow({
   depth,
   selected,
   expanded,
+  childrenExpanded,
   locked,
   lockable,
   onSelect,
+  onToggleChildren,
   onToggle,
   onLockToggle,
   onMove,
@@ -937,9 +955,11 @@ function LayerRow({
   depth: number
   selected: boolean
   expanded: boolean
+  childrenExpanded: boolean
   locked: boolean
   lockable: boolean
   onSelect: () => void
+  onToggleChildren?: () => void
   onToggle: () => void
   onLockToggle: () => void
   onMove: (delta: number) => void
@@ -977,6 +997,23 @@ function LayerRow({
         className='min-w-0 overflow-hidden rounded-lg transition-colors duration-150 data-[selected=true]:bg-accent motion-reduce:transition-none'
       >
         <div className='relative flex min-w-0 items-center gap-0.5'>
+          {onToggleChildren && (
+            <button
+              type='button'
+              aria-label={
+                childrenExpanded ? t('layers.collapse', { name }) : t('layers.expand', { name })
+              }
+              aria-expanded={childrenExpanded}
+              className='grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25'
+              onClick={onToggleChildren}
+            >
+              {childrenExpanded ? (
+                <ChevronDown className='size-3.5' />
+              ) : (
+                <ChevronRight className='size-3.5' />
+              )}
+            </button>
+          )}
           <button
             type='button'
             draggable={!locked && !reordering}

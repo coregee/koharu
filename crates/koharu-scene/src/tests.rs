@@ -133,7 +133,7 @@ async fn built_in_component_schemas_have_expected_revisions() {
             schema::<LayerLock>(),
         ],
         [
-            2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1
+            2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1
         ]
     );
 }

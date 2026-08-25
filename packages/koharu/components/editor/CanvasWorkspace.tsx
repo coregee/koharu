@@ -146,6 +146,20 @@ export function CanvasWorkspace() {
             !effectiveLayerLocked(page.layers, layer),
         )
       : undefined
+  const activeEraseTarget =
+    selected.length === 1
+      ? page?.layers.find(
+          (
+            layer,
+          ): layer is Extract<
+            Page['layers'][number],
+            { type: 'raster' } | { type: 'image' } | { type: 'artwork' }
+          > =>
+            layer.id === selected[0] &&
+            (layer.type === 'raster' || layer.type === 'image' || layer.type === 'artwork') &&
+            (layer.type === 'artwork' || !effectiveLayerLocked(page.layers, layer)),
+        )
+      : undefined
   const activePaintRaster =
     activeRaster && activeRaster.kind !== 'censor' ? activeRaster : undefined
   const activeCensorRaster = activeRaster?.kind === 'censor' ? activeRaster : undefined
@@ -768,8 +782,8 @@ export function CanvasWorkspace() {
                 receiveError(errorMessage(error))
               }
             } else if (tool === 'eraser') {
-              if (!activeRaster) {
-                receiveError('Select a paint or cleanup layer before using the Eraser.')
+              if (!activeEraseTarget) {
+                receiveError('Select an editable image layer before using the Eraser.')
                 return
               }
               strokeUpdates.clear()
@@ -777,14 +791,14 @@ export function CanvasWorkspace() {
                 kind: 'erase',
                 pointer: event.pointerId,
                 revision: canvasRevision,
-                layer: activeRaster.id,
+                layer: activeEraseTarget.id,
                 points: [point],
                 diameter: brush.diameter,
               }
               try {
                 canvas.beginStroke({
                   kind: 'erase',
-                  layer: activeRaster.id,
+                  layer: activeEraseTarget.id,
                   point,
                   diameter: brush.diameter,
                 })

@@ -29,6 +29,89 @@ pub(crate) enum RasterStrokeMode {
     Erase,
 }
 
+/// Maps source pixels into page space so erasing follows an image layer's durable geometry.
+#[derive(Clone, Copy, Debug)]
+struct RasterPlacement {
+    origin: [f64; 2],
+    x_axis: [f64; 2],
+    y_axis: [f64; 2],
+}
+
+impl RasterPlacement {
+    const IDENTITY: Self = Self {
+        origin: [0.0, 0.0],
+        x_axis: [1.0, 0.0],
+        y_axis: [0.0, 1.0],
+    };
+
+    fn from_geometry(geometry: &SceneGeometry, width: u32, height: u32) -> Result<Self> {
+        let [top_left, top_right, bottom_right, bottom_left] = geometry.points.as_slice() else {
+            bail!("an editable image layer must have rectangular geometry");
+        };
+        let placement = Self {
+            origin: [top_left.x, top_left.y],
+            x_axis: [
+                (top_right.x - top_left.x) / f64::from(width),
+                (top_right.y - top_left.y) / f64::from(width),
+            ],
+            y_axis: [
+                (bottom_left.x - top_left.x) / f64::from(height),
+                (bottom_left.y - top_left.y) / f64::from(height),
+            ],
+        };
+        let determinant = placement.determinant();
+        let expected_bottom_right = (
+            top_right.x + bottom_left.x - top_left.x,
+            top_right.y + bottom_left.y - top_left.y,
+        );
+        let closure_error = (bottom_right.x - expected_bottom_right.0)
+            .hypot(bottom_right.y - expected_bottom_right.1);
+        let closure_tolerance = (placement.axis_length(placement.x_axis) * f64::from(width))
+            .max(placement.axis_length(placement.y_axis) * f64::from(height))
+            * 1e-6;
+        if !determinant.is_finite()
+            || closure_error > closure_tolerance
+            || determinant.abs()
+                <= placement.axis_length(placement.x_axis)
+                    * placement.axis_length(placement.y_axis)
+                    * f64::EPSILON
+        {
+            bail!("an editable image layer must have non-degenerate geometry");
+        }
+        Ok(placement)
+    }
+
+    fn determinant(self) -> f64 {
+        self.x_axis[0] * self.y_axis[1] - self.x_axis[1] * self.y_axis[0]
+    }
+
+    fn axis_length(self, axis: [f64; 2]) -> f64 {
+        axis[0].hypot(axis[1])
+    }
+
+    fn pixel_size(self) -> f64 {
+        self.axis_length(self.x_axis)
+            .max(self.axis_length(self.y_axis))
+    }
+
+    fn raster_to_page(self, x: f64, y: f64) -> (f64, f64) {
+        (
+            self.origin[0] + self.x_axis[0] * x + self.y_axis[0] * y,
+            self.origin[1] + self.x_axis[1] * x + self.y_axis[1] * y,
+        )
+    }
+
+    fn page_to_raster(self, x: f64, y: f64) -> (f64, f64) {
+        let x = x - self.origin[0];
+        let y = y - self.origin[1];
+        let determinant = self.determinant();
+        (
+            (x * self.y_axis[1] - y * self.y_axis[0]) / determinant,
+            (self.x_axis[0] * y - self.x_axis[1] * x) / determinant,
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Type)]
 pub struct ProjectInfo {
     pub name: String,
@@ -1013,27 +1096,71 @@ impl Project {
         }
         let mut raster_layer = None;
         let mut promote_layer = false;
+        let source = AssetRole::new("source")?;
+        let mut asset_attributes = Default::default();
+        let mut placement = RasterPlacement::IDENTITY;
         let mut image = if let Some(layer) = layer {
-            if snapshot.parent(layer)? != Some(page) {
+            if layer == page {
+                if mode != RasterStrokeMode::Erase {
+                    bail!("the original artwork only accepts erase strokes");
+                }
+                let asset = snapshot
+                    .asset(page, &source)?
+                    .context("the original artwork has no source asset")?;
+                asset_attributes = asset.metadata.attributes;
+                let bytes = snapshot.read_blob(asset.blob).await?;
+                let image = image::load_from_memory(&bytes)?.to_rgba8();
+                placement = RasterPlacement::from_geometry(
+                    &SceneGeometry::rectangle(0.0, 0.0, page_value.width, page_value.height),
+                    image.width(),
+                    image.height(),
+                )?;
+                promote_layer = snapshot
+                    .component::<EntityOrigin>(page)?
+                    .is_some_and(|origin| origin.origin != Origin::User);
+                image
+            } else if snapshot.parent(layer)? != Some(page) {
                 bail!("the raster target must be a layer on the active page");
-            }
-            let target = snapshot
-                .component::<SceneRasterLayer>(layer)?
-                .context("the raster target must be a layer on the active page")?;
-            if mode == RasterStrokeMode::Paint && target.kind != new_layer_kind {
-                bail!("the raster target kind does not match the selected brush");
-            }
-            promote_layer = target.origin != Origin::User
-                || snapshot
+            } else if let Some(target) = snapshot.component::<SceneRasterLayer>(layer)? {
+                if mode == RasterStrokeMode::Paint && target.kind != new_layer_kind {
+                    bail!("the raster target kind does not match the selected brush");
+                }
+                promote_layer = target.origin != Origin::User
+                    || snapshot
+                        .component::<EntityOrigin>(layer)?
+                        .is_some_and(|origin| origin.origin != Origin::User);
+                raster_layer = Some(target);
+                match snapshot.asset(layer, &source)? {
+                    Some(asset) => {
+                        asset_attributes = asset.metadata.attributes;
+                        let bytes = snapshot.read_blob(asset.blob).await?;
+                        image::load_from_memory(&bytes)?.to_rgba8()
+                    }
+                    None => RgbaImage::new(width, height),
+                }
+            } else {
+                if mode != RasterStrokeMode::Erase
+                    || snapshot.component::<SceneTextLayout>(layer)?.is_some()
+                    || snapshot.component::<SceneRegion>(layer)?.is_some()
+                    || snapshot.component::<SceneGroup>(layer)?.is_some()
+                {
+                    bail!("the raster target must be a raster or imported image layer");
+                }
+                let geometry = snapshot
+                    .component::<SceneGeometry>(layer)?
+                    .context("the imported image target has no geometry")?;
+                let asset = snapshot
+                    .asset(layer, &source)?
+                    .context("the imported image target has no source asset")?;
+                asset_attributes = asset.metadata.attributes;
+                let bytes = snapshot.read_blob(asset.blob).await?;
+                let image = image::load_from_memory(&bytes)?.to_rgba8();
+                placement =
+                    RasterPlacement::from_geometry(&geometry, image.width(), image.height())?;
+                promote_layer = snapshot
                     .component::<EntityOrigin>(layer)?
                     .is_some_and(|origin| origin.origin != Origin::User);
-            raster_layer = Some(target);
-            match snapshot.asset(layer, &AssetRole::new("source")?)? {
-                Some(asset) => {
-                    let bytes = snapshot.read_blob(asset.blob).await?;
-                    image::load_from_memory(&bytes)?.to_rgba8()
-                }
-                None => RgbaImage::new(width, height),
+                image
             }
         } else {
             if mode == RasterStrokeMode::Erase {
@@ -1041,13 +1168,13 @@ impl Project {
             }
             RgbaImage::new(width, height)
         };
-        if image.dimensions() != (width, height) {
+        if raster_layer.is_some() && image.dimensions() != (width, height) {
             bail!("raster layer dimensions must match the page");
         }
-        rasterize_stroke(&mut image, mode, color, diameter, &points);
+        rasterize_stroke_with_placement(&mut image, mode, color, diameter, &points, placement);
+        let (output_width, output_height) = image.dimensions();
         let mut bytes = Cursor::new(Vec::new());
         DynamicImage::ImageRgba8(image).write_to(&mut bytes, ImageFormat::Png)?;
-        let source = AssetRole::new("source")?;
         let layer_label = match new_layer_kind {
             RasterLayerKind::Censor => "Censor",
             RasterLayerKind::Paint => "Paint",
@@ -1072,11 +1199,10 @@ impl Project {
             let layer = if let Some(layer) = committed_layer {
                 if promote_layer {
                     edit.promote_entity_to_user(layer)?;
-                    let raster = raster_layer
-                        .as_mut()
-                        .expect("an existing raster target has a layer component");
-                    raster.origin = Origin::User;
-                    edit.set(layer, raster)?;
+                    if let Some(raster) = raster_layer.as_mut() {
+                        raster.origin = Origin::User;
+                        edit.set(layer, raster)?;
+                    }
                 }
                 layer
             } else {
@@ -1103,9 +1229,9 @@ impl Project {
                     bytes.into_inner(),
                     "image/png",
                     AssetMetadata {
-                        width: Some(width),
-                        height: Some(height),
-                        attributes: Default::default(),
+                        width: Some(output_width),
+                        height: Some(output_height),
+                        attributes: asset_attributes,
                     },
                 ),
             )
@@ -1564,6 +1690,7 @@ fn validate_project_name(name: &str) -> Result<String> {
     Ok(name.to_owned())
 }
 
+#[cfg(test)]
 fn rasterize_stroke(
     image: &mut RgbaImage,
     mode: RasterStrokeMode,
@@ -1571,18 +1698,64 @@ fn rasterize_stroke(
     diameter: f32,
     points: &[ScenePoint],
 ) {
+    rasterize_stroke_with_placement(
+        image,
+        mode,
+        color,
+        diameter,
+        points,
+        RasterPlacement::IDENTITY,
+    );
+}
+
+fn rasterize_stroke_with_placement(
+    image: &mut RgbaImage,
+    mode: RasterStrokeMode,
+    color: [u8; 4],
+    diameter: f32,
+    points: &[ScenePoint],
+    placement: RasterPlacement,
+) {
     let radius = f64::from(diameter) * 0.5;
+    let transition = placement.pixel_size().max(f64::EPSILON);
+    let edge = transition * 0.5;
     for (start, end) in points
         .iter()
         .zip(points.iter().skip(1))
         .chain(points.last().map(|point| (point, point)))
     {
-        let left = (start.x.min(end.x) - radius - 0.5).floor().max(0.0) as u32;
-        let top = (start.y.min(end.y) - radius - 0.5).floor().max(0.0) as u32;
-        let right = (start.x.max(end.x) + radius + 0.5)
+        let page_left = start.x.min(end.x) - radius - edge;
+        let page_top = start.y.min(end.y) - radius - edge;
+        let page_right = start.x.max(end.x) + radius + edge;
+        let page_bottom = start.y.max(end.y) + radius + edge;
+        let corners = [
+            placement.page_to_raster(page_left, page_top),
+            placement.page_to_raster(page_right, page_top),
+            placement.page_to_raster(page_right, page_bottom),
+            placement.page_to_raster(page_left, page_bottom),
+        ];
+        let left = corners
+            .iter()
+            .map(|point| point.0)
+            .fold(f64::INFINITY, f64::min)
+            .floor()
+            .max(0.0) as u32;
+        let top = corners
+            .iter()
+            .map(|point| point.1)
+            .fold(f64::INFINITY, f64::min)
+            .floor()
+            .max(0.0) as u32;
+        let right = corners
+            .iter()
+            .map(|point| point.0)
+            .fold(f64::NEG_INFINITY, f64::max)
             .ceil()
             .min(f64::from(image.width())) as u32;
-        let bottom = (start.y.max(end.y) + radius + 0.5)
+        let bottom = corners
+            .iter()
+            .map(|point| point.1)
+            .fold(f64::NEG_INFINITY, f64::max)
             .ceil()
             .min(f64::from(image.height())) as u32;
         let dx = end.x - start.x;
@@ -1590,8 +1763,7 @@ fn rasterize_stroke(
         let length_squared = dx * dx + dy * dy;
         for y in top..bottom {
             for x in left..right {
-                let px = f64::from(x) + 0.5;
-                let py = f64::from(y) + 0.5;
+                let (px, py) = placement.raster_to_page(f64::from(x) + 0.5, f64::from(y) + 0.5);
                 let t = if length_squared == 0.0 {
                     0.0
                 } else {
@@ -1599,7 +1771,7 @@ fn rasterize_stroke(
                 };
                 let distance =
                     ((px - (start.x + t * dx)).powi(2) + (py - (start.y + t * dy)).powi(2)).sqrt();
-                let coverage = (radius + 0.5 - distance).clamp(0.0, 1.0) as f32;
+                let coverage = ((radius + edge - distance) / transition).clamp(0.0, 1.0) as f32;
                 if coverage == 0.0 {
                     continue;
                 }
@@ -1878,6 +2050,158 @@ mod tests {
                 .component::<SceneLayerLock>(layer)
                 .unwrap()
                 .is_some_and(|lock| lock.locked)
+        );
+    }
+
+    #[tokio::test]
+    async fn original_and_imported_image_erasing_are_undoable() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 100.0, 200.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(patch).await.unwrap();
+        let page = page.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+
+        let image = RgbaImage::from_pixel(10, 20, image::Rgba([40, 80, 120, 255]));
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut encoded, ImageFormat::Png)
+            .unwrap();
+        let image_bytes = Arc::<[u8]>::from(encoded.into_inner());
+        let source = AssetRole::new("source").unwrap();
+        let patch = project
+            .snapshot()
+            .patch(|edit| {
+                edit.set_asset(
+                    page,
+                    &source,
+                    AssetInput::new(
+                        image_bytes.clone(),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(10),
+                            height: Some(20),
+                            attributes: Default::default(),
+                        },
+                    ),
+                )
+            })
+            .unwrap();
+        project.commit(patch).await.unwrap();
+        let original_page_blob = project
+            .snapshot()
+            .asset(page, &source)
+            .unwrap()
+            .unwrap()
+            .blob;
+        let (_, layer) = project
+            .add_image_layer(
+                page,
+                crate::commands::import::Page {
+                    name: "alternate.png".to_owned(),
+                    bytes: image_bytes,
+                    format: ImageFormat::Png,
+                    width: 10,
+                    height: 20,
+                },
+            )
+            .await
+            .unwrap();
+        project
+            .set_geometries([(layer, SceneGeometry::rectangle(20.0, 30.0, 50.0, 100.0))])
+            .await
+            .unwrap();
+        let original_blob = project
+            .snapshot()
+            .asset(layer, &source)
+            .unwrap()
+            .unwrap()
+            .blob;
+
+        let (page_commit, committed_page) = project
+            .apply_raster_stroke(
+                page,
+                Some(page),
+                RasterStrokeMode::Erase,
+                RasterLayerKind::Paint,
+                [0; 4],
+                20.0,
+                vec![ScenePoint { x: 55.0, y: 105.0 }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(committed_page, page);
+        project.record_commit(&page_commit);
+        let erased_page = project.snapshot();
+        let erased_page_asset = erased_page.asset(page, &source).unwrap().unwrap();
+        assert_ne!(erased_page_asset.blob, original_page_blob);
+        let bytes = erased_page.read_blob(erased_page_asset.blob).await.unwrap();
+        let image = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        assert_eq!(image.get_pixel(5, 10)[3], 0);
+        project.undo().await.unwrap();
+        assert_eq!(
+            project
+                .snapshot()
+                .asset(page, &source)
+                .unwrap()
+                .unwrap()
+                .blob,
+            original_page_blob
+        );
+
+        let (commit, committed_layer) = project
+            .apply_raster_stroke(
+                page,
+                Some(layer),
+                RasterStrokeMode::Erase,
+                RasterLayerKind::Paint,
+                [0; 4],
+                10.0,
+                vec![ScenePoint { x: 47.5, y: 82.5 }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(committed_layer, layer);
+        project.record_commit(&commit);
+
+        let erased = project.snapshot();
+        let erased_asset = erased.asset(layer, &source).unwrap().unwrap();
+        assert_eq!(erased_asset.metadata.width, Some(10));
+        assert_eq!(erased_asset.metadata.height, Some(20));
+        assert_ne!(erased_asset.blob, original_blob);
+        let erased_blob = erased_asset.blob;
+        let bytes = erased.read_blob(erased_blob).await.unwrap();
+        let image = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        assert_eq!(image.get_pixel(5, 10)[3], 0);
+        assert!(project.info().can_undo);
+
+        project.undo().await.unwrap();
+        assert_eq!(
+            project
+                .snapshot()
+                .asset(layer, &source)
+                .unwrap()
+                .unwrap()
+                .blob,
+            original_blob
+        );
+        assert!(project.info().can_redo);
+
+        project.redo().await.unwrap();
+        assert_eq!(
+            project
+                .snapshot()
+                .asset(layer, &source)
+                .unwrap()
+                .unwrap()
+                .blob,
+            erased_blob
         );
     }
 

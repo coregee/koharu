@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use bytes::Bytes;
 
 use crate::{
-    Change, Error, Patch, ProjectId, Result, Snapshot,
+    Change, Error, Generation, Patch, ProducerId, ProjectId, Result, Snapshot, TextGroup,
     patch::{Operation, apply_operations},
     state::{State, StoredState},
 };
@@ -197,13 +197,27 @@ impl Session {
         let stored = storage.load().await?;
         let checkpoint: StoredState = revision::from_slice(stored.payload())?;
         let state = State::from_checkpoint(stored.document_id(), stored.revision(), checkpoint)?;
-        state.validate()?;
+        let migrate_text_groups = state.has_outdated_component::<TextGroup>()?;
+        if !migrate_text_groups {
+            state.validate()?;
+        }
         let current = Snapshot::new(Arc::new(state), stored)?;
-        Ok(Self {
+        let mut session = Self {
             storage,
             current,
             history: BTreeMap::new(),
-        })
+        };
+        if migrate_text_groups {
+            let generation =
+                Generation::new(ProducerId::new("dev.koharu.scene.text-group-migration")?);
+            let mut edit = session.current.edit_as(generation);
+            edit.migrate_legacy_text_groups()?;
+            let patch = edit.finish()?;
+            patch.state.validate()?;
+            session.commit(patch).await?;
+            session.history.clear();
+        }
+        Ok(session)
     }
 }
 
@@ -216,4 +230,134 @@ pub struct Commit {
 
 fn encode_checkpoint(state: &State) -> Result<Vec<u8>> {
     revision::to_vec(&state.to_checkpoint()).map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use revision::revisioned;
+
+    use super::*;
+    use crate::{
+        At, Component, Origin, PageDraft, TextGroupKind, TextLayout, TextLayoutKind, TextRole,
+        component::{ValidationContext, encode, key},
+    };
+
+    #[revisioned(revision = 1)]
+    #[derive(Clone)]
+    struct LegacyTextGroup {}
+
+    impl Component for LegacyTextGroup {
+        const KIND: &'static str = TextGroup::KIND;
+    }
+
+    #[tokio::test]
+    async fn opening_revision_one_text_groups_migrates_structure_and_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy-text-groups.khrproj");
+        let (page, layer, main, legacy_revision);
+        {
+            let mut session = Session::create(&path).await.unwrap();
+            let mut created = None;
+            let patch = session
+                .snapshot()
+                .patch(|edit| {
+                    let page = edit.add_page(PageDraft::new("page", 500.0, 700.0), At::End)?;
+                    let content = edit.add_text_content(page, At::End)?;
+                    edit.set_text_role(
+                        content,
+                        Some(&TextRole {
+                            origin: Origin::User,
+                            role: TextRole::SFX.to_owned(),
+                        }),
+                    )?;
+                    let layer = edit.add_text_layer(
+                        page,
+                        At::End,
+                        content,
+                        &TextLayout {
+                            origin: Origin::User,
+                            kind: TextLayoutKind::Paragraph,
+                        },
+                    )?;
+                    created = Some((page, layer));
+                    Ok(())
+                })
+                .unwrap();
+            let snapshot = session.commit(patch).await.unwrap().snapshot;
+            (page, layer) = created.unwrap();
+            main = snapshot
+                .page(page)
+                .unwrap()
+                .text_group(TextGroupKind::Main)
+                .unwrap()
+                .unwrap()
+                .id();
+            let sfx = snapshot
+                .page(page)
+                .unwrap()
+                .text_group(TextGroupKind::Sfx)
+                .unwrap()
+                .unwrap()
+                .id();
+
+            let mut state = (*session.current.state).clone();
+            let position = state.child_ids(main).unwrap().len();
+            state.move_entity(layer, main, position).unwrap();
+            state.remove_leaf(sfx).unwrap();
+            let record_exists = |_id| true;
+            let blob_exists = |_id| true;
+            let legacy = encode(
+                &LegacyTextGroup {},
+                &ValidationContext::new(&record_exists, &blob_exists),
+            )
+            .unwrap();
+            state
+                .set_entity_component(main, key::<TextGroup>().unwrap(), legacy)
+                .unwrap();
+            legacy_revision = state.revision.next().unwrap();
+            state.revision = legacy_revision;
+            let proposed = session
+                .current
+                .storage
+                .update(
+                    legacy_revision,
+                    Bytes::from(encode_checkpoint(&state).unwrap()),
+                    state.referenced_blobs(),
+                    [],
+                )
+                .unwrap();
+            session.storage.save(&proposed).await.unwrap();
+        }
+
+        let session = Session::open(&path).await.unwrap();
+        assert_eq!(
+            session.snapshot().revision(),
+            legacy_revision.next().unwrap()
+        );
+        let snapshot = session.snapshot();
+        let sfx = snapshot
+            .page(page)
+            .unwrap()
+            .text_group(TextGroupKind::Sfx)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.parent(layer).unwrap(), Some(sfx.id()));
+        assert_eq!(
+            session
+                .current
+                .state
+                .component(main, &key::<TextGroup>().unwrap())
+                .unwrap()
+                .unwrap()
+                .schema,
+            u32::from(<TextGroup as revision::Revisioned>::revision()),
+        );
+        assert!(session.history.is_empty());
+        let migrated_revision = snapshot.revision();
+        drop(snapshot);
+        drop(session);
+
+        let reopened = Session::open(&path).await.unwrap();
+        assert_eq!(reopened.snapshot().revision(), migrated_revision);
+    }
 }

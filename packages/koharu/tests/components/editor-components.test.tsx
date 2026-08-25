@@ -876,6 +876,47 @@ describe('greenfield editor', () => {
     )
   })
 
+  it('collapses and expands text group contents without changing the project', () => {
+    installProject()
+    const setVisibility = vi.spyOn(commands, 'setVisibility').mockResolvedValue(null)
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        {
+          type: 'group',
+          locked: false,
+          id: 'sfx-text',
+          parent: 'page',
+          visibility: { visible: true, opacity: 1 },
+          name: 'SFX Text',
+          role: 'sfx_text',
+        },
+        {
+          ...textLayer,
+          id: 'sfx',
+          parent: 'sfx-text',
+          content: {
+            ...textLayer.content,
+            id: 'sfx-content',
+            translation: { text: 'Boom', language: null },
+            classification: 'sfx',
+          },
+        },
+      ],
+    }))
+    render(<Inspector />)
+
+    expect(screen.getByRole('button', { name: 'Edit Boom' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse SFX Text' }))
+
+    expect(screen.queryByRole('button', { name: 'Edit Boom' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit SFX Text' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand SFX Text' }))
+
+    expect(screen.getByRole('button', { name: 'Edit Boom' })).toBeInTheDocument()
+    expect(setVisibility).not.toHaveBeenCalled()
+  })
+
   it('locks layers from the control beneath visibility', async () => {
     installProject()
     const current = queryClient.getQueryData<Page>(pageKey)!

@@ -8,7 +8,9 @@ use smallvec::SmallVec;
 
 use crate::{
     BlobId, EntityId, EntityOrigin, Error, Page, Relation, RelationId, Result,
-    component::{ComponentKey, ComponentRecord, StoredComponent, ValidationContext},
+    component::{
+        Component, ComponentKey, ComponentRecord, StoredComponent, ValidationContext, key,
+    },
     schema,
 };
 
@@ -909,8 +911,31 @@ impl State {
             )
             .components = load_components(relation.components)?;
         }
-        state.validate()?;
         Ok(state)
+    }
+
+    pub(crate) fn has_outdated_component<T: Component>(&self) -> Result<bool> {
+        let marker = key::<T>()?;
+        let current = u32::from(<T as revision::Revisioned>::revision());
+        Ok(self
+            .project_components
+            .iter()
+            .filter(|(candidate, _)| candidate == &marker)
+            .chain(self.pages.values().flat_map(|page| {
+                page.entities.values().flat_map(|entity| {
+                    entity
+                        .components
+                        .iter()
+                        .filter(|(candidate, _)| candidate == &marker)
+                })
+            }))
+            .chain(self.relations.values().flat_map(|relation| {
+                relation
+                    .components
+                    .iter()
+                    .filter(|(candidate, _)| candidate == &marker)
+            }))
+            .any(|(_, component)| component.schema < current))
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
