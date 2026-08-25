@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef } from 'react'
+import { useId, useMemo, useRef } from 'react'
 
 import { SelectionControls } from '@/components/editor/SelectionControls'
 import {
@@ -15,6 +15,7 @@ import type {
   EntityId,
   Frame,
   Geometry,
+  InpaintSelection,
   Page,
   Point,
   TransformFrame,
@@ -32,6 +33,8 @@ interface CanvasOverlayProps {
   cursor: Point | null
   brushSize: number
   showBrushCursor: boolean
+  inpaintSelections: readonly InpaintSelection[]
+  inpaintDraft: InpaintSelection | null
   onTransformStart: (elements: TransformFrame[]) => void
   onTransformFrame: (elements: TransformFrame[]) => void
   onTransformEnd: () => void
@@ -52,6 +55,8 @@ export function CanvasOverlay({
   cursor,
   brushSize,
   showBrushCursor,
+  inpaintSelections,
+  inpaintDraft,
   onTransformStart,
   onTransformFrame,
   onTransformEnd,
@@ -153,6 +158,13 @@ export function CanvasOverlay({
       })}
 
       {draft && <DraftOverlay frame={draft} camera={camera} />}
+      {(inpaintSelections.length > 0 || inpaintDraft) && (
+        <InpaintSelectionOverlay
+          page={page}
+          camera={camera}
+          selections={inpaintDraft ? [...inpaintSelections, inpaintDraft] : inpaintSelections}
+        />
+      )}
       {showBrushCursor && cursor && (
         <div
           className='absolute rounded-full border border-white/95 shadow-[0_0_0_1px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.45)]'
@@ -190,6 +202,106 @@ export function CanvasOverlay({
       ) : null}
     </div>
   )
+}
+
+function InpaintSelectionOverlay({
+  page,
+  camera,
+  selections,
+}: {
+  page: Page
+  camera: Camera
+  selections: readonly InpaintSelection[]
+}) {
+  const clipId = useId().replaceAll(':', '')
+  const dpr = window.devicePixelRatio
+  const scale = camera.zoom / dpr
+  const screenPoint = (point: Point) => ({
+    x: (point.x * camera.zoom + camera.translation[0]) / dpr,
+    y: (point.y * camera.zoom + camera.translation[1]) / dpr,
+  })
+  const pageOrigin = screenPoint({ x: 0, y: 0 })
+
+  return (
+    <svg
+      data-testid='inpaint-selection-overlay'
+      className='absolute inset-0 size-full overflow-hidden'
+    >
+      <defs>
+        <clipPath id={clipId}>
+          <rect
+            x={pageOrigin.x}
+            y={pageOrigin.y}
+            width={page.size.width * scale}
+            height={page.size.height * scale}
+          />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clipId})`} fill='rgb(168 85 247 / 0.3)' stroke='rgb(216 180 254 / 0.95)'>
+        {selections.map((selection, index) => {
+          if (selection.type === 'pen') {
+            const points = selection.points.map(screenPoint)
+            const path = points
+              .map((point, pointIndex) => `${pointIndex === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+              .join(' ')
+            return points.length === 1 ? (
+              <circle
+                key={index}
+                cx={points[0].x}
+                cy={points[0].y}
+                r={(selection.diameter * scale) / 2}
+                stroke='none'
+              />
+            ) : (
+              <path
+                key={index}
+                d={path}
+                fill='none'
+                stroke='rgb(168 85 247 / 0.55)'
+                strokeWidth={selection.diameter * scale}
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              />
+            )
+          }
+          const bounds = constrainedSelectionBounds(selection.start, selection.end)
+          const topLeft = screenPoint({ x: bounds.left, y: bounds.top })
+          const size = bounds.size * scale
+          return selection.type === 'circle' ? (
+            <circle
+              key={index}
+              cx={topLeft.x + size / 2}
+              cy={topLeft.y + size / 2}
+              r={size / 2}
+              strokeWidth={1.5}
+            />
+          ) : (
+            <rect
+              key={index}
+              x={topLeft.x}
+              y={topLeft.y}
+              width={size}
+              height={size}
+              strokeWidth={1.5}
+            />
+          )
+        })}
+      </g>
+    </svg>
+  )
+}
+
+export function constrainedSelectionBounds(start: Point, end: Point) {
+  const deltaX = end.x - start.x
+  const deltaY = end.y - start.y
+  const size = Math.max(Math.abs(deltaX), Math.abs(deltaY), 1)
+  const endX = start.x + size * (deltaX < 0 ? -1 : 1)
+  const endY = start.y + size * (deltaY < 0 ? -1 : 1)
+  return {
+    left: Math.min(start.x, endX),
+    top: Math.min(start.y, endY),
+    size,
+  }
 }
 
 function TextRegionOverlay({

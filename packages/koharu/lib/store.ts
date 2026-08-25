@@ -30,9 +30,10 @@ export const MIN_BRUSH_DIAMETER = 1
 export const MAX_BRUSH_DIAMETER = 128
 export const MIN_FILL_TOLERANCE = 0
 export const MAX_FILL_TOLERANCE = 255
+export type RemoveSelectionTool = 'pen' | 'circle' | 'square'
 
 export function isBrushTool(tool: CanvasTool): boolean {
-  return tool === 'draw' || tool === 'eraser' || tool === 'remove' || tool === 'censor'
+  return tool === 'draw' || tool === 'eraser' || tool === 'censor'
 }
 
 export interface CanvasBrush {
@@ -77,6 +78,7 @@ interface KoharuStore {
   tool: CanvasTool
   brush: CanvasBrush
   fillTolerance: number
+  removeSelectionTool: RemoveSelectionTool
   inspector: InspectorSection
   processingScope: PipelineScope
   processingStages: Stage[]
@@ -92,6 +94,7 @@ interface KoharuStore {
   setTool: (tool: CanvasTool) => void
   setBrush: (brush: CanvasBrush) => void
   setFillTolerance: (tolerance: number) => void
+  setRemoveSelectionTool: (tool: RemoveSelectionTool) => void
   setShortcut: (action: ShortcutAction, key: string) => void
   requestCanvasFit: () => void
   dismissJob: (id: string) => void
@@ -131,6 +134,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   tool: 'select',
   brush: { diameter: 48, color: '#111111' },
   fillTolerance: 32,
+  removeSelectionTool: 'pen',
   inspector: 'copy',
   processingScope: 'page',
   processingStages: [...pipelineStages],
@@ -147,6 +151,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   setTool: (tool) => set({ tool }),
   setBrush: (brush) => set({ brush }),
   setFillTolerance: (fillTolerance) => set({ fillTolerance }),
+  setRemoveSelectionTool: (removeSelectionTool) => set({ removeSelectionTool }),
   setShortcut: (action, key) =>
     set((state) => ({
       shortcuts: { ...state.shortcuts, [action]: key.toLowerCase().slice(0, 1) },

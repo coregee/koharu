@@ -336,6 +336,7 @@ pub enum ImageKind {
     Cleanup,
     Paint,
     Censor,
+    Segmentation,
     Embedded,
 }
 

@@ -10,7 +10,7 @@ use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, BubbleRegion,
     BubbleStyle as SceneBubbleStyle, Commit, Edit as SceneEdit, EntityId, EntityOrigin, FitsTo,
-    Geometry as SceneGeometry, Group as SceneGroup, LayerLock as SceneLayerLock,
+    Generation, Geometry as SceneGeometry, Group as SceneGroup, LayerLock as SceneLayerLock,
     OcrCandidate as SceneOcrCandidate, Origin, PageDraft, Point as ScenePoint, Presents,
     Project as SceneProject, RasterLayer as SceneRasterLayer, RasterLayerKind, RecognizedFrom,
     Region as SceneRegion, RegionShape as SceneRegionShape, RegionShapeKind, RemovePolicy,
@@ -1094,9 +1094,17 @@ impl Project {
                 bail!("only layers can be locked");
             }
         }
+        let mut generated_segmentations = HashSet::new();
+        for layer in &layers {
+            if Self::segmentation_generation(&snapshot, *layer)?.is_some() {
+                generated_segmentations.insert(*layer);
+            }
+        }
         let patch = snapshot.patch(|edit| {
             for layer in layers {
-                edit.promote_entity_to_user(layer)?;
+                if !generated_segmentations.contains(&layer) {
+                    edit.promote_entity_to_user(layer)?;
+                }
                 if locked {
                     edit.set(
                         layer,
@@ -1462,13 +1470,18 @@ impl Project {
             .flatten()
             .collect::<Vec<_>>();
         let at = Self::placement(&siblings, layer, index);
-        let patch = snapshot.patch(|edit| {
+        let segmentation_generation = Self::segmentation_generation(&snapshot, layer)?;
+        let mut edit = segmentation_generation
+            .clone()
+            .map_or_else(|| snapshot.edit(), |owner| snapshot.edit_as(owner));
+        if segmentation_generation.is_none() {
             edit.promote_entity_to_user(layer)?;
             if snapshot.component::<SceneTextGroup>(parent)?.is_some() {
                 edit.promote_entity_to_user(parent)?;
             }
-            edit.move_entity(layer, Some(parent), at)
-        })?;
+        }
+        edit.move_entity(layer, Some(parent), at)?;
+        let patch = edit.finish()?;
         self.commit(patch).await
     }
 
@@ -1540,6 +1553,7 @@ impl Project {
         }
         let mut raster_layer = None;
         let mut promote_layer = false;
+        let mut raster_generation = None;
         let source = AssetRole::new("source")?;
         let mut asset_attributes = Default::default();
         let mut placement = RasterPlacement::IDENTITY;
@@ -1569,10 +1583,13 @@ impl Project {
                 if mode == RasterStrokeMode::Paint && target.kind != new_layer_kind {
                     bail!("the raster target kind does not match the selected brush");
                 }
-                promote_layer = target.origin != Origin::User
-                    || snapshot
-                        .component::<EntityOrigin>(layer)?
-                        .is_some_and(|origin| origin.origin != Origin::User);
+                if target.kind == RasterLayerKind::Segmentation {
+                    raster_generation = Self::segmentation_generation(&snapshot, layer)?;
+                } else {
+                    let entity_origin = snapshot.component::<EntityOrigin>(layer)?;
+                    promote_layer = target.origin != Origin::User
+                        || entity_origin.is_some_and(|origin| origin.origin != Origin::User);
+                }
                 raster_layer = Some(target);
                 match snapshot.asset(layer, &source)? {
                     Some(asset) => {
@@ -1623,6 +1640,7 @@ impl Project {
             RasterLayerKind::Censor => "Censor",
             RasterLayerKind::Paint => "Paint",
             RasterLayerKind::Cleanup => "Cleanup",
+            RasterLayerKind::Segmentation => "Segmentation",
         };
         let name = format!(
             "{layer_label} {}",
@@ -1639,7 +1657,9 @@ impl Project {
                 + 1
         );
         let mut committed_layer = layer;
-        let patch = snapshot.patch(|edit| {
+        let mut edit =
+            raster_generation.map_or_else(|| snapshot.edit(), |owner| snapshot.edit_as(owner));
+        {
             let layer = if let Some(layer) = committed_layer {
                 if promote_layer {
                     edit.promote_entity_to_user(layer)?;
@@ -1678,8 +1698,9 @@ impl Project {
                         attributes: asset_attributes,
                     },
                 ),
-            )
-        })?;
+            )?;
+        }
+        let patch = edit.finish()?;
         Ok((
             self.commit(patch).await?,
             committed_layer.expect("raster layer was selected or added while building the patch"),
@@ -2160,6 +2181,24 @@ impl Project {
                     .is_some()))
     }
 
+    fn segmentation_generation(
+        snapshot: &Snapshot,
+        entity: EntityId,
+    ) -> Result<Option<Generation>> {
+        if !snapshot
+            .component::<SceneRasterLayer>(entity)?
+            .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
+        {
+            return Ok(None);
+        }
+        Ok(snapshot
+            .component::<EntityOrigin>(entity)?
+            .and_then(|origin| match origin.origin {
+                Origin::Generated(generation) => Some(generation),
+                Origin::User => None,
+            }))
+    }
+
     fn is_transformable_layer(snapshot: &Snapshot, entity: EntityId) -> Result<bool> {
         Ok(snapshot.component::<SceneTextLayout>(entity)?.is_some()
             || snapshot.component::<SceneBubbleStyle>(entity)?.is_some()
@@ -2496,10 +2535,8 @@ fn rasterize_fill(
         .into_iter()
         .flatten()
         {
-            let index = usize::try_from(
-                u64::from(next_y) * u64::from(width) + u64::from(next_x),
-            )
-            .expect("pixel index fits in addressable memory");
+            let index = usize::try_from(u64::from(next_y) * u64::from(width) + u64::from(next_x))
+                .expect("pixel index fits in addressable memory");
             if !visited[index] {
                 visited[index] = true;
                 pending.push_back((next_x, next_y));
@@ -3127,6 +3164,139 @@ mod tests {
                 .unwrap()
                 .blob,
             erased_blob
+        );
+    }
+
+    #[tokio::test]
+    async fn segmentation_erasing_is_undoable_without_changing_detector_ownership() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let create = session
+            .snapshot()
+            .patch(|edit| {
+                let id = edit.add_page(PageDraft::new("page", 10.0, 10.0), At::End)?;
+                let sibling = edit.add_entity(id, At::End)?;
+                edit.set(
+                    sibling,
+                    &SceneRasterLayer {
+                        origin: Origin::User,
+                        name: "Paint".to_owned(),
+                        kind: RasterLayerKind::Paint,
+                    },
+                )?;
+                page = Some(id);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(create).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let detector = Generation::new(
+            ProducerId::new("dev.koharu.pipeline.detection").expect("valid producer"),
+        );
+        let image = RgbaImage::from_pixel(10, 10, image::Rgba([168, 85, 247, 255]));
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut encoded, ImageFormat::Png)
+            .unwrap();
+        let mut edit = snapshot.edit_as(detector.clone());
+        let layer = edit.add_entity(page, At::Start).unwrap();
+        edit.set(
+            layer,
+            &SceneRasterLayer {
+                origin: Origin::User,
+                name: "Text Segmentation".to_owned(),
+                kind: RasterLayerKind::Segmentation,
+            },
+        )
+        .unwrap();
+        edit.set_asset(
+            layer,
+            &AssetRole::new("source").unwrap(),
+            AssetInput::new(
+                Arc::<[u8]>::from(encoded.into_inner()),
+                "image/png",
+                AssetMetadata {
+                    width: Some(10),
+                    height: Some(10),
+                    attributes: Default::default(),
+                },
+            ),
+        )
+        .unwrap();
+        session.commit(edit.finish().unwrap()).await.unwrap();
+        let segmentation = layer;
+        let mut project = Project::new(session, "test".to_owned());
+        let source = AssetRole::new("source").unwrap();
+        let original_blob = project
+            .snapshot()
+            .asset(segmentation, &source)
+            .unwrap()
+            .unwrap()
+            .blob;
+
+        project
+            .set_layer_locked(vec![segmentation], true)
+            .await
+            .unwrap();
+        project
+            .set_layer_locked(vec![segmentation], false)
+            .await
+            .unwrap();
+        project.move_layer(segmentation, page, 1).await.unwrap();
+        assert_eq!(
+            project
+                .snapshot()
+                .component::<EntityOrigin>(segmentation)
+                .unwrap()
+                .unwrap()
+                .origin,
+            Origin::Generated(detector.clone())
+        );
+
+        let (commit, committed_layer) = project
+            .apply_raster_stroke(
+                page,
+                Some(segmentation),
+                RasterStrokeMode::Erase,
+                RasterLayerKind::Paint,
+                [0; 4],
+                4.0,
+                vec![ScenePoint { x: 5.0, y: 5.0 }],
+            )
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+
+        assert_eq!(committed_layer, segmentation);
+        let erased = project.snapshot();
+        let erased_asset = erased.asset(segmentation, &source).unwrap().unwrap();
+        let erased_image =
+            image::load_from_memory(&erased.read_blob(erased_asset.blob).await.unwrap())
+                .unwrap()
+                .to_rgba8();
+        assert_eq!(erased_image.get_pixel(5, 5)[3], 0);
+        assert_eq!(
+            erased
+                .component::<EntityOrigin>(segmentation)
+                .unwrap()
+                .unwrap()
+                .origin,
+            Origin::Generated(detector.clone())
+        );
+
+        project.undo().await.unwrap();
+        let restored = project.snapshot();
+        assert_eq!(
+            restored.asset(segmentation, &source).unwrap().unwrap().blob,
+            original_blob
+        );
+        assert_eq!(
+            restored
+                .component::<EntityOrigin>(segmentation)
+                .unwrap()
+                .unwrap()
+                .origin,
+            Origin::Generated(detector)
         );
     }
 

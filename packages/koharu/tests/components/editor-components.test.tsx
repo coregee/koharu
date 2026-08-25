@@ -620,6 +620,41 @@ describe('greenfield editor', () => {
     expect(useKoharuStore.getState().brush.diameter).toBe(49)
   })
 
+  it('switches between Remove selection tools', () => {
+    installProject()
+    useKoharuStore.setState({ tool: 'remove', removeSelectionTool: 'pen' })
+    render(
+      <TooltipProvider>
+        <ToolBar />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Circle selection' }))
+    expect(useKoharuStore.getState().removeSelectionTool).toBe('circle')
+    fireEvent.click(screen.getByRole('button', { name: 'Square selection' }))
+    expect(useKoharuStore.getState().removeSelectionTool).toBe('square')
+    expect(screen.queryByRole('button', { name: 'Brush size: 48 pixels' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Pen selection' }))
+    expect(screen.getByRole('button', { name: 'Brush size: 48 pixels' })).toBeInTheDocument()
+  })
+
+  it('adjusts fill tolerance from the toolbar popover', async () => {
+    const user = userEvent.setup()
+    installProject()
+    useKoharuStore.setState({ tool: 'fill', fillTolerance: 32 })
+    render(
+      <TooltipProvider>
+        <ToolBar />
+      </TooltipProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Fill tolerance: 32' }))
+    expect(screen.getByRole('textbox', { name: 'Fill tolerance' })).toHaveValue('32')
+
+    await user.click(screen.getByRole('button', { name: 'Increase fill tolerance' }))
+    expect(useKoharuStore.getState().fillTolerance).toBe(33)
+  })
+
   it('uses the border color well to enable and disable the border', async () => {
     const user = userEvent.setup()
     installProject()
@@ -1064,6 +1099,34 @@ describe('greenfield editor', () => {
     expect(screen.getByRole('button', { name: 'Edit Censor' })).toHaveTextContent('Censor')
     fireEvent.click(screen.getByRole('button', { name: 'Show Censor' }))
     await waitFor(() => expect(setVisibility).toHaveBeenCalledWith(['censor'], true, null))
+  })
+
+  it('identifies the detection segmentation in the layer list', () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        ...page.layers,
+        {
+          type: 'raster',
+          locked: false,
+          id: 'segmentation',
+          parent: 'page',
+          visibility: { visible: true, opacity: 0.45 },
+          image: 'segmentation-mask',
+          name: 'Text Segmentation',
+          kind: 'segmentation',
+        },
+      ],
+    }))
+
+    render(<Inspector />)
+
+    expect(screen.getByRole('button', { name: 'Edit Text Segmentation' })).toHaveTextContent(
+      'Segmentation mask',
+    )
+    expect(screen.getByRole('button', { name: 'Hide Text Segmentation' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Lock Text Segmentation' })).toBeInTheDocument()
   })
 
   it('edits detected-region metadata and reruns OCR for one text box', async () => {

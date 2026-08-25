@@ -12,7 +12,7 @@ use koharu_rasterizer::{Raster, RasterOptions, Rasterizer};
 use koharu_renderer::{
     Frame, ImageKind, LayerKind, TextAlign, TextMetadata as RenderedText, WritingMode,
 };
-use koharu_scene::{AssetRole, Snapshot};
+use koharu_scene::{AssetRole, RasterLayer, RasterLayerKind, Snapshot};
 
 use crate::{
     engine_data::{TextJustification, TextOrientation},
@@ -20,7 +20,6 @@ use crate::{
 };
 
 const SOURCE_ROLE: &str = "source";
-const TEXT_MASK_ROLE: &str = "text-mask";
 const COO_MASK_ROLE: &str = "coo-mask";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,7 +121,7 @@ pub(crate) async fn build(
     }
     if options.include_removal_mask {
         let mask = combine_masks(
-            read_image(snapshot, frame.page(), TEXT_MASK_ROLE).await?,
+            read_segmentation_mask(snapshot, frame.page()).await?,
             read_image(snapshot, frame.page(), COO_MASK_ROLE).await?,
         )?;
         if let Some(mask) = mask {
@@ -165,6 +164,7 @@ pub(crate) async fn build(
                 ImageKind::Cleanup => "Cleanup".to_owned(),
                 ImageKind::Paint => "Paint".to_owned(),
                 ImageKind::Censor => "Censor".to_owned(),
+                ImageKind::Segmentation => "Segmentation".to_owned(),
             });
             validate_pixels(&name, &rendered.image)?;
             layers.push(Layer {
@@ -270,6 +270,43 @@ async fn read_image(
             .await
             .map_err(|error| PsdExportError::Task(error.to_string()))??,
     ))
+}
+
+async fn read_segmentation_mask(
+    snapshot: &Snapshot,
+    page: koharu_scene::EntityId,
+) -> Result<Option<DynamicImage>, PsdExportError> {
+    let mut combined: Option<GrayImage> = None;
+    for entity in snapshot.children(page)? {
+        if snapshot
+            .component::<RasterLayer>(entity)?
+            .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
+        {
+            let Some(image) = read_image(snapshot, entity, SOURCE_ROLE).await? else {
+                return Ok(None);
+            };
+            let image = image.to_rgba8();
+            let layer = GrayImage::from_fn(image.width(), image.height(), |x, y| {
+                image::Luma([image.get_pixel(x, y)[3]])
+            });
+            if let Some(mask) = &mut combined {
+                if mask.dimensions() != layer.dimensions() {
+                    return Err(PsdExportError::MismatchedMaskDimensions {
+                        left_width: mask.width(),
+                        left_height: mask.height(),
+                        right_width: layer.width(),
+                        right_height: layer.height(),
+                    });
+                }
+                for (target, source) in mask.iter_mut().zip(layer.as_raw()) {
+                    *target = (*target).max(*source);
+                }
+            } else {
+                combined = Some(layer);
+            }
+        }
+    }
+    Ok(combined.map(DynamicImage::ImageLuma8))
 }
 
 fn combine_masks(

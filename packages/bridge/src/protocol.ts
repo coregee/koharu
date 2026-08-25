@@ -96,7 +96,7 @@ export const commands = {
 	commitCensor: (expectedRevision: Revision, layer: string | null, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_censor", { expectedRevision, layer, points: points.map(i=>i), diameter }),
 	commitErase: (expectedRevision: Revision, layer: EntityId, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_erase", { expectedRevision, layer, points: points.map(i=>i), diameter }),
 	commitTransform: (expectedRevision: Revision, elements: TransformFrame[]) => __TAURI_INVOKE<number | null>("commit_transform", { expectedRevision, elements }).then((v) => (v==null?v:v as typeof v)),
-	commitInpaint: (expectedRevision: Revision, points: Point[], diameter: number) => __TAURI_INVOKE<string | null>("commit_inpaint", { expectedRevision, points: points.map(i=>i), diameter }),
+	commitInpaint: (expectedRevision: Revision, selections: InpaintSelection[]) => __TAURI_INVOKE<string | null>("commit_inpaint", { expectedRevision, selections: selections.map(i=>i) }),
 };
 
 /* Types */
@@ -294,6 +294,8 @@ export type GrokConfig = Record<string, never>;
 
 export type GroupRole = "main_text" | "sfx_text";
 
+export type InpaintSelection = { type: "pen"; points: Point[]; diameter: number } | { type: "circle"; start: Point; end: Point } | { type: "square"; start: Point; end: Point };
+
 export type InpaintingModel = { model: "lama" } | { model: "aot-inpainting" } | {
 	model: "flux2-klein",
 } & Flux2KleinConfig | {
@@ -483,7 +485,7 @@ export type Quantization = {
 	name: string,
 };
 
-export type RasterLayerKind = "cleanup" | "paint" | "censor";
+export type RasterLayerKind = "cleanup" | "paint" | "censor" | "segmentation";
 
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 

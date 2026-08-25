@@ -7,10 +7,7 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_trait::async_trait;
-use image::{
-    DynamicImage, ExtendedColorType, GrayImage, ImageEncoder as _, Luma, RgbImage,
-    codecs::png::{CompressionType, FilterType, PngEncoder},
-};
+use image::{DynamicImage, GrayImage, ImageFormat, Luma, RgbImage, Rgba, RgbaImage};
 use imageproc::{
     contours::{BorderType, find_contours_with_threshold},
     distance_transform::{Norm, distance_transform},
@@ -24,9 +21,9 @@ use koharu_ml::koharu_layout_rfdetr_seg_2xl::{
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, DetectionAnalysis, DetectionLabel,
     EntityId, EntityOrigin, FitsTo, FlowsIn, Generation, Geometry, Inside, OcrCandidate, Origin,
-    PanelRegion, Point, RecognizedFrom, Region, RegionKind, RegionShape, RegionShapeKind,
-    RegionSpec, RemovePolicy, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography,
-    WritingMode,
+    PanelRegion, Point, RasterLayer, RasterLayerKind, RecognizedFrom, Region, RegionKind,
+    RegionShape, RegionShapeKind, RegionSpec, RemovePolicy, TextLayout, TextLayoutKind, TextRegion,
+    TextRole, Typography, Visibility, WritingMode,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -38,6 +35,9 @@ use crate::{DetectionModel, ModelCell};
 const MODEL_ID: &str = "mayocream/koharu-layout-rfdetr-seg-2xl-1152";
 const MODEL_NAME: &str = "koharu-layout-rfdetr-seg-2xl";
 const PRODUCER: &str = "dev.koharu.pipeline.detection";
+const SEGMENTATION_NAME: &str = "Text Segmentation";
+const SEGMENTATION_COLOR: [u8; 3] = [168, 85, 247];
+const SEGMENTATION_OPACITY: f32 = 0.45;
 const ANGLE_SNAP_DEGREES: f32 = 3.0;
 const ANGLE_SEARCH_HALF_STEPS: i32 = 90;
 const ANGLE_SEARCH_STEP_DEGREES: f64 = 0.5;
@@ -1400,6 +1400,7 @@ async fn write_mask(
     detections: &[KoharuLayoutDetection],
     size: ImageSize,
 ) -> Result<()> {
+    let segmentation = detector_segmentation_layer(&input.scene, page)?;
     let mut mask = if size.width > 0 && size.height > 0 {
         let radius = ((size.width.max(size.height) as f32 / 1024.0) * 6.0)
             .round()
@@ -1409,19 +1410,36 @@ async fn write_mask(
         mask_for(detections, "text", size)
     };
     if let Some(bounds) = input.region {
-        preserve_mask_outside_region(input, page, "text-mask", bounds, &mut mask).await?;
+        preserve_mask_outside_region(input, page, segmentation, bounds, &mut mask).await?;
     }
+    let preview = segmentation_preview(&mask);
     let mut bytes = Cursor::new(Vec::new());
-    PngEncoder::new_with_quality(&mut bytes, CompressionType::Fast, FilterType::NoFilter)
-        .write_image(
-            mask.as_raw(),
-            mask.width(),
-            mask.height(),
-            ExtendedColorType::L8,
+    DynamicImage::ImageRgba8(preview).write_to(&mut bytes, ImageFormat::Png)?;
+    let segmentation = if let Some(segmentation) = segmentation {
+        segmentation
+    } else {
+        let segmentation = edit.add_entity(page, At::Start)?;
+        edit.set(
+            segmentation,
+            &RasterLayer {
+                origin: Origin::User,
+                name: SEGMENTATION_NAME.to_owned(),
+                kind: RasterLayerKind::Segmentation,
+            },
         )?;
+        edit.set(
+            segmentation,
+            &Visibility {
+                origin: Origin::User,
+                visible: true,
+                opacity: SEGMENTATION_OPACITY,
+            },
+        )?;
+        segmentation
+    };
     edit.set_asset(
-        page,
-        &AssetRole::new("text-mask")?,
+        segmentation,
+        &AssetRole::new("source")?,
         AssetInput::new(
             Arc::<[u8]>::from(bytes.into_inner()),
             "image/png",
@@ -1432,26 +1450,31 @@ async fn write_mask(
             },
         ),
     )?;
+    edit.remove_asset(page, &AssetRole::new("text-mask")?)?;
     Ok(())
 }
 
 async fn preserve_mask_outside_region(
     input: &StageInput,
     page: EntityId,
-    role: &str,
+    segmentation: Option<EntityId>,
     bounds: crate::Bounds,
     mask: &mut GrayImage,
 ) -> Result<()> {
-    let previous = input
-        .images
-        .get(&input.scene, page, role)
-        .await?
-        .map(|image| image.to_luma8());
+    let previous = if let Some(segmentation) = segmentation {
+        input
+            .images
+            .get(&input.scene, segmentation, "source")
+            .await?
+            .map(|image| segmentation_mask(&image))
+    } else {
+        None
+    };
     if previous
         .as_ref()
         .is_some_and(|image| image.dimensions() != mask.dimensions())
     {
-        bail!("existing {role} dimensions do not match page {page}");
+        bail!("existing segmentation dimensions do not match page {page}");
     }
     for (x, y, pixel) in mask.enumerate_pixels_mut() {
         if f64::from(x + 1) <= bounds.x
@@ -1465,6 +1488,45 @@ async fn preserve_mask_outside_region(
         }
     }
     Ok(())
+}
+
+fn detector_segmentation_layer(
+    scene: &koharu_scene::Snapshot,
+    page: EntityId,
+) -> Result<Option<EntityId>> {
+    let mut segmentation = None;
+    for entity in scene.children(page)? {
+        let detector_owned = scene
+            .component::<EntityOrigin>(entity)?
+            .is_some_and(|origin| match origin.origin {
+                Origin::Generated(generation) => generation.producer.as_str() == PRODUCER,
+                Origin::User => false,
+            });
+        if detector_owned
+            && scene
+                .component::<RasterLayer>(entity)?
+                .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
+        {
+            if segmentation.replace(entity).is_some() {
+                bail!("page {page} contains multiple detector-owned segmentation layers");
+            }
+        }
+    }
+    Ok(segmentation)
+}
+
+fn segmentation_preview(mask: &GrayImage) -> RgbaImage {
+    RgbaImage::from_fn(mask.width(), mask.height(), |x, y| {
+        let [red, green, blue] = SEGMENTATION_COLOR;
+        Rgba([red, green, blue, mask.get_pixel(x, y)[0]])
+    })
+}
+
+fn segmentation_mask(image: &DynamicImage) -> GrayImage {
+    let image = image.to_rgba8();
+    GrayImage::from_fn(image.width(), image.height(), |x, y| {
+        Luma([image.get_pixel(x, y)[3]])
+    })
 }
 
 fn region_kind(label: &str) -> Result<RegionKind> {
@@ -1922,9 +1984,9 @@ mod tests {
     };
     use koharu_ml::koharu_layout_rfdetr_seg_2xl::{KoharuLayoutDetection, KoharuLayoutMask};
     use koharu_scene::{
-        At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, OcrCandidate, Origin, PageDraft,
-        Region, RegionSpec, Session, TextLayout, TextLayoutKind, TextRegion, TextRole, Typography,
-        WritingMode,
+        AssetRole, At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, OcrCandidate, Origin,
+        PageDraft, RasterLayer, RasterLayerKind, Region, RegionSpec, Session, TextLayout,
+        TextLayoutKind, TextRegion, TextRole, Typography, Visibility, WritingMode,
     };
 
     use super::{
@@ -1933,7 +1995,7 @@ mod tests {
         Processor, RegionOutput, StageInput, StageProcessor, closed_mask_for,
         collapse_nested_detections, color_palette, generation, infer_typography, layout_order,
         link_dialogue_regions, mask_containment, mask_for, mask_geometry, non_maximum_suppression,
-        normalize_text_color, write_region,
+        normalize_text_color, write_mask, write_region,
     };
 
     #[test]
@@ -1987,6 +2049,91 @@ mod tests {
         );
 
         assert!(processor.skip(&input).unwrap());
+    }
+
+    #[tokio::test]
+    async fn detection_writes_a_visible_editable_segmentation_layer() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let create = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 8.0, 8.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(create).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let input = StageInput::new(
+            snapshot.clone(),
+            page,
+            None,
+            None,
+            std::sync::Arc::new(crate::ImageCache::default()),
+            None,
+        );
+        let detector = generation(super::PRODUCER, super::MODEL_ID).unwrap();
+        let mut edit = snapshot.edit_as(detector);
+
+        write_mask(
+            &input,
+            &mut edit,
+            page,
+            &[filled_detection("text", 1.0, [2.0, 2.0, 6.0, 6.0])],
+            ImageSize {
+                width: 8,
+                height: 8,
+            },
+        )
+        .await
+        .unwrap();
+
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
+        let segmentation = snapshot
+            .children(page)
+            .unwrap()
+            .find(|entity| {
+                snapshot
+                    .component::<RasterLayer>(*entity)
+                    .unwrap()
+                    .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
+            })
+            .unwrap();
+        let layer = snapshot
+            .component::<RasterLayer>(segmentation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(layer.name, super::SEGMENTATION_NAME);
+        let visibility = snapshot
+            .component::<Visibility>(segmentation)
+            .unwrap()
+            .unwrap();
+        assert!(visibility.visible);
+        assert_eq!(visibility.opacity, super::SEGMENTATION_OPACITY);
+        let source = snapshot
+            .asset(segmentation, &AssetRole::new("source").unwrap())
+            .unwrap()
+            .unwrap();
+        let image = image::load_from_memory(&snapshot.read_blob(source.blob).await.unwrap())
+            .unwrap()
+            .to_rgba8();
+        assert!(image.pixels().any(|pixel| pixel[3] == u8::MAX));
+        assert!(
+            image
+                .pixels()
+                .filter(|pixel| pixel[3] != 0)
+                .all(|pixel| pixel.0[..3] == super::SEGMENTATION_COLOR)
+        );
+        assert!(
+            snapshot
+                .asset(page, &AssetRole::new("text-mask").unwrap())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

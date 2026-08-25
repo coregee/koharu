@@ -57,6 +57,8 @@
     "empty": "請選擇頁面以開始。",
     "fit": "適應視窗",
     "fillRequiresImage": "使用填色前，請選擇可編輯的繪圖或影像圖層。",
+    "inpaintSelection": "修復選取範圍",
+    "inpaintSelectionCount": "選取範圍：{{count}}",
     "surface": "Koharu 畫布",
     "unavailable": "WebGPU 畫布無法使用"
   },
@@ -256,6 +258,7 @@
       "group": "群組",
       "image": "影像",
       "paint": "繪製",
+      "segmentation": "分割遮罩",
       "censor": "審查遮罩",
       "text": "文字",
       "mainTextGroup": "主要文字群組",
@@ -574,6 +577,11 @@
     "increaseFillTolerance": "增加填色容差",
     "pan": "平移",
     "remove": "移除",
+    "removeSelection": {
+      "circle": "圓形選取",
+      "pen": "畫筆選取",
+      "square": "方形選取"
+    },
     "select": "選取",
     "text": "文字"
   },

@@ -57,6 +57,8 @@
     "empty": "Selecione uma página para começar.",
     "fit": "Ajustar à janela",
     "fillRequiresImage": "Selecione uma camada de pintura ou imagem editável antes de usar Preencher.",
+    "inpaintSelection": "Preencher seleção",
+    "inpaintSelectionCount": "Seleções: {{count}}",
     "surface": "Tela do Koharu",
     "unavailable": "A tela WebGPU não está disponível"
   },
@@ -256,6 +258,7 @@
       "group": "Grupo",
       "image": "Imagem",
       "paint": "Pintura",
+      "segmentation": "Máscara de segmentação",
       "censor": "Máscara de censura",
       "text": "Texto",
       "mainTextGroup": "Grupo de texto principal",
@@ -574,6 +577,11 @@
     "increaseFillTolerance": "Aumentar tolerância do preenchimento",
     "pan": "Mover",
     "remove": "Remover",
+    "removeSelection": {
+      "circle": "Seleção circular",
+      "pen": "Seleção com caneta",
+      "square": "Seleção quadrada"
+    },
     "select": "Selecionar",
     "text": "Texto"
   },

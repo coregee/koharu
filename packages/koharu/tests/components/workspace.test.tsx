@@ -755,6 +755,49 @@ describe('canvas interaction adapter', () => {
     expect(commit).toHaveBeenCalledWith(1, 'paint', expect.arrayContaining([{ x: 20, y: 20 }]), 48)
   })
 
+  it('targets the detected segmentation layer with the eraser', async () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        ...page.layers,
+        {
+          type: 'raster',
+          locked: false,
+          id: 'segmentation',
+          parent: 'page',
+          visibility: { visible: true, opacity: 0.45 },
+          image: 'segmentation-image',
+          name: 'Text Segmentation',
+          kind: 'segmentation',
+        },
+      ],
+    }))
+    useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['segmentation'] })
+    const commit = vi
+      .spyOn(commands, 'commitErase')
+      .mockResolvedValue({ revision: 2, layer: 'segmentation' })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 16, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 16, clientX: 30, clientY: 40 })
+
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(
+        1,
+        'segmentation',
+        expect.arrayContaining([{ x: 20, y: 20 }]),
+        48,
+      ),
+    )
+    expect(canvas.beginStroke).toHaveBeenCalledWith({
+      kind: 'erase',
+      layer: 'segmentation',
+      point: { x: 20, y: 20 },
+      diameter: 48,
+    })
+  })
+
   it('targets an imported image layer with the eraser', async () => {
     installProject()
     useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['element'] })
@@ -778,6 +821,27 @@ describe('canvas interaction adapter', () => {
       'element',
       expect.arrayContaining([{ x: 20, y: 20 }]),
       48,
+    )
+  })
+
+  it('fills a contiguous color region on the selected image layer', async () => {
+    installProject()
+    useKoharuStore.setState({
+      tool: 'fill',
+      selectedLayers: ['element'],
+      brush: { diameter: 48, color: '#336699' },
+      fillTolerance: 24,
+    })
+    const commit = vi
+      .spyOn(commands, 'commitFill')
+      .mockResolvedValue({ revision: 2, layer: 'element' })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 15, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 15, clientX: 30, clientY: 40 })
+
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(1, 'element', { x: 20, y: 20 }, [51, 102, 153, 255], 24),
     )
   })
 
@@ -823,23 +887,53 @@ describe('canvas interaction adapter', () => {
     })
   })
 
-  it('maps the Remove tool to an inpainting mask gesture', async () => {
+  it('stages Remove selections until the user starts inpainting', async () => {
     installProject()
     useKoharuStore.setState({ tool: 'remove' })
     const commit = vi.spyOn(commands, 'commitInpaint').mockResolvedValue('job')
     const surface = renderWorkspace()
 
     fireEvent.pointerDown(surface, { button: 0, pointerId: 12, clientX: 30, clientY: 40 })
+    fireEvent.pointerMove(surface, { pointerId: 12, clientX: 40, clientY: 50 })
     fireEvent.pointerUp(surface, { pointerId: 12, clientX: 30, clientY: 40 })
 
+    expect(commit).not.toHaveBeenCalled()
+    expect(canvas.beginStroke).not.toHaveBeenCalled()
+    expect(screen.getByTestId('inpaint-selection-overlay')).toBeInTheDocument()
+    expect(screen.getByText('Selections: 1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inpaint Selection' }))
     await waitFor(() => expect(commit).toHaveBeenCalledOnce())
-    expect(canvas.beginStroke).toHaveBeenCalledWith({
-      kind: 'inpaint',
-      layer: null,
-      point: { x: 20, y: 20 },
-      diameter: 48,
-    })
-    expect(commit).toHaveBeenCalledWith(1, expect.arrayContaining([{ x: 20, y: 20 }]), 48)
+    expect(commit).toHaveBeenCalledWith(1, [
+      {
+        type: 'pen',
+        points: expect.arrayContaining([
+          { x: 20, y: 20 },
+          { x: 30, y: 30 },
+        ]),
+        diameter: 48,
+      },
+    ])
+    await waitFor(() => expect(screen.getByText('Selections: 0')).toBeInTheDocument())
+  })
+
+  it('accumulates circle and square Remove selections and can reset them', () => {
+    installProject()
+    useKoharuStore.setState({ tool: 'remove', removeSelectionTool: 'circle' })
+    const commit = vi.spyOn(commands, 'commitInpaint').mockResolvedValue('job')
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 14, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 14, clientX: 70, clientY: 60 })
+    act(() => useKoharuStore.setState({ removeSelectionTool: 'square' }))
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 15, clientX: 90, clientY: 100 })
+    fireEvent.pointerUp(surface, { pointerId: 15, clientX: 120, clientY: 140 })
+
+    expect(screen.getByText('Selections: 2')).toBeInTheDocument()
+    expect(commit).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    expect(screen.getByText('Selections: 0')).toBeInTheDocument()
+    expect(screen.queryByTestId('inpaint-selection-overlay')).not.toBeInTheDocument()
   })
 
   it('creates the same OCR-candidate text box on click and drag', async () => {

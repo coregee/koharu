@@ -3,7 +3,7 @@
 import { commands, type CanvasPagePreparation, type Point, type TransformFrame } from './protocol'
 
 export type CanvasColor = [number, number, number, number]
-export type CanvasStrokeKind = 'paint' | 'erase' | 'inpaint'
+export type CanvasStrokeKind = 'paint' | 'erase'
 export type WorkspaceColor = [number, number, number]
 
 export interface CanvasStroke {

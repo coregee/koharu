@@ -57,6 +57,8 @@
     "empty": "ページを選択して開始します。",
     "fit": "ウィンドウに合わせる",
     "fillRequiresImage": "塗りつぶしを使用する前に、編集可能なペイントまたは画像レイヤーを選択してください。",
+    "inpaintSelection": "選択範囲をインペイント",
+    "inpaintSelectionCount": "選択範囲: {{count}}",
     "surface": "Koharu キャンバス",
     "unavailable": "WebGPU キャンバスを利用できません"
   },
@@ -256,6 +258,7 @@
       "group": "グループ",
       "image": "画像",
       "paint": "ペイント",
+      "segmentation": "セグメンテーションマスク",
       "censor": "検閲マスク",
       "text": "テキスト",
       "mainTextGroup": "メインテキストグループ",
@@ -574,6 +577,11 @@
     "increaseFillTolerance": "塗りつぶし許容値を上げる",
     "pan": "移動",
     "remove": "削除",
+    "removeSelection": {
+      "circle": "円形選択",
+      "pen": "ペン選択",
+      "square": "正方形選択"
+    },
     "select": "選択",
     "text": "テキスト"
   },

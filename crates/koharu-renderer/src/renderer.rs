@@ -652,6 +652,7 @@ impl Traversal<'_> {
                         RasterLayerKind::Cleanup => ImageKind::Cleanup,
                         RasterLayerKind::Paint => ImageKind::Paint,
                         RasterLayerKind::Censor => ImageKind::Censor,
+                        RasterLayerKind::Segmentation => ImageKind::Segmentation,
                     };
                     self.layers.push(image_draft(
                         entity,

@@ -215,6 +215,7 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
                 censor_entities.push(entity);
             }
             RasterLayerKind::Censor => {}
+            RasterLayerKind::Segmentation => {}
         }
     }
     Ok(Prepared {

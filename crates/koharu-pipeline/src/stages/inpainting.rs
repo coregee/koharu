@@ -28,6 +28,7 @@ use super::{StageInput, StageProcessor, finish, generation};
 use crate::{InpaintingModel, ModelCell};
 
 const PRODUCER: &str = "dev.koharu.pipeline.inpainting";
+const MASK_INPUTS_ATTRIBUTE: &str = "dev.koharu.inpainting.mask-inputs";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 #[serde(default)]
@@ -107,17 +108,22 @@ impl StageProcessor for Processor {
             return Ok(false);
         }
         let source = AssetRole::new("source")?;
+        let mask_inputs = persistent_mask_inputs(&input.scene, input.page)?;
+        let mut cleanup = None;
         for entity in input.scene.children(input.page)? {
-            if input
-                .scene
-                .component::<RasterLayer>(entity)?
-                .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
-                && input.scene.asset(entity, &source)?.is_some()
-            {
-                return Ok(true);
+            if let Some(layer) = input.scene.component::<RasterLayer>(entity)? {
+                if layer.kind == RasterLayerKind::Cleanup
+                    && input.scene.asset(entity, &source)?.is_some()
+                {
+                    cleanup = input.scene.asset(entity, &source)?;
+                }
             }
         }
-        Ok(false)
+        Ok(cleanup.is_some_and(|asset| {
+            mask_inputs.as_ref().is_none_or(|fingerprint| {
+                asset.metadata.attributes.get(MASK_INPUTS_ATTRIBUTE) == Some(fingerprint)
+            })
+        }))
     }
 
     fn unload(&self) -> bool {
@@ -299,6 +305,9 @@ impl Model {
             input.scene.edit_as(generation(PRODUCER, model_name)?)
         };
         edit.observe_assets(page)?;
+        for entity in &prepared.segmentation_entities {
+            edit.observe_assets(*entity)?;
+        }
         if let Some(entity) = cleanup_entity {
             edit.observe::<RasterLayer>(entity)?;
             edit.observe_assets(entity)?;
@@ -325,6 +334,10 @@ impl Model {
         let width = overlay.width();
         let height = overlay.height();
         DynamicImage::ImageRgba8(overlay).write_to(&mut bytes, ImageFormat::Png)?;
+        let mut attributes = prepared.cleanup_attributes;
+        if let Some(mask_inputs) = prepared.mask_inputs {
+            attributes.insert(MASK_INPUTS_ATTRIBUTE.to_owned(), mask_inputs);
+        }
         let cleanup_entity = if let Some(entity) = cleanup_entity {
             if manual {
                 let mut layer = input
@@ -364,7 +377,7 @@ impl Model {
                 AssetMetadata {
                     width: Some(width),
                     height: Some(height),
-                    attributes: BTreeMap::new(),
+                    attributes,
                 },
             ),
         )?;
@@ -426,6 +439,9 @@ struct InpaintInput {
     original: Arc<DynamicImage>,
     cleanup_entity: Option<koharu_scene::EntityId>,
     cleanup: Option<RgbaImage>,
+    cleanup_attributes: BTreeMap<String, String>,
+    segmentation_entities: Vec<koharu_scene::EntityId>,
+    mask_inputs: Option<String>,
     mask: GrayImage,
     text_mask: GrayImage,
     flat_fill_regions: Vec<FlatFillRegion>,
@@ -455,6 +471,14 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
     } else {
         None
     };
+    let cleanup_attributes = if let Some(entity) = cleanup_entity {
+        input
+            .scene
+            .asset(entity, &AssetRole::new("source")?)?
+            .map_or_else(BTreeMap::new, |asset| asset.metadata.attributes)
+    } else {
+        BTreeMap::new()
+    };
     if cleanup
         .as_ref()
         .is_some_and(|image| image.dimensions() != original.dimensions())
@@ -474,6 +498,16 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
     };
     let mut mask = GrayImage::new(source.width(), source.height());
     let mut text_mask = GrayImage::new(source.width(), source.height());
+    let segmentation_entities = if input.inpainting_mask.is_none() {
+        segmentation_layers(&input.scene, page)?
+    } else {
+        Vec::new()
+    };
+    let mask_inputs = if input.inpainting_mask.is_none() {
+        persistent_mask_inputs(&input.scene, page)?
+    } else {
+        None
+    };
     if let Some(transient) = &input.inpainting_mask {
         let layer = image::load_from_memory(&transient.png)?.to_luma8();
         if layer.dimensions() != mask.dimensions() {
@@ -481,18 +515,29 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
         }
         mask = layer;
     } else {
-        for role in ["text-mask", "coo-mask"] {
-            if let Some(image) = input.images.get(&input.scene, page, role).await? {
-                let layer = image.to_luma8();
+        for entity in &segmentation_entities {
+            if let Some(image) = input.images.get(&input.scene, *entity, "source").await? {
+                let layer = segmentation_mask(&image);
                 if layer.dimensions() != mask.dimensions() {
-                    bail!("{role} dimensions do not match page {page}");
+                    bail!("segmentation dimensions do not match page {page}");
                 }
-                for (target, source) in mask.iter_mut().zip(layer.as_raw()) {
+                for ((target, text), source) in mask
+                    .iter_mut()
+                    .zip(text_mask.iter_mut())
+                    .zip(layer.as_raw())
+                {
                     *target = (*target).max(*source);
+                    *text = (*text).max(*source);
                 }
-                if role == "text-mask" {
-                    text_mask = layer;
-                }
+            }
+        }
+        if let Some(image) = input.images.get(&input.scene, page, "coo-mask").await? {
+            let layer = image.to_luma8();
+            if layer.dimensions() != mask.dimensions() {
+                bail!("coo-mask dimensions do not match page {page}");
+            }
+            for (target, source) in mask.iter_mut().zip(layer.as_raw()) {
+                *target = (*target).max(*source);
             }
         }
     }
@@ -514,9 +559,54 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
         original,
         cleanup_entity,
         cleanup,
+        cleanup_attributes,
+        segmentation_entities,
+        mask_inputs,
         mask,
         text_mask,
         flat_fill_regions,
+    })
+}
+
+fn segmentation_layers(
+    scene: &koharu_scene::Snapshot,
+    page: koharu_scene::EntityId,
+) -> Result<Vec<koharu_scene::EntityId>> {
+    let mut segmentations = Vec::new();
+    for entity in scene.children(page)? {
+        if scene
+            .component::<RasterLayer>(entity)?
+            .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
+        {
+            segmentations.push(entity);
+        }
+    }
+    Ok(segmentations)
+}
+
+fn persistent_mask_inputs(
+    scene: &koharu_scene::Snapshot,
+    page: koharu_scene::EntityId,
+) -> Result<Option<String>> {
+    let source = AssetRole::new("source")?;
+    let mut blobs = Vec::new();
+    for entity in segmentation_layers(scene, page)? {
+        if let Some(asset) = scene.asset(entity, &source)? {
+            blobs.push(asset.blob.to_string());
+        }
+    }
+    if let Some(asset) = scene.asset(page, &AssetRole::new("coo-mask")?)? {
+        blobs.push(asset.blob.to_string());
+    }
+    blobs.sort_unstable();
+    blobs.dedup();
+    Ok((!blobs.is_empty()).then(|| blobs.join(",")))
+}
+
+fn segmentation_mask(image: &DynamicImage) -> GrayImage {
+    let image = image.to_rgba8();
+    GrayImage::from_fn(image.width(), image.height(), |x, y| {
+        Luma([image.get_pixel(x, y)[3]])
     })
 }
 
@@ -903,7 +993,8 @@ mod tests {
         let mut session = koharu_scene::Session::memory().await.unwrap();
         let mut page = None;
         let source = DynamicImage::new_rgb8(8, 8);
-        let persistent = DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([255])));
+        let persistent =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(8, 8, Rgba([168, 85, 247, 255])));
         let encode = |image: &DynamicImage| {
             let mut bytes = Cursor::new(Vec::new());
             image.write_to(&mut bytes, ImageFormat::Png).unwrap();
@@ -916,21 +1007,41 @@ mod tests {
                     koharu_scene::PageDraft::new("page", 8.0, 8.0),
                     koharu_scene::At::End,
                 )?;
-                for (role, image) in [("source", &source), ("text-mask", &persistent)] {
-                    edit.set_asset(
-                        id,
-                        &AssetRole::new(role)?,
-                        AssetInput::new(
-                            encode(image),
-                            "image/png",
-                            AssetMetadata {
-                                width: Some(8),
-                                height: Some(8),
-                                attributes: BTreeMap::new(),
-                            },
-                        ),
-                    )?;
-                }
+                edit.set_asset(
+                    id,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        encode(&source),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(8),
+                            height: Some(8),
+                            attributes: BTreeMap::new(),
+                        },
+                    ),
+                )?;
+                let segmentation = edit.add_entity(id, At::Start)?;
+                edit.set(
+                    segmentation,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Text Segmentation".to_owned(),
+                        kind: RasterLayerKind::Segmentation,
+                    },
+                )?;
+                edit.set_asset(
+                    segmentation,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        encode(&persistent),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(8),
+                            height: Some(8),
+                            attributes: BTreeMap::new(),
+                        },
+                    ),
+                )?;
                 page = Some(id);
                 Ok(())
             })
@@ -955,6 +1066,83 @@ mod tests {
         assert_eq!(prepared.mask.get_pixel(3, 4), &Luma([255]));
         assert_eq!(prepared.mask.get_pixel(0, 0), &Luma([0]));
         assert!(prepared.text_mask.pixels().all(|pixel| pixel[0] == 0));
+    }
+
+    #[tokio::test]
+    async fn automatic_inpainting_consumes_the_edited_segmentation_alpha() {
+        let mut session = koharu_scene::Session::memory().await.unwrap();
+        let mut page = None;
+        let mut segmentation_image = RgbaImage::from_pixel(8, 8, Rgba([168, 85, 247, 0]));
+        segmentation_image.put_pixel(3, 4, Rgba([168, 85, 247, 255]));
+        segmentation_image.put_pixel(4, 4, Rgba([168, 85, 247, 0]));
+        let encode = |image: &DynamicImage| {
+            let mut bytes = Cursor::new(Vec::new());
+            image.write_to(&mut bytes, ImageFormat::Png).unwrap();
+            Arc::<[u8]>::from(bytes.into_inner())
+        };
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let id = edit.add_page(
+                    koharu_scene::PageDraft::new("page", 8.0, 8.0),
+                    koharu_scene::At::End,
+                )?;
+                edit.set_asset(
+                    id,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        encode(&DynamicImage::new_rgb8(8, 8)),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(8),
+                            height: Some(8),
+                            attributes: BTreeMap::new(),
+                        },
+                    ),
+                )?;
+                let segmentation = edit.add_entity(id, At::Start)?;
+                edit.set(
+                    segmentation,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Text Segmentation".to_owned(),
+                        kind: RasterLayerKind::Segmentation,
+                    },
+                )?;
+                edit.set_asset(
+                    segmentation,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        encode(&DynamicImage::ImageRgba8(segmentation_image.clone())),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(8),
+                            height: Some(8),
+                            attributes: BTreeMap::new(),
+                        },
+                    ),
+                )?;
+                page = Some(id);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let input = StageInput::new(
+            snapshot,
+            page,
+            None,
+            None,
+            Arc::new(crate::ImageCache::default()),
+            None,
+        );
+
+        let prepared = prepare(&input).await.unwrap();
+
+        assert_eq!(prepared.segmentation_entities.len(), 1);
+        assert_eq!(prepared.mask.get_pixel(3, 4), &Luma([255]));
+        assert_eq!(prepared.mask.get_pixel(4, 4), &Luma([0]));
+        assert_eq!(prepared.text_mask, prepared.mask);
     }
 
     #[tokio::test]
@@ -1019,6 +1207,98 @@ mod tests {
 
         assert!(processor.skip(&automatic).unwrap());
         assert!(!processor.skip(&manual).unwrap());
+    }
+
+    #[tokio::test]
+    async fn automatic_inpainting_restarts_when_segmentation_is_available() {
+        let mut session = koharu_scene::Session::memory().await.unwrap();
+        let mut page = None;
+        let mut cleanup = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let id = edit.add_page(
+                    koharu_scene::PageDraft::new("page", 8.0, 8.0),
+                    koharu_scene::At::End,
+                )?;
+                for kind in [RasterLayerKind::Cleanup, RasterLayerKind::Segmentation] {
+                    let layer = edit.add_entity(id, At::Start)?;
+                    if kind == RasterLayerKind::Cleanup {
+                        cleanup = Some(layer);
+                    }
+                    edit.set(
+                        layer,
+                        &RasterLayer {
+                            origin: Origin::User,
+                            name: format!("{kind:?}"),
+                            kind,
+                        },
+                    )?;
+                    edit.set_asset(
+                        layer,
+                        &AssetRole::new("source")?,
+                        AssetInput::new(
+                            Arc::<[u8]>::from([0]),
+                            "image/png",
+                            AssetMetadata {
+                                width: Some(8),
+                                height: Some(8),
+                                attributes: BTreeMap::new(),
+                            },
+                        ),
+                    )?;
+                }
+                page = Some(id);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let input = StageInput::new(
+            snapshot.clone(),
+            page,
+            None,
+            None,
+            Arc::new(crate::ImageCache::default()),
+            None,
+        );
+        let processor = Processor::new(InpaintingModel::LaMa {}, koharu_ml::Device::cpu()).unwrap();
+
+        assert!(!processor.skip(&input).unwrap());
+
+        let fingerprint = persistent_mask_inputs(&snapshot, page).unwrap().unwrap();
+        let cleanup = cleanup.unwrap();
+        let patch = snapshot
+            .patch(|edit| {
+                edit.set_asset(
+                    cleanup,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        Arc::<[u8]>::from([0]),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(8),
+                            height: Some(8),
+                            attributes: BTreeMap::from([(
+                                MASK_INPUTS_ATTRIBUTE.to_owned(),
+                                fingerprint,
+                            )]),
+                        },
+                    ),
+                )
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let consumed = StageInput::new(
+            snapshot,
+            page,
+            None,
+            None,
+            Arc::new(crate::ImageCache::default()),
+            None,
+        );
+
+        assert!(processor.skip(&consumed).unwrap());
     }
 
     fn rectangle_region([left, top, right, bottom]: [u32; 4]) -> FlatFillRegion {

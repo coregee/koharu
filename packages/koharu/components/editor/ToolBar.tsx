@@ -2,6 +2,7 @@
 
 import {
   Brush,
+  Circle,
   Eraser,
   Hand,
   Minus,
@@ -11,6 +12,7 @@ import {
   Plus,
   Sparkles,
   ScanLine,
+  Square,
   Type,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +27,7 @@ import {
   MIN_FILL_TOLERANCE,
   useKoharuStore,
   type CanvasTool,
+  type RemoveSelectionTool,
 } from '@/lib/store'
 import { Button } from '@koharu/ui/components/button'
 import {
@@ -61,12 +64,14 @@ export function ToolBar() {
   const active = useKoharuStore((state) => state.tool)
   const brush = useKoharuStore((state) => state.brush)
   const fillTolerance = useKoharuStore((state) => state.fillTolerance)
+  const removeSelectionTool = useKoharuStore((state) => state.removeSelectionTool)
   const setTool = useKoharuStore((state) => state.setTool)
   const setBrush = useKoharuStore((state) => state.setBrush)
   const setFillTolerance = useKoharuStore((state) => state.setFillTolerance)
+  const setRemoveSelectionTool = useKoharuStore((state) => state.setRemoveSelectionTool)
   const shortcuts = useKoharuStore((state) => state.shortcuts)
   const hasBrush = isBrushTool(active)
-  const hasControls = hasBrush || active === 'fill'
+  const hasControls = hasBrush || active === 'fill' || active === 'remove'
 
   return (
     <aside className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'>
@@ -105,19 +110,56 @@ export function ToolBar() {
           {(active === 'draw' || active === 'fill') && (
             <ColorWell value={brush.color} onChange={(color) => setBrush({ ...brush, color })} />
           )}
-          {hasBrush && (
+          {active === 'remove' && (
+            <RemoveSelectionTools value={removeSelectionTool} onChange={setRemoveSelectionTool} />
+          )}
+          {(hasBrush || (active === 'remove' && removeSelectionTool === 'pen')) && (
             <BrushSize
               value={brush.diameter}
               onChange={(diameter) => setBrush({ ...brush, diameter })}
             />
           )}
-          {active === 'fill' && (
-            <FillTolerance value={fillTolerance} onChange={setFillTolerance} />
-          )}
+          {active === 'fill' && <FillTolerance value={fillTolerance} onChange={setFillTolerance} />}
         </div>
       )}
     </aside>
   )
+}
+
+const removeSelectionTools = [
+  ['pen', Brush],
+  ['circle', Circle],
+  ['square', Square],
+] as const satisfies ReadonlyArray<readonly [RemoveSelectionTool, typeof Brush]>
+
+function RemoveSelectionTools({
+  value,
+  onChange,
+}: {
+  value: RemoveSelectionTool
+  onChange: (value: RemoveSelectionTool) => void
+}) {
+  const { t } = useTranslation()
+  return removeSelectionTools.map(([tool, Icon]) => (
+    <Tooltip key={tool}>
+      <TooltipTrigger
+        render={
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon'
+            aria-label={t(`tools.removeSelection.${tool}`)}
+            data-active={value === tool}
+            className='size-8 rounded-xl text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+            onClick={() => onChange(tool)}
+          />
+        }
+      >
+        <Icon className='size-4' />
+      </TooltipTrigger>
+      <TooltipContent side='right'>{t(`tools.removeSelection.${tool}`)}</TooltipContent>
+    </Tooltip>
+  ))
 }
 
 function BrushSize({ value, onChange }: { value: number; onChange: (value: number) => void }) {

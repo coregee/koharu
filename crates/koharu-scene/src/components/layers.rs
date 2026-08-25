@@ -51,6 +51,7 @@ pub enum RasterLayerKind {
     Cleanup,
     Paint,
     Censor,
+    Segmentation,
 }
 
 /// A full-page transparent pixel layer composited above the page source.

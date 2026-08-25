@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, bail};
 use image::{GrayImage, ImageEncoder as _, codecs::png::PngEncoder};
 use koharu_desktop::{CanvasState, Desktop, Frame, TransformFrame};
 use koharu_rasterizer::ResourceId;
@@ -23,6 +23,14 @@ use super::{
 pub struct Point {
     pub x: f64,
     pub y: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InpaintSelection {
+    Pen { points: Vec<Point>, diameter: f32 },
+    Circle { start: Point, end: Point },
+    Square { start: Point, end: Point },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Type)]
@@ -400,29 +408,17 @@ pub(crate) async fn commit_transform(
     target = "koharu_metrics",
     name = "inpaint_requested",
     skip_all,
-    fields(origin = "user", point_count = points.len(), size = f64::from(diameter)),
+    fields(origin = "user", selection_count = selections.len()),
 )]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn commit_inpaint(
     expected_revision: Revision,
-    points: Vec<Point>,
-    diameter: f32,
+    selections: Vec<InpaintSelection>,
     handle: AppHandle<Cef>,
     project: State<'_, CurrentProject>,
 ) -> Result<Option<JobId>, Error> {
-    if !diameter.is_finite() || diameter <= 0.0 || points.is_empty() {
-        return Err(anyhow!(
-            "an inpaint stroke requires a positive diameter and at least one point"
-        )
-        .into());
-    }
-    if points
-        .iter()
-        .any(|point| !point.x.is_finite() || !point.y.is_finite())
-    {
-        return Err(anyhow!("inpaint stroke points must be finite").into());
-    }
+    validate_inpaint_selections(&selections)?;
     let (page, width, height) = {
         let project = project.project.lock().await;
         let project = project.as_ref().context("no project is open")?;
@@ -439,7 +435,7 @@ pub(crate) async fn commit_inpaint(
         )
     };
     let (png, bounds) =
-        tokio::task::spawn_blocking(move || encode_mask(width, height, &points, diameter))
+        tokio::task::spawn_blocking(move || encode_mask(width, height, &selections))
             .await
             .context("inpaint mask worker stopped unexpectedly")??;
     *handle.state::<Processing>().inpainting_mask.lock() = Some(koharu_pipeline::InpaintingMask {
@@ -461,6 +457,36 @@ pub(crate) async fn commit_inpaint(
     ))
 }
 
+fn validate_inpaint_selections(selections: &[InpaintSelection]) -> anyhow::Result<()> {
+    if selections.is_empty() {
+        bail!("an inpaint request requires at least one selection");
+    }
+    for selection in selections {
+        match selection {
+            InpaintSelection::Pen { points, diameter } => {
+                if points.is_empty() || !diameter.is_finite() || *diameter <= 0.0 {
+                    bail!("an inpaint pen selection requires points and a positive diameter");
+                }
+                validate_points(points)?;
+            }
+            InpaintSelection::Circle { start, end } | InpaintSelection::Square { start, end } => {
+                validate_points(&[*start, *end])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_points(points: &[Point]) -> anyhow::Result<()> {
+    if points
+        .iter()
+        .any(|point| !point.x.is_finite() || !point.y.is_finite())
+    {
+        bail!("inpaint selection points must be finite");
+    }
+    Ok(())
+}
+
 fn ensure_revision(actual: Revision, expected: Revision) -> anyhow::Result<()> {
     if actual != expected {
         bail!("canvas edit expected revision {expected}, but the project is at {actual}");
@@ -471,15 +497,50 @@ fn ensure_revision(actual: Revision, expected: Revision) -> anyhow::Result<()> {
 fn encode_mask(
     width: u32,
     height: u32,
-    points: &[Point],
-    diameter: f32,
+    selections: &[InpaintSelection],
 ) -> anyhow::Result<(Vec<u8>, koharu_pipeline::Bounds)> {
     if width == 0 || height == 0 {
         bail!("page dimensions must be positive");
     }
     let mut image = GrayImage::new(width, height);
-    let radius = f64::from(diameter) * 0.5;
     let mut dirty = None::<[u32; 4]>;
+    for selection in selections {
+        match selection {
+            InpaintSelection::Pen { points, diameter } => {
+                paint_pen(&mut image, &mut dirty, points, *diameter);
+            }
+            InpaintSelection::Circle { start, end } => {
+                paint_circle(&mut image, &mut dirty, *start, *end);
+            }
+            InpaintSelection::Square { start, end } => {
+                paint_square(&mut image, &mut dirty, *start, *end);
+            }
+        }
+    }
+    let [left, top, right, bottom] =
+        dirty.context("inpaint selection does not intersect the page")?;
+    let mut png = Vec::new();
+    PngEncoder::new(&mut png).write_image(
+        image.as_raw(),
+        width,
+        height,
+        image::ExtendedColorType::L8,
+    )?;
+    Ok((
+        png,
+        koharu_pipeline::Bounds {
+            x: f64::from(left),
+            y: f64::from(top),
+            width: f64::from(right - left + 1),
+            height: f64::from(bottom - top + 1),
+        },
+    ))
+}
+
+fn paint_pen(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, points: &[Point], diameter: f32) {
+    let width = image.width();
+    let height = image.height();
+    let radius = f64::from(diameter) * 0.5;
     for (start, end) in points
         .iter()
         .zip(points.iter().skip(1))
@@ -512,32 +573,132 @@ fn encode_mask(
                 if coverage == 0 {
                     continue;
                 }
-                let pixel = image.get_pixel_mut(x, y);
-                pixel.0[0] = pixel.0[0].max(coverage);
-                dirty = Some(match dirty {
-                    Some([min_x, min_y, max_x, max_y]) => {
-                        [min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y)]
-                    }
-                    None => [x, y, x, y],
-                });
+                paint_pixel(image, dirty, x, y, coverage);
             }
         }
     }
-    let [left, top, right, bottom] = dirty.context("inpaint stroke does not intersect the page")?;
-    let mut png = Vec::new();
-    PngEncoder::new(&mut png).write_image(
-        image.as_raw(),
-        width,
-        height,
-        image::ExtendedColorType::L8,
-    )?;
-    Ok((
-        png,
-        koharu_pipeline::Bounds {
-            x: f64::from(left),
-            y: f64::from(top),
-            width: f64::from(right - left + 1),
-            height: f64::from(bottom - top + 1),
-        },
-    ))
+}
+
+fn paint_circle(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, start: Point, end: Point) {
+    let [left, top, right, bottom] = constrained_bounds(start, end);
+    let center_x = (left + right) * 0.5;
+    let center_y = (top + bottom) * 0.5;
+    let radius = (right - left) * 0.5;
+    let pixel_bounds =
+        clipped_pixel_bounds(image, left - 0.5, top - 0.5, right + 0.5, bottom + 0.5);
+    for y in pixel_bounds[1]..pixel_bounds[3] {
+        for x in pixel_bounds[0]..pixel_bounds[2] {
+            let distance = (f64::from(x) + 0.5 - center_x).hypot(f64::from(y) + 0.5 - center_y);
+            let coverage = ((radius + 0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
+            if coverage > 0 {
+                paint_pixel(image, dirty, x, y, coverage);
+            }
+        }
+    }
+}
+
+fn paint_square(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, start: Point, end: Point) {
+    let [left, top, right, bottom] = constrained_bounds(start, end);
+    let pixel_bounds = clipped_pixel_bounds(image, left, top, right, bottom);
+    for y in pixel_bounds[1]..pixel_bounds[3] {
+        for x in pixel_bounds[0]..pixel_bounds[2] {
+            paint_pixel(image, dirty, x, y, 255);
+        }
+    }
+}
+
+fn constrained_bounds(start: Point, end: Point) -> [f64; 4] {
+    let delta_x = end.x - start.x;
+    let delta_y = end.y - start.y;
+    let size = delta_x.abs().max(delta_y.abs()).max(1.0);
+    let end_x = start.x + size.copysign(if delta_x == 0.0 { 1.0 } else { delta_x });
+    let end_y = start.y + size.copysign(if delta_y == 0.0 { 1.0 } else { delta_y });
+    [
+        start.x.min(end_x),
+        start.y.min(end_y),
+        start.x.max(end_x),
+        start.y.max(end_y),
+    ]
+}
+
+fn clipped_pixel_bounds(
+    image: &GrayImage,
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+) -> [u32; 4] {
+    [
+        left.floor().max(0.0) as u32,
+        top.floor().max(0.0) as u32,
+        right.ceil().min(f64::from(image.width())).max(0.0) as u32,
+        bottom.ceil().min(f64::from(image.height())).max(0.0) as u32,
+    ]
+}
+
+fn paint_pixel(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, x: u32, y: u32, coverage: u8) {
+    let pixel = image.get_pixel_mut(x, y);
+    pixel.0[0] = pixel.0[0].max(coverage);
+    *dirty = Some(match *dirty {
+        Some([min_x, min_y, max_x, max_y]) => {
+            [min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y)]
+        }
+        None => [x, y, x, y],
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combined_inpaint_selections_share_one_mask_and_bounds() {
+        let selections = [
+            InpaintSelection::Pen {
+                points: vec![Point { x: 2.0, y: 2.0 }, Point { x: 4.0, y: 2.0 }],
+                diameter: 2.0,
+            },
+            InpaintSelection::Square {
+                start: Point { x: 6.0, y: 6.0 },
+                end: Point { x: 8.0, y: 7.0 },
+            },
+        ];
+
+        let (png, bounds) = encode_mask(12, 12, &selections).unwrap();
+        let mask = image::load_from_memory(&png).unwrap().into_luma8();
+
+        assert!(mask.get_pixel(2, 2).0[0] > 0);
+        assert_eq!(mask.get_pixel(7, 7).0[0], 255);
+        assert_eq!(mask.get_pixel(10, 10).0[0], 0);
+        assert!(bounds.x <= 2.0);
+        assert!(bounds.y <= 2.0);
+        assert!(bounds.x + bounds.width >= 8.0);
+        assert!(bounds.y + bounds.height >= 8.0);
+    }
+
+    #[test]
+    fn circle_selection_does_not_fill_its_constrained_square_corners() {
+        let selections = [InpaintSelection::Circle {
+            start: Point { x: 2.0, y: 2.0 },
+            end: Point { x: 8.0, y: 4.0 },
+        }];
+
+        let (png, _) = encode_mask(12, 12, &selections).unwrap();
+        let mask = image::load_from_memory(&png).unwrap().into_luma8();
+
+        assert_eq!(mask.get_pixel(2, 2).0[0], 0);
+        assert_eq!(mask.get_pixel(5, 5).0[0], 255);
+    }
+
+    #[test]
+    fn inpaint_selection_validation_rejects_empty_requests() {
+        assert!(validate_inpaint_selections(&[]).is_err());
+        assert!(
+            validate_inpaint_selections(&[InpaintSelection::Pen {
+                points: Vec::new(),
+                diameter: 12.0,
+            }])
+            .is_err()
+        );
+    }
 }

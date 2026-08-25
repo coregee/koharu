@@ -57,6 +57,8 @@
     "empty": "Select a page to begin.",
     "fit": "Fit Window",
     "fillRequiresImage": "Select an editable paint or image layer before using Fill.",
+    "inpaintSelection": "Inpaint Selection",
+    "inpaintSelectionCount": "Selections: {{count}}",
     "surface": "Koharu canvas",
     "unavailable": "WebGPU canvas unavailable"
   },
@@ -261,6 +263,7 @@
       "group": "Group",
       "image": "Image",
       "paint": "Paint",
+      "segmentation": "Segmentation mask",
       "bubble": "Speech bubble",
       "censor": "Censor mask",
       "text": "Text",
@@ -589,6 +592,11 @@
     "increaseFillTolerance": "Increase fill tolerance",
     "pan": "Pan",
     "remove": "Remove",
+    "removeSelection": {
+      "circle": "Circle selection",
+      "pen": "Pen selection",
+      "square": "Square selection"
+    },
     "select": "Select",
     "text": "Text"
   },

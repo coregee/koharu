@@ -50,6 +50,7 @@ import { prefetchCanvasPages, workspaceColor, type CanvasColor } from '@koharu/b
 import {
   commands,
   type Frame,
+  type InpaintSelection,
   type Page,
   type Point,
   type TransformFrame,
@@ -75,10 +76,11 @@ type Gesture =
   | { kind: 'move'; pointer: number; start: Point; originals: TransformFrame[] }
   | { kind: 'region-move'; pointer: number; start: Point; original: TransformFrame }
   | { kind: 'text'; pointer: number; start: Point; frame: Frame }
+  | { kind: 'inpaint-selection'; pointer: number; selection: InpaintSelection }
   | StrokeGesture
 
 interface StrokeGesture {
-  kind: 'paint' | 'erase' | 'inpaint' | 'censor'
+  kind: 'paint' | 'erase' | 'censor'
   pointer: number
   revision: number
   layer: string | null
@@ -93,7 +95,7 @@ interface CanvasView {
 }
 
 interface StrokeUpdate {
-  kind: 'paint' | 'erase' | 'inpaint' | 'censor'
+  kind: 'paint' | 'erase' | 'censor'
   points: Point[]
 }
 
@@ -114,6 +116,9 @@ export function CanvasWorkspace() {
   const [previews, setPreviews] = useState<Record<string, Frame>>({})
   const [regionPreviews, setRegionPreviews] = useState<Record<string, Frame>>({})
   const [draft, setDraft] = useState<Frame | null>(null)
+  const [inpaintSelections, setInpaintSelections] = useState<InpaintSelection[]>([])
+  const [inpaintDraft, setInpaintDraft] = useState<InpaintSelection | null>(null)
+  const [inpaintPending, setInpaintPending] = useState(false)
   const [hovered, setHovered] = useState<string | null>(null)
   const [cursor, setCursor] = useState<Point | null>(null)
   const colorSampling = useColorSampling()
@@ -131,6 +136,10 @@ export function CanvasWorkspace() {
   const tool = useKoharuStore((state) => state.tool)
   const brush = useKoharuStore((state) => state.brush)
   const fillTolerance = useKoharuStore((state) => state.fillTolerance)
+  const removeSelectionTool = useKoharuStore((state) => state.removeSelectionTool)
+  const processing = useKoharuStore((state) =>
+    Object.values(state.jobs).some((job) => job.state === 'running'),
+  )
   const selected = useKoharuStore((state) => state.selectedLayers)
   const selectLayers = useKoharuStore((state) => state.selectLayers)
   const setTool = useKoharuStore((state) => state.setTool)
@@ -164,8 +173,7 @@ export function CanvasWorkspace() {
             (layer.type === 'artwork' || !effectiveLayerLocked(page.layers, layer)),
         )
       : undefined
-  const activePaintRaster =
-    activeRaster && activeRaster.kind !== 'censor' ? activeRaster : undefined
+  const activePaintRaster = activeRaster?.kind === 'paint' ? activeRaster : undefined
   const activeCensorRaster = activeRaster?.kind === 'censor' ? activeRaster : undefined
   const activeFillTarget =
     activeEraseTarget?.type === 'raster' && activeEraseTarget.kind !== 'paint'
@@ -180,6 +188,31 @@ export function CanvasWorkspace() {
     )
     return pending
   }, [])
+
+  const resetInpaintSelection = useCallback(() => {
+    setInpaintSelections([])
+    setInpaintDraft(null)
+  }, [])
+
+  const submitInpaintSelection = useCallback(() => {
+    if (canvasRevision === null || !inpaintSelections.length || inpaintPending || processing) return
+    commitPending.current = true
+    setInpaintPending(true)
+    void enqueue(() => call(commands.commitInpaint, canvasRevision, inpaintSelections))
+      .then(() => resetInpaintSelection())
+      .catch(() => undefined)
+      .finally(() => {
+        commitPending.current = false
+        setInpaintPending(false)
+      })
+  }, [
+    canvasRevision,
+    enqueue,
+    inpaintPending,
+    inpaintSelections,
+    processing,
+    resetInpaintSelection,
+  ])
 
   const transformUpdates = useFrameCommand((elements: TransformFrame[]) =>
     canvas?.updateTransform(elements),
@@ -291,10 +324,11 @@ export function CanvasWorkspace() {
   const cancelGesture = useCallback(() => {
     const current = gesture.current
     gesture.current = null
-    if (current?.kind === 'paint' || current?.kind === 'erase' || current?.kind === 'inpaint') {
+    if (current?.kind === 'paint' || current?.kind === 'erase') {
       strokeUpdates.clear()
       canvas?.cancelStroke()
     }
+    if (current?.kind === 'inpaint-selection') setInpaintDraft(null)
     if (transformActive.current) {
       transformUpdates.clear()
       transformActive.current = false
@@ -398,6 +432,12 @@ export function CanvasWorkspace() {
   }, [fitCanvas, fitCanvasRequest])
 
   useEffect(() => cancelGesture, [cancelGesture, canvasGeneration, canvasRevision, page?.id, tool])
+
+  useEffect(() => {
+    resetInpaintSelection()
+  }, [pageId, resetInpaintSelection])
+
+  useEffect(() => cancelGesture, [cancelGesture, removeSelectionTool])
 
   useEffect(() => {
     const editable = (target: EventTarget | null) =>
@@ -595,14 +635,13 @@ export function CanvasWorkspace() {
     } else if (current.kind === 'text') {
       current.frame = draftFrame(current.start, point)
       setDraft(current.frame)
-    } else if (
-      current.kind === 'paint' ||
-      current.kind === 'erase' ||
-      current.kind === 'inpaint' ||
-      current.kind === 'censor'
-    ) {
+    } else if (current.kind === 'paint' || current.kind === 'erase' || current.kind === 'censor') {
       current.points.push(...points)
       strokeUpdates.schedule({ kind: current.kind, points })
+    } else if (current.kind === 'inpaint-selection') {
+      if (current.selection.type === 'pen') current.selection.points.push(...points)
+      else current.selection.end = point
+      setInpaintDraft({ ...current.selection })
     }
   }
 
@@ -642,12 +681,10 @@ export function CanvasWorkspace() {
           return refresh(projectKey, pagesKey, pageKey)
         })
         .catch(() => undefined)
-    } else if (
-      current.kind === 'paint' ||
-      current.kind === 'erase' ||
-      current.kind === 'inpaint' ||
-      current.kind === 'censor'
-    ) {
+    } else if (current.kind === 'inpaint-selection') {
+      setInpaintSelections((selections) => [...selections, current.selection])
+      setInpaintDraft(null)
+    } else if (current.kind === 'paint' || current.kind === 'erase' || current.kind === 'censor') {
       strokeUpdates.commit()
       try {
         canvas?.finishStroke()
@@ -679,22 +716,18 @@ export function CanvasWorkspace() {
                 selectLayers([result.layer])
                 return refresh(projectKey, pagesKey, pageKey)
               })
-            : current.kind === 'erase'
-              ? enqueue(() =>
-                  call(
-                    commands.commitErase,
-                    current.revision,
-                    current.layer!,
-                    current.points,
-                    current.diameter,
-                  ),
-                ).then((result) => {
-                  selectLayers([result.layer])
-                  return refresh(projectKey, pagesKey, pageKey)
-                })
-              : enqueue(() =>
-                  call(commands.commitInpaint, current.revision, current.points, current.diameter),
-                )
+            : enqueue(() =>
+                call(
+                  commands.commitErase,
+                  current.revision,
+                  current.layer!,
+                  current.points,
+                  current.diameter,
+                ),
+              ).then((result) => {
+                selectLayers([result.layer])
+                return refresh(projectKey, pagesKey, pageKey)
+              })
       commitPending.current = true
       void operation
         .catch(() => canvas?.cancelStroke())
@@ -714,7 +747,12 @@ export function CanvasWorkspace() {
           aria-busy={page ? canvasState.status !== 'ready' : undefined}
           className='relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden bg-[var(--surface-canvas)] outline-none'
           style={{
-            cursor: page && canvasState.status === 'ready' ? canvasCursors[tool] : undefined,
+            cursor:
+              page && canvasState.status === 'ready'
+                ? tool === 'remove' && removeSelectionTool !== 'pen'
+                  ? 'crosshair'
+                  : canvasCursors[tool]
+                : undefined,
           }}
           onContextMenu={(event) => event.preventDefault()}
           onPointerDown={(event) => {
@@ -862,26 +900,16 @@ export function CanvasWorkspace() {
                 receiveError(errorMessage(error))
               }
             } else if (tool === 'remove') {
-              strokeUpdates.clear()
+              const selection: InpaintSelection =
+                removeSelectionTool === 'pen'
+                  ? { type: 'pen', points: [point], diameter: brush.diameter }
+                  : { type: removeSelectionTool, start: point, end: point }
               gesture.current = {
-                kind: 'inpaint',
+                kind: 'inpaint-selection',
                 pointer: event.pointerId,
-                revision: canvasRevision,
-                layer: null,
-                points: [point],
-                diameter: brush.diameter,
+                selection,
               }
-              try {
-                canvas.beginStroke({
-                  kind: 'inpaint',
-                  layer: null,
-                  point,
-                  diameter: brush.diameter,
-                })
-              } catch (error) {
-                gesture.current = null
-                receiveError(errorMessage(error))
-              }
+              setInpaintDraft(selection)
             } else if (tool === 'censor') {
               strokeUpdates.clear()
               gesture.current = {
@@ -937,7 +965,10 @@ export function CanvasWorkspace() {
           onWheel={(event) => {
             if (!page) return
             event.preventDefault()
-            if (event.altKey && isBrushTool(tool)) {
+            if (
+              event.altKey &&
+              (isBrushTool(tool) || (tool === 'remove' && removeSelectionTool === 'pen'))
+            ) {
               if (event.deltaY !== 0) {
                 const currentBrush = useKoharuStore.getState().brush
                 const delta = event.deltaY < 0 ? BRUSH_DIAMETER_STEP : -BRUSH_DIAMETER_STEP
@@ -1006,7 +1037,11 @@ export function CanvasWorkspace() {
               draft={draft}
               cursor={cursor}
               brushSize={brush.diameter}
-              showBrushCursor={isBrushTool(tool)}
+              showBrushCursor={
+                isBrushTool(tool) || (tool === 'remove' && removeSelectionTool === 'pen')
+              }
+              inpaintSelections={tool === 'remove' ? inpaintSelections : []}
+              inpaintDraft={tool === 'remove' ? inpaintDraft : null}
               onTransformStart={beginTransform}
               onTransformFrame={updateTransform}
               onTransformEnd={finishTransform}
@@ -1014,6 +1049,33 @@ export function CanvasWorkspace() {
               onRegionTransformFrame={updateRegionTransform}
               onRegionTransformEnd={finishRegionTransform}
             />
+          )}
+          {page && canvasState.status === 'ready' && tool === 'remove' && (
+            <div
+              data-canvas-control
+              className='absolute right-3 bottom-3 z-20 flex items-center gap-3 rounded-xl border border-border bg-[var(--surface-floating)] px-3 py-2 shadow-[var(--shadow-toolrail)]'
+            >
+              <span className='text-xs text-muted-foreground'>
+                {t('canvas.inpaintSelectionCount', { count: inpaintSelections.length })}
+              </span>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                disabled={!inpaintSelections.length || inpaintPending}
+                onClick={resetInpaintSelection}
+              >
+                {t('common.reset')}
+              </Button>
+              <Button
+                type='button'
+                size='sm'
+                disabled={!inpaintSelections.length || inpaintPending || processing}
+                onClick={submitInpaintSelection}
+              >
+                {t('canvas.inpaintSelection')}
+              </Button>
+            </div>
           )}
           {page && canvasState.status === 'error' && (
             <div
