@@ -36,6 +36,7 @@ import {
   refresh,
   usePage,
   usePages,
+  useProject,
 } from '@/lib/queries'
 import {
   isBrushTool,
@@ -61,6 +62,7 @@ const canvasCursors = {
   select: undefined,
   text: 'text',
   draw: 'none',
+  fill: 'crosshair',
   eraser: 'none',
   color_picker: 'crosshair',
   remove: 'none',
@@ -118,6 +120,7 @@ export function CanvasWorkspace() {
 
   const page = usePage().data
   const pages = usePages().data
+  const project = useProject().data
   const camera = useKoharuStore((state) => state.camera)
   const canvasPage = useKoharuStore((state) => state.canvasPage)
   const canvasRevision = useKoharuStore((state) => state.canvasRevision)
@@ -127,6 +130,7 @@ export function CanvasWorkspace() {
   const layerFrames = useKoharuStore((state) => state.layerFrames)
   const tool = useKoharuStore((state) => state.tool)
   const brush = useKoharuStore((state) => state.brush)
+  const fillTolerance = useKoharuStore((state) => state.fillTolerance)
   const selected = useKoharuStore((state) => state.selectedLayers)
   const selectLayers = useKoharuStore((state) => state.selectLayers)
   const setTool = useKoharuStore((state) => state.setTool)
@@ -163,6 +167,10 @@ export function CanvasWorkspace() {
   const activePaintRaster =
     activeRaster && activeRaster.kind !== 'censor' ? activeRaster : undefined
   const activeCensorRaster = activeRaster?.kind === 'censor' ? activeRaster : undefined
+  const activeFillTarget =
+    activeEraseTarget?.type === 'raster' && activeEraseTarget.kind !== 'paint'
+      ? undefined
+      : activeEraseTarget
 
   const enqueue = useCallback(<Result,>(operation: () => Promise<Result>): Promise<Result> => {
     const pending = commandQueue.current.then(operation)
@@ -417,6 +425,23 @@ export function CanvasWorkspace() {
           .catch(() => undefined)
         return
       }
+      if (command && event.key.toLowerCase() === 'c' && state.selectedLayers.length > 0) {
+        event.preventDefault()
+        void call(commands.copyLayers, state.selectedLayers)
+          .then(() => refresh(projectKey))
+          .catch(() => undefined)
+        return
+      }
+      if (command && event.key.toLowerCase() === 'v' && page && project?.can_paste) {
+        event.preventDefault()
+        void call(commands.pasteLayers, page.id)
+          .then((layers) => {
+            selectLayers(layers)
+            return refresh(projectKey, pagesKey, pageKey)
+          })
+          .catch(() => undefined)
+        return
+      }
       if (command && event.key.toLowerCase() === 'a' && page) {
         event.preventDefault()
         selectLayers(
@@ -453,7 +478,7 @@ export function CanvasWorkspace() {
         return
       }
       const next = (
-        ['select', 'text', 'draw', 'eraser', 'color_picker', 'remove', 'pan'] as const
+        ['select', 'text', 'draw', 'fill', 'eraser', 'color_picker', 'remove', 'pan'] as const
       ).find((action) => state.shortcuts[action] === event.key.toLowerCase())
       if (next) setTool(next)
     }
@@ -475,7 +500,15 @@ export function CanvasWorkspace() {
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', blur)
     }
-  }, [cancelGesture, colorSampling, page, requestCanvasFit, selectLayers, setTool])
+  }, [
+    cancelGesture,
+    colorSampling,
+    page,
+    project?.can_paste,
+    requestCanvasFit,
+    selectLayers,
+    setTool,
+  ])
 
   const clientPagePoint = (clientX: number, clientY: number) =>
     pagePoint(
@@ -781,6 +814,28 @@ export function CanvasWorkspace() {
                 gesture.current = null
                 receiveError(errorMessage(error))
               }
+            } else if (tool === 'fill') {
+              if (!activeFillTarget) {
+                receiveError(t('canvas.fillRequiresImage'))
+                return
+              }
+              commitPending.current = true
+              void enqueue(() =>
+                call(
+                  commands.commitFill,
+                  canvasRevision,
+                  activeFillTarget.id,
+                  point,
+                  hexToRgba(brush.color),
+                  fillTolerance,
+                ),
+              )
+                .then((result) => {
+                  selectLayers([result.layer])
+                  return refresh(projectKey, pagesKey, pageKey)
+                })
+                .catch(() => undefined)
+                .finally(() => (commitPending.current = false))
             } else if (tool === 'eraser') {
               if (!activeEraseTarget) {
                 receiveError('Select an editable image layer before using the Eraser.')

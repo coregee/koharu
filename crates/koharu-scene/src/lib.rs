@@ -24,12 +24,12 @@ pub use change::{
 };
 pub use component::{Component, ValidationContext};
 pub use components::{
-    Asset, AssetInput, AssetMetadata, AssetRole, Authored, DetectionAnalysis, DetectionLabel,
-    EntityOrigin, FontStyle, Generation, Geometry, Group, LanguageTag, LayerLock, OcrAnalysis,
-    OcrCandidate, Origin, Page, PageDraft, Point, Project, RasterLayer, RasterLayerKind, Region,
-    RegionKind, RegionShape, RegionShapeKind, Relation, RelationKind, SourceText, TextAlignment,
-    TextContent, TextDirection, TextGroup, TextGroupKind, TextLayout, TextLayoutKind, TextRole,
-    TextStyleRange, Translation, Typography, Visibility, WritingMode,
+    Asset, AssetInput, AssetMetadata, AssetRole, Authored, BubbleStyle, DetectionAnalysis,
+    DetectionLabel, EntityOrigin, FontStyle, Generation, Geometry, Group, LanguageTag, LayerLock,
+    OcrAnalysis, OcrCandidate, Origin, Page, PageDraft, Point, Project, RasterLayer,
+    RasterLayerKind, Region, RegionKind, RegionShape, RegionShapeKind, Relation, RelationKind,
+    SourceText, TextAlignment, TextContent, TextDirection, TextGroup, TextGroupKind, TextLayout,
+    TextLayoutKind, TextRole, TextStyleRange, Translation, Typography, Visibility, WritingMode,
 };
 pub use document::{AnalysisRegionRef, GroupRef, TextContentRef, TextLayerRef};
 pub use edit::{At, Edit, RemovePolicy};

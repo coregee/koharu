@@ -172,7 +172,6 @@ export function CanvasOverlay({
           frame={regionControlFrame}
           camera={camera}
           edgesOnly={false}
-          rotatable={false}
           onTransformStart={onRegionTransformStart}
           onTransformFrame={onRegionTransformFrame}
           onTransformEnd={onRegionTransformEnd}

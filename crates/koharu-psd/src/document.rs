@@ -139,7 +139,7 @@ pub(crate) async fn build(
         .iter()
         .filter_map(|layer| match layer.kind() {
             LayerKind::Text(text) => Some((layer.entity(), text)),
-            LayerKind::Image(_) => None,
+            LayerKind::Image(_) | LayerKind::Shape(_) => None,
         })
         .filter(|(_, text)| !text.text.trim().is_empty())
         .collect::<Vec<_>>();
@@ -149,7 +149,7 @@ pub(crate) async fn build(
     for visual in frame.layers().iter().rev() {
         let image = match visual.kind() {
             LayerKind::Image(image) => Some(image),
-            LayerKind::Text(_) => None,
+            LayerKind::Text(_) | LayerKind::Shape(_) => None,
         };
         let raster =
             image.is_some_and(|image| matches!(image.kind, ImageKind::Cleanup | ImageKind::Paint));
@@ -176,9 +176,24 @@ pub(crate) async fn build(
                 hidden: false,
                 text: None,
             });
+        } else if let LayerKind::Shape(shape) = visual.kind() {
+            let cropped = frame
+                .cropped(visual.entity())?
+                .ok_or(PsdExportError::MissingRenderedEntity(visual.entity()))?;
+            let rendered = rasterize(Arc::clone(&rasterizer), &cropped, raster_options).await?;
+            validate_pixels(&shape.name, &rendered.image)?;
+            layers.push(Layer {
+                id: 0,
+                name: shape.name.clone(),
+                left: rendered.left,
+                top: rendered.top,
+                pixels: rendered.image,
+                hidden: false,
+                text: None,
+            });
         } else if let Some(text) = match visual.kind() {
             LayerKind::Text(text) if !text.text.trim().is_empty() => Some(text),
-            LayerKind::Text(_) | LayerKind::Image(_) => None,
+            LayerKind::Text(_) | LayerKind::Image(_) | LayerKind::Shape(_) => None,
         } {
             let offset = text_entities
                 .iter()

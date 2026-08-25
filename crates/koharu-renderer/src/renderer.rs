@@ -9,11 +9,11 @@ use anyhow::{Context, anyhow};
 use arc_swap::ArcSwap;
 use koharu_rasterizer::{RasterOptions, Rasterizer};
 use koharu_scene::{
-    Asset, AssetRole, BlobId, Change, Component, ComponentOwner, EntityChange, EntityId, FitsTo,
-    FlowsIn, Geometry, Group, OcrAnalysis, Origin, Page, Presents, RasterLayer, RasterLayerKind,
-    RecognizedFrom, Region, RelationChange, RelationId, RelationSpec, Revision, Snapshot,
-    TextAlignment, TextDirection, TextGroupKind, TextLayout as SceneTextLayout, TextLayoutKind,
-    Translation, Typography, Visibility,
+    Asset, AssetRole, BlobId, BubbleStyle, Change, Component, ComponentOwner, EntityChange,
+    EntityId, FitsTo, FlowsIn, Geometry, Group, OcrAnalysis, Origin, Page, Presents, RasterLayer,
+    RasterLayerKind, RecognizedFrom, Region, RegionShape, RegionShapeKind, RelationChange,
+    RelationId, RelationSpec, Revision, Snapshot, TextAlignment, TextDirection, TextGroupKind,
+    TextLayout as SceneTextLayout, TextLayoutKind, Translation, Typography, Visibility,
 };
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -31,12 +31,12 @@ use vello::{
 use crate::{
     Error, FontFamily, FontStyle, Frame, ImageKind, ImageMetadata, Layer, LayerKind, Presentation,
     RasterImage, RenderBounds, RenderDependency, RenderDiagnostic, Result, RetentionStats,
-    TextAlign, TextMetadata, TypesettingConfig, WritingMode,
+    ShapeMetadata, TextAlign, TextMetadata, TypesettingConfig, WritingMode,
     bubble::{GeometryFrame, LayoutBox, contour, flow_cells, geometry_bounds, geometry_frame},
     fonts::{FontPreview, FontRequest, Fonts},
     frame::{
         FrameData, ImageNodeDescriptor, LayerData, LocalTextMetadata, NodeDescriptor, RetainedNode,
-        prepare_frame,
+        ShapeNodeDescriptor, prepare_frame,
     },
     images::{DecodedImage, ImageCache, decode},
     script::{is_chinese_or_japanese_text, shaping_direction_for_text},
@@ -293,7 +293,7 @@ impl Renderer {
             .iter()
             .filter_map(|(_, descriptor)| match descriptor {
                 NodeDescriptor::Image(image) => Some(image.blob),
-                NodeDescriptor::Text(_) => None,
+                NodeDescriptor::Text(_) | NodeDescriptor::Shape(_) => None,
             })
             .collect::<BTreeSet<_>>();
         let images = Arc::new(self.load_images(snapshot, image_ids).await?);
@@ -482,6 +482,7 @@ struct LayerDraft {
 #[derive(Clone)]
 enum DraftMetadata {
     Image(ImageMetadata),
+    Shape(ShapeMetadata),
     Text {
         text: String,
         language: Option<koharu_scene::LanguageTag>,
@@ -692,6 +693,32 @@ impl Traversal<'_> {
                 )? {
                     self.layers.push(draft);
                 }
+                self.dependencies.extend(common);
+                continue;
+            }
+            if let Some(style) = self.snapshot.component::<BubbleStyle>(entity)? {
+                common.insert(component_dependency::<BubbleStyle>(entity));
+                common.insert(component_dependency::<Geometry>(entity));
+                common.insert(component_dependency::<RegionShape>(entity));
+                let geometry = self
+                    .snapshot
+                    .component::<Geometry>(entity)?
+                    .ok_or_else(|| {
+                        Error::invalid(format!("bubble layer {entity} has no geometry"))
+                    })?;
+                let shape = self
+                    .snapshot
+                    .component::<RegionShape>(entity)?
+                    .map_or(RegionShapeKind::Rectangular, |shape| shape.kind);
+                self.layers.push(shape_draft(
+                    entity,
+                    geometry,
+                    shape,
+                    style,
+                    presentation,
+                    Arc::from(ancestry),
+                    &mut common,
+                )?);
                 self.dependencies.extend(common);
                 continue;
             }
@@ -1113,6 +1140,38 @@ fn image_draft(
     })
 }
 
+fn shape_draft(
+    entity: EntityId,
+    geometry: Geometry,
+    shape: RegionShapeKind,
+    style: BubbleStyle,
+    presentation: Presentation,
+    ancestry: Arc<[EntityId]>,
+    dependencies: &mut BTreeSet<RenderDependency>,
+) -> Result<LayerDraft> {
+    let frame = geometry_frame(&geometry)
+        .ok_or_else(|| Error::invalid(format!("invalid bubble geometry for entity {entity}")))?;
+    Ok(LayerDraft {
+        entity,
+        geometry,
+        frame,
+        presentation,
+        ancestry,
+        descriptor: NodeDescriptor::Shape(ShapeNodeDescriptor {
+            shape,
+            width: frame.bounds.width,
+            height: frame.bounds.height,
+            fill_color: style.fill_color,
+            outline_color: style.outline_color,
+            outline_width: style.outline_width,
+        }),
+        metadata: DraftMetadata::Shape(ShapeMetadata {
+            name: "Speech Bubble".to_owned(),
+        }),
+        dependencies: dependencies.iter().cloned().collect(),
+    })
+}
+
 fn build_node(
     descriptor: NodeDescriptor,
     fonts: &Fonts,
@@ -1188,6 +1247,24 @@ fn build_node(
                 diagnostics: rendered.diagnostics.into(),
             })
         }
+        NodeDescriptor::Shape(shape) => {
+            let scene = Arc::new(shape_scene(shape));
+            let local_bounds = RenderBounds {
+                x: 0.0,
+                y: 0.0,
+                width: shape.width,
+                height: shape.height,
+            };
+            Ok(RetainedNode {
+                descriptor,
+                scene,
+                resources: Arc::from([]),
+                local_bounds,
+                image: None,
+                text: None,
+                diagnostics: Arc::from([]),
+            })
+        }
     }
 }
 
@@ -1203,6 +1280,7 @@ fn assemble_frame(
         let bounds = transform_bounds(node.local_bounds, placement);
         let kind = match draft.metadata {
             DraftMetadata::Image(metadata) => LayerKind::Image(metadata),
+            DraftMetadata::Shape(metadata) => LayerKind::Shape(metadata),
             DraftMetadata::Text {
                 text,
                 language,
@@ -1287,7 +1365,7 @@ fn placement(draft: &LayerDraft, node: &RetainedNode) -> Affine {
             f64::from(draft.frame.bounds.x),
             f64::from(draft.frame.bounds.y),
         )),
-        NodeDescriptor::Text(_) => {
+        NodeDescriptor::Text(_) | NodeDescriptor::Shape(_) => {
             let frame = draft.frame.bounds;
             Affine::translate((
                 f64::from(frame.x + frame.width * 0.5),
@@ -1299,6 +1377,110 @@ fn placement(draft: &LayerDraft, node: &RetainedNode) -> Affine {
                 ))
         }
     }
+}
+
+fn shape_scene(shape: &ShapeNodeDescriptor) -> koharu_rasterizer::PreparedScene {
+    use koharu_rasterizer::{FillRule, PreparedPath, PreparedScene, PreparedSceneCommand};
+
+    let mut commands = Vec::new();
+    if shape.fill_color[3] > 0 {
+        commands.push(PreparedSceneCommand::FillPath(PreparedPath {
+            fill: FillRule::NonZero,
+            transform: Affine::IDENTITY.as_coeffs(),
+            color: shape.fill_color,
+            elements: shape_path(shape.shape, 0.0, 0.0, shape.width, shape.height),
+        }));
+    }
+    let inset = shape
+        .outline_width
+        .min(shape.width * 0.5)
+        .min(shape.height * 0.5);
+    if shape.outline_color[3] > 0 && inset > 0.0 {
+        let mut elements = shape_path(shape.shape, 0.0, 0.0, shape.width, shape.height);
+        if shape.width > inset * 2.0 && shape.height > inset * 2.0 {
+            elements.extend(shape_path(
+                shape.shape,
+                inset,
+                inset,
+                shape.width - inset * 2.0,
+                shape.height - inset * 2.0,
+            ));
+        }
+        commands.push(PreparedSceneCommand::FillPath(PreparedPath {
+            fill: FillRule::EvenOdd,
+            transform: Affine::IDENTITY.as_coeffs(),
+            color: shape.outline_color,
+            elements,
+        }));
+    }
+    PreparedScene { commands }
+}
+
+fn shape_path(
+    shape: RegionShapeKind,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Vec<koharu_rasterizer::PathElement> {
+    use koharu_rasterizer::PathElement;
+
+    let (x, y, width, height) = (
+        f64::from(x),
+        f64::from(y),
+        f64::from(width),
+        f64::from(height),
+    );
+    if shape == RegionShapeKind::Rectangular {
+        return vec![
+            PathElement::MoveTo([x, y]),
+            PathElement::LineTo([x + width, y]),
+            PathElement::LineTo([x + width, y + height]),
+            PathElement::LineTo([x, y + height]),
+            PathElement::Close,
+        ];
+    }
+    const KAPPA: f64 = 0.552_284_749_830_793_6;
+    let center_x = x + width * 0.5;
+    let center_y = y + height * 0.5;
+    let radius_x = width * 0.5;
+    let radius_y = height * 0.5;
+    vec![
+        PathElement::MoveTo([center_x + radius_x, center_y]),
+        PathElement::CurveTo([
+            center_x + radius_x,
+            center_y + radius_y * KAPPA,
+            center_x + radius_x * KAPPA,
+            center_y + radius_y,
+            center_x,
+            center_y + radius_y,
+        ]),
+        PathElement::CurveTo([
+            center_x - radius_x * KAPPA,
+            center_y + radius_y,
+            center_x - radius_x,
+            center_y + radius_y * KAPPA,
+            center_x - radius_x,
+            center_y,
+        ]),
+        PathElement::CurveTo([
+            center_x - radius_x,
+            center_y - radius_y * KAPPA,
+            center_x - radius_x * KAPPA,
+            center_y - radius_y,
+            center_x,
+            center_y - radius_y,
+        ]),
+        PathElement::CurveTo([
+            center_x + radius_x * KAPPA,
+            center_y - radius_y,
+            center_x + radius_x,
+            center_y - radius_y * KAPPA,
+            center_x + radius_x,
+            center_y,
+        ]),
+        PathElement::Close,
+    ]
 }
 
 fn transform_bounds(bounds: RenderBounds, transform: Affine) -> RenderBounds {

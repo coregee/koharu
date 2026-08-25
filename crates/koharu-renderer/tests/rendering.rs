@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 use koharu_rasterizer::{PREPARED_RASTER_TILE_DIMENSION, RasterOptions, Rasterizer};
 use koharu_renderer::{ImageKind, LayerKind, Renderer};
 use koharu_scene::{
-    AssetInput, AssetMetadata, AssetRole, At, Origin, PageDraft, RasterLayer, RasterLayerKind,
-    Session, Visibility,
+    AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, BubbleStyle, Geometry, Origin,
+    PageDraft, RasterLayer, RasterLayerKind, RegionShape, RegionShapeKind, Session, Visibility,
 };
 
 fn png(width: u32, height: u32, color: [u8; 4]) -> Arc<[u8]> {
@@ -51,6 +51,67 @@ async fn public_renderer_returns_a_complete_immutable_frame() {
         .diagnostics()
         .iter()
         .any(|diagnostic| matches!(diagnostic, koharu_renderer::RenderDiagnostic::MissingAsset { entity, role } if *entity == page && role == "source")));
+}
+
+#[tokio::test]
+async fn authored_bubble_regions_render_as_transformable_vector_layers() {
+    let mut session = Session::memory().await.unwrap();
+    let mut page = None;
+    let mut bubble = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let created = edit.add_page(PageDraft::new("page", 320.0, 240.0), At::End)?;
+            let region = edit.add_analysis_region::<BubbleRegion>(
+                created,
+                At::End,
+                &Geometry::rectangle(40.0, 50.0, 160.0, 90.0),
+                None,
+            )?;
+            edit.set(
+                region,
+                &RegionShape {
+                    origin: Origin::User,
+                    kind: RegionShapeKind::Circular,
+                },
+            )?;
+            edit.set(
+                region,
+                &BubbleStyle {
+                    origin: Origin::User,
+                    fill_color: [255, 255, 255, 255],
+                    outline_color: [12, 34, 56, 255],
+                    outline_width: 4.0,
+                },
+            )?;
+            page = Some(created);
+            bubble = Some(region);
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    let bubble = bubble.unwrap();
+    let frame = Renderer::new()
+        .unwrap()
+        .render(&snapshot, page.unwrap())
+        .await
+        .unwrap();
+
+    let layer = frame.layer(bubble).unwrap();
+    assert!(matches!(layer.kind(), LayerKind::Shape(_)));
+    assert_eq!(layer.element_frame().unwrap().width, 160.0);
+    let manifest = frame.prepared().manifest().unwrap();
+    let prepared = manifest
+        .frame
+        .layers
+        .iter()
+        .find(|layer| layer.id.to_string() == bubble.as_uuid().simple().to_string())
+        .unwrap();
+    assert_eq!(prepared.kind, koharu_rasterizer::LayerKind::Vector);
+    let koharu_rasterizer::PreparedContent::Vector(scene) = &prepared.content else {
+        panic!("bubble layer must contain vector commands");
+    };
+    assert_eq!(scene.commands.len(), 2);
 }
 
 #[tokio::test]

@@ -172,6 +172,7 @@ function installProject() {
     active_page: 'page',
     can_undo: true,
     can_redo: false,
+    can_paste: false,
   })
   queryClient.setQueryData(pagesKey, [
     {
@@ -403,6 +404,7 @@ describe('greenfield editor', () => {
           active_page: 'page-3',
           can_undo: true,
           can_redo: false,
+          can_paste: false,
         },
         page: pages[2]!,
       })
@@ -416,6 +418,7 @@ describe('greenfield editor', () => {
           active_page: 'page-2',
           can_undo: true,
           can_redo: false,
+          can_paste: false,
         },
         page: pages[1]!,
       })
@@ -943,6 +946,55 @@ describe('greenfield editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add image layer' }))
 
     await waitFor(() => expect(addImageLayer).toHaveBeenCalledWith('page'))
+  })
+
+  it('creates and styles an empty speech-bubble layer', async () => {
+    installProject()
+    const user = userEvent.setup()
+    const current = queryClient.getQueryData<Page>(pageKey)!
+    const bubble: Extract<Layer, { type: 'bubble' }> = {
+      type: 'bubble',
+      id: 'bubble',
+      parent: 'page',
+      locked: false,
+      geometry: {
+        points: [
+          { x: 100, y: 120 },
+          { x: 300, y: 120 },
+          { x: 300, y: 240 },
+          { x: 100, y: 240 },
+        ],
+      },
+      visibility: { visible: true, opacity: 1 },
+      shape: 'circular',
+      fill_color: [255, 255, 255, 255],
+      outline_color: [0, 0, 0, 255],
+      outline_width: 3,
+    }
+    const page = { ...current, layers: [...current.layers, bubble] }
+    const addBubbleLayer = vi
+      .spyOn(commands, 'addBubbleLayer')
+      .mockResolvedValue({ page, layer: bubble.id })
+    const setBubbleStyle = vi.spyOn(commands, 'setBubbleStyle').mockResolvedValue(page)
+    render(<Inspector />)
+
+    await user.click(screen.getByRole('button', { name: 'Add speech bubble' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Oval' }))
+    await waitFor(() => expect(addBubbleLayer).toHaveBeenCalledWith('page', 'circular'))
+
+    await user.click(await screen.findByRole('combobox', { name: /bubble shape/i }))
+    await user.click(await screen.findByRole('option', { name: 'Rectangle' }))
+    await waitFor(() =>
+      expect(setBubbleStyle).toHaveBeenCalledWith('bubble', {
+        shape: 'rectangular',
+        fill_color: [255, 255, 255, 255],
+        outline_color: [0, 0, 0, 255],
+        outline_width: 3,
+      }),
+    )
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /background color/i })).toBeInTheDocument()
+    expect(screen.getByLabelText('Speech Bubble 1 outline width')).toBeInTheDocument()
   })
 
   it('reorders sibling layers with drag and drop', async () => {

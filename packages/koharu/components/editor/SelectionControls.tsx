@@ -1,5 +1,6 @@
 'use client'
 
+import { RotateCw } from 'lucide-react'
 import { useRef, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 
 import {
@@ -178,15 +179,15 @@ export function SelectionControls({
 
       {rotatable && (
         <>
-          <span className='pointer-events-none absolute top-0 left-1/2 h-2 w-px -translate-x-1/2 -translate-y-full bg-[var(--canvas-selection)]' />
+          <span className='pointer-events-none absolute top-0 left-1/2 h-3 w-px -translate-x-1/2 -translate-y-full bg-[var(--canvas-selection)]' />
           <div
             data-canvas-control
             data-rotate-handle
-            className='pointer-events-auto absolute top-[-16px] left-1/2 grid size-3.5 -translate-x-1/2 -translate-y-1/2 cursor-alias touch-none place-items-center'
+            className='pointer-events-auto absolute top-[-20px] left-1/2 grid size-5 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none place-items-center rounded-full border border-primary-foreground bg-[var(--canvas-selection)] shadow-[0_1px_3px_rgb(0_0_0/0.35)] active:cursor-grabbing'
             onPointerDown={startRotate}
             {...pointerEvents}
           >
-            <span className='size-1.5 rounded-[1px] border border-primary-foreground bg-[var(--canvas-selection)] shadow-[0_0_0_1px_rgb(0_0_0/0.12)]' />
+            <RotateCw className='size-3 text-primary-foreground' strokeWidth={2.5} />
           </div>
         </>
       )}

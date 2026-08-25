@@ -157,6 +157,33 @@ export function TitleBar() {
               </MenubarItem>
               <MenubarSeparator />
               <MenubarItem
+                disabled={selectedLayers.length === 0}
+                onClick={() =>
+                  void call(commands.copyLayers, selectedLayers)
+                    .then(() => refresh(projectKey))
+                    .catch(() => undefined)
+                }
+              >
+                {t('menu.copy')}
+                <MenubarShortcut>Ctrl+C</MenubarShortcut>
+              </MenubarItem>
+              <MenubarItem
+                disabled={!page || !project?.can_paste}
+                onClick={() => {
+                  if (!page) return
+                  void call(commands.pasteLayers, page.id)
+                    .then((layers) => {
+                      selectLayers(layers)
+                      return refresh(projectKey, pagesKey, pageKey)
+                    })
+                    .catch(() => undefined)
+                }}
+              >
+                {t('menu.paste')}
+                <MenubarShortcut>Ctrl+V</MenubarShortcut>
+              </MenubarItem>
+              <MenubarSeparator />
+              <MenubarItem
                 disabled={!page}
                 onClick={() =>
                   selectLayers(page?.layers.filter(selectableLayer).map((layer) => layer.id) ?? [])

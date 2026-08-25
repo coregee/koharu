@@ -66,12 +66,15 @@ export function draftFrame(start: Point, end: Point): Frame {
 }
 
 export function selectableLayer(layer: Layer): boolean {
-  return layer.type === 'text' || layer.type === 'image'
+  return layer.type === 'text' || layer.type === 'image' || layer.type === 'bubble'
 }
 
 export function layerFrame(layer: Layer): Frame | null {
   const geometry =
-    layer.type === 'text' || layer.type === 'image' || layer.type === 'artwork'
+    layer.type === 'text' ||
+    layer.type === 'image' ||
+    layer.type === 'bubble' ||
+    layer.type === 'artwork'
       ? layer.geometry
       : null
   return geometryFrame(geometry)

@@ -5,10 +5,10 @@
 //! relation endpoints.
 
 use crate::{
-    BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, LayerLock,
-    OcrAnalysis, OcrCandidate, Page, Presents, Project, RasterLayer, Region, RegionShape,
-    RegionSpec, Relation, Result, SourceText, TextContent, TextGroup, TextGroupKind, TextLayout,
-    TextRegion, TextRole, Translation, Typography, Visibility,
+    BubbleRegion, BubbleStyle, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group,
+    LayerLock, OcrAnalysis, OcrCandidate, Page, Presents, Project, RasterLayer, Region,
+    RegionShape, RegionSpec, Relation, Result, SourceText, TextContent, TextGroup, TextGroupKind,
+    TextLayout, TextRegion, TextRole, Translation, Typography, Visibility,
     component::{Component, ComponentRecord, ValidationContext, decode, key},
     components::Assets,
     state::{Components, State},
@@ -64,6 +64,7 @@ component_schema! {
     REGION_SHAPE = 18 => RegionShape,
     OCR_CANDIDATE = 19 => OcrCandidate,
     LAYER_LOCK = 20 => LayerLock,
+    BUBBLE_STYLE = 21 => BubbleStyle,
 }
 
 pub(crate) fn validate_components(
@@ -91,6 +92,7 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     let has_region_shape = has(REGION_SHAPE);
     let has_geometry = has(GEOMETRY);
     let has_raster = has(RASTER_LAYER);
+    let has_bubble_style = has(BUBBLE_STYLE);
     let has_assets = has(ASSETS);
     let has_layout = has(TEXT_LAYOUT);
     let has_typography = has(TYPOGRAPHY);
@@ -125,6 +127,7 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
             || has_region
             || has_geometry
             || has_raster
+            || has_bubble_style
             || has_assets
             || has_layout
             || has_typography
@@ -195,6 +198,16 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
         Err(Error::invalid(format!(
             "entity {id} has a region shape but is not an analysis region"
         )))
+    } else if has_bubble_style {
+        let region = decode_entity::<Region>(state, id)?
+            .ok_or_else(|| Error::invalid(format!("bubble layer {id} is not a region")))?;
+        if region.kind == BubbleRegion::kind() {
+            Ok(())
+        } else {
+            Err(Error::invalid(format!(
+                "bubble layer {id} does not carry the speech-bubble region kind"
+            )))
+        }
     } else if has_layout
         && (has_source || has_translation || has_region || has_detection || has_ocr)
     {

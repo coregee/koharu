@@ -9,7 +9,10 @@ use super::{
     ChannelExt as _, Error,
     canvas::{CanvasChannel, Point},
     import,
-    project::{CurrentProject, Page, Project, TextClassification, Typography},
+    project::{
+        AddedLayer, BubbleStyleUpdate, CurrentProject, Page, Project, TextClassification,
+        Typography,
+    },
 };
 async fn synchronize_canvas(
     desktop: &Desktop,
@@ -444,6 +447,107 @@ pub(crate) async fn add_image_layer(
     let canvas = synchronize_canvas(&desktop, &commit, Some(page)).await?;
     canvas_channel.channel.publish(canvas);
     Ok(Some(view))
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "bubble_layer_added",
+    skip_all,
+    fields(origin = "user", shape = ?shape)
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn add_bubble_layer(
+    page: EntityId,
+    shape: RegionShapeKind,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<AddedLayer, Error> {
+    let (commit, layer, view) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let (commit, layer) = project.add_bubble_layer(page, shape).await?;
+        project.record_commit(&commit);
+        let view = Project::page(&commit.snapshot, page)?;
+        (commit, layer, view)
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, Some(page)).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(AddedLayer { page: view, layer })
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "bubble_style_edited",
+    skip_all,
+    fields(origin = "user", layer = %layer)
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_bubble_style(
+    layer: EntityId,
+    style: BubbleStyleUpdate,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<Page, Error> {
+    let (commit, page, view) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.set_bubble_style(layer, style).await?;
+        project.record_commit(&commit);
+        let page = project.active_page().context("no active page")?;
+        let view = Project::page(&commit.snapshot, page)?;
+        (commit, page, view)
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, Some(page)).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(view)
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "layers_copied",
+    skip_all,
+    fields(origin = "user", entity_count = layers.len()),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn copy_layers(
+    layers: Vec<EntityId>,
+    project: State<'_, CurrentProject>,
+) -> Result<(), Error> {
+    let mut project = project.project.lock().await;
+    let project = project.as_mut().context("no project is open")?;
+    project.copy_layers(layers).await?;
+    Ok(())
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "layers_pasted",
+    skip_all,
+    fields(origin = "user")
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn paste_layers(
+    page: EntityId,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<Vec<EntityId>, Error> {
+    let (commit, pasted) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let (commit, pasted) = project.paste_layers(page).await?;
+        project.record_commit(&commit);
+        (commit, pasted)
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, Some(page)).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(pasted)
 }
 
 #[tracing::instrument(

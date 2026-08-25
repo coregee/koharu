@@ -264,6 +264,58 @@ pub(crate) async fn commit_erase(
     .await
 }
 
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "fill_committed",
+    skip_all,
+    fields(origin = "user", tolerance = tolerance),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn commit_fill(
+    expected_revision: Revision,
+    layer: EntityId,
+    point: Point,
+    color: [u8; 4],
+    tolerance: u8,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<LayerCommit, Error> {
+    let (commit, page, revision) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        ensure_revision(project.snapshot().revision(), expected_revision)?;
+        let page = project
+            .active_page()
+            .context("the project has no active page")?;
+        let commit = project
+            .apply_raster_fill(
+                page,
+                layer,
+                koharu_scene::Point {
+                    x: point.x,
+                    y: point.y,
+                },
+                color,
+                tolerance,
+            )
+            .await?;
+        let revision = if let Some(commit) = &commit {
+            project.record_commit(commit);
+            commit.revision
+        } else {
+            project.snapshot().revision()
+        };
+        (commit, project.active_page(), revision)
+    };
+    if let Some(commit) = commit {
+        desktop.synchronize(&commit.snapshot, page, &commit).await?;
+        canvas_channel.channel.publish(desktop.canvas_state());
+    }
+    Ok(LayerCommit { revision, layer })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn commit_raster_stroke(
     expected_revision: Revision,

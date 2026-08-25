@@ -11,7 +11,7 @@ use crate::{Error, Result};
 
 const MANIFEST_MAGIC: [u8; 8] = *b"KHRMANF\0";
 const RESOURCE_MAGIC: [u8; 8] = *b"KHRRSRC\0";
-pub const PREPARED_FRAME_MANIFEST_VERSION: u16 = 4;
+pub const PREPARED_FRAME_MANIFEST_VERSION: u16 = 5;
 pub const PREPARED_RESOURCE_FORMAT_VERSION: u16 = 3;
 /// Logical raster tile edge used by portable frames. The one-pixel sampling
 /// gutter is stored outside this logical extent where adjacent pixels exist.
@@ -445,6 +445,9 @@ impl PreparedLayer {
             (LayerKind::Text, PreparedContent::Vector(scene)) => {
                 scene.validate(resources, referenced)?;
             }
+            (LayerKind::Vector, PreparedContent::Vector(scene)) => {
+                scene.validate(resources, referenced)?;
+            }
             _ => {
                 return Err(Error::invalid(
                     "prepared layer kind and content do not match",
@@ -459,6 +462,7 @@ impl PreparedLayer {
 pub enum LayerKind {
     Raster,
     Text,
+    Vector,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

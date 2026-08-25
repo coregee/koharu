@@ -6,6 +6,7 @@ import {
   Hand,
   Minus,
   MousePointer2,
+  PaintBucket,
   Pipette,
   Plus,
   Sparkles,
@@ -19,7 +20,9 @@ import { usePage } from '@/lib/queries'
 import {
   isBrushTool,
   MAX_BRUSH_DIAMETER,
+  MAX_FILL_TOLERANCE,
   MIN_BRUSH_DIAMETER,
+  MIN_FILL_TOLERANCE,
   useKoharuStore,
   type CanvasTool,
 } from '@/lib/store'
@@ -44,6 +47,7 @@ const tools = [
   ['select', MousePointer2],
   ['text', Type],
   ['draw', Brush],
+  ['fill', PaintBucket],
   ['eraser', Eraser],
   ['color_picker', Pipette],
   ['remove', Sparkles],
@@ -56,10 +60,13 @@ export function ToolBar() {
   const page = usePage().data
   const active = useKoharuStore((state) => state.tool)
   const brush = useKoharuStore((state) => state.brush)
+  const fillTolerance = useKoharuStore((state) => state.fillTolerance)
   const setTool = useKoharuStore((state) => state.setTool)
   const setBrush = useKoharuStore((state) => state.setBrush)
+  const setFillTolerance = useKoharuStore((state) => state.setFillTolerance)
   const shortcuts = useKoharuStore((state) => state.shortcuts)
   const hasBrush = isBrushTool(active)
+  const hasControls = hasBrush || active === 'fill'
 
   return (
     <aside className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'>
@@ -93,15 +100,20 @@ export function ToolBar() {
         ))}
       </div>
 
-      {hasBrush && (
+      {hasControls && (
         <div className='flex flex-col items-center gap-1 border-t border-border/80 py-1.5'>
-          {active === 'draw' && (
+          {(active === 'draw' || active === 'fill') && (
             <ColorWell value={brush.color} onChange={(color) => setBrush({ ...brush, color })} />
           )}
-          <BrushSize
-            value={brush.diameter}
-            onChange={(diameter) => setBrush({ ...brush, diameter })}
-          />
+          {hasBrush && (
+            <BrushSize
+              value={brush.diameter}
+              onChange={(diameter) => setBrush({ ...brush, diameter })}
+            />
+          )}
+          {active === 'fill' && (
+            <FillTolerance value={fillTolerance} onChange={setFillTolerance} />
+          )}
         </div>
       )}
     </aside>
@@ -169,6 +181,77 @@ function BrushSize({ value, onChange }: { value: number; onChange: (value: numbe
           aria-label={t('tools.brushSize')}
           min={MIN_BRUSH_DIAMETER}
           max={MAX_BRUSH_DIAMETER}
+          step={1}
+          value={value}
+          className='py-1 [&_[data-slot=slider-thumb]]:size-2.5'
+          onValueChange={onChange}
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function FillTolerance({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  const { t } = useTranslation()
+  const roundedValue = Math.round(value)
+
+  return (
+    <Popover>
+      <Tooltip>
+        <PopoverTrigger
+          render={
+            <TooltipTrigger
+              render={
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon'
+                  aria-label={t('tools.fillToleranceValue', { value: roundedValue })}
+                  className='size-8 rounded-xl font-sans text-[11px] leading-none font-medium tracking-[-0.02em] text-muted-foreground tabular-nums hover:bg-foreground/[0.06] hover:text-foreground'
+                />
+              }
+            >
+              {roundedValue}
+            </TooltipTrigger>
+          }
+        />
+        <TooltipContent side='right'>
+          {t('tools.fillToleranceValue', { value: roundedValue })}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        side='right'
+        align='center'
+        sideOffset={8}
+        className='w-48 gap-2.5 rounded-xl p-2.5'
+      >
+        <div className='flex items-center justify-between gap-3'>
+          <PopoverTitle className='text-[11px]'>{t('tools.fillTolerance')}</PopoverTitle>
+          <NumberField
+            min={MIN_FILL_TOLERANCE}
+            max={MAX_FILL_TOLERANCE}
+            step={1}
+            value={roundedValue}
+            className='w-20'
+            onValueChange={(next) => {
+              if (next !== null) onChange(clamp(next, MIN_FILL_TOLERANCE, MAX_FILL_TOLERANCE))
+            }}
+          >
+            <NumberFieldGroup className='h-7'>
+              <NumberFieldDecrement aria-label={t('tools.decreaseFillTolerance')}>
+                <Minus />
+              </NumberFieldDecrement>
+              <NumberFieldInput aria-label={t('tools.fillTolerance')} />
+              <NumberFieldIncrement aria-label={t('tools.increaseFillTolerance')}>
+                <Plus />
+              </NumberFieldIncrement>
+            </NumberFieldGroup>
+          </NumberField>
+        </div>
+        <Slider
+          aria-label={t('tools.fillTolerance')}
+          min={MIN_FILL_TOLERANCE}
+          max={MAX_FILL_TOLERANCE}
           step={1}
           value={value}
           className='py-1 [&_[data-slot=slider-thumb]]:size-2.5'

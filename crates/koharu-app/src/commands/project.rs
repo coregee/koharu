@@ -1,10 +1,15 @@
-use std::{collections::HashSet, io::Cursor, path::PathBuf};
+use std::{
+    collections::{HashSet, VecDeque},
+    io::Cursor,
+    path::PathBuf,
+};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use image::{DynamicImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
-    AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin, FitsTo,
+    AssetInput, AssetMetadata, AssetRole, At, Authored, BubbleRegion,
+    BubbleStyle as SceneBubbleStyle, Commit, Edit as SceneEdit, EntityId, EntityOrigin, FitsTo,
     Geometry as SceneGeometry, Group as SceneGroup, LayerLock as SceneLayerLock,
     OcrCandidate as SceneOcrCandidate, Origin, PageDraft, Point as ScenePoint, Presents,
     Project as SceneProject, RasterLayer as SceneRasterLayer, RasterLayerKind, RecognizedFrom,
@@ -119,6 +124,56 @@ pub struct ProjectInfo {
     pub active_page: Option<EntityId>,
     pub can_undo: bool,
     pub can_redo: bool,
+    pub can_paste: bool,
+}
+
+#[derive(Clone)]
+struct LayerClipboard {
+    source_page: EntityId,
+    last_paste_page: Option<EntityId>,
+    paste_count: u32,
+    layers: Vec<CopiedLayer>,
+}
+
+#[derive(Clone)]
+enum CopiedLayer {
+    Text {
+        layout: SceneTextLayout,
+        frame: Option<SceneGeometry>,
+        typography: Option<SceneTypography>,
+        visibility: Option<SceneVisibility>,
+        lock: Option<SceneLayerLock>,
+        source: Option<SceneSourceText>,
+        translation: Option<SceneTranslation>,
+        role: Option<SceneTextRole>,
+        ocr_candidate: Option<SceneOcrCandidate>,
+    },
+    Raster {
+        layer: SceneRasterLayer,
+        visibility: Option<SceneVisibility>,
+        lock: Option<SceneLayerLock>,
+        asset: Option<CopiedAsset>,
+    },
+    Image {
+        geometry: SceneGeometry,
+        visibility: Option<SceneVisibility>,
+        lock: Option<SceneLayerLock>,
+        asset: CopiedAsset,
+    },
+    Bubble {
+        geometry: SceneGeometry,
+        shape: RegionShapeKind,
+        style: SceneBubbleStyle,
+        visibility: Option<SceneVisibility>,
+        lock: Option<SceneLayerLock>,
+    },
+}
+
+#[derive(Clone)]
+struct CopiedAsset {
+    bytes: std::sync::Arc<[u8]>,
+    media_type: String,
+    metadata: AssetMetadata,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -149,6 +204,12 @@ pub struct Page {
     pub size: PageSize,
     pub layers: Vec<Layer>,
     pub regions: Vec<AnalysisRegion>,
+}
+
+#[derive(Clone, Debug, Serialize, Type)]
+pub struct AddedLayer {
+    pub page: Page,
+    pub layer: EntityId,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -188,6 +249,17 @@ pub enum Layer {
         geometry: Geometry,
         visibility: LayerVisibility,
         image: String,
+    },
+    Bubble {
+        id: EntityId,
+        parent: Option<EntityId>,
+        locked: bool,
+        geometry: Geometry,
+        visibility: LayerVisibility,
+        shape: RegionShapeKind,
+        fill_color: [u8; 4],
+        outline_color: [u8; 4],
+        outline_width: f32,
     },
     Artwork {
         id: EntityId,
@@ -292,6 +364,14 @@ pub struct Typography {
     pub writing_mode: Option<koharu_scene::WritingMode>,
 }
 
+#[derive(Clone, Debug, serde::Deserialize, Serialize, Type)]
+pub struct BubbleStyleUpdate {
+    pub shape: RegionShapeKind,
+    pub fill_color: [u8; 4],
+    pub outline_color: [u8; 4],
+    pub outline_width: f32,
+}
+
 pub(crate) struct CurrentProject {
     pub(crate) project: Mutex<Option<Project>>,
 }
@@ -378,6 +458,7 @@ pub(crate) struct Project {
     pub(crate) active_page: Option<EntityId>,
     pub(crate) undo: Vec<Vec<Revision>>,
     pub(crate) redo: Vec<Vec<Revision>>,
+    clipboard: Option<LayerClipboard>,
 }
 
 impl Project {
@@ -403,6 +484,7 @@ impl Project {
             active_page,
             undo: Vec::new(),
             redo: Vec::new(),
+            clipboard: None,
         }
     }
 
@@ -441,6 +523,7 @@ impl Project {
             active_page: self.active_page,
             can_undo: !self.undo.is_empty(),
             can_redo: !self.redo.is_empty(),
+            can_paste: self.clipboard.is_some(),
         }
     }
 
@@ -634,6 +717,89 @@ impl Project {
             self.commit(patch).await?,
             layer.expect("image layer was added while building the patch"),
         ))
+    }
+
+    pub(crate) async fn add_bubble_layer(
+        &mut self,
+        page: EntityId,
+        shape: RegionShapeKind,
+    ) -> Result<(Commit, EntityId)> {
+        let snapshot = self.snapshot();
+        let page_value = snapshot.page(page)?.page()?;
+        let width = (page_value.width * 0.32)
+            .clamp(120.0, 360.0)
+            .min(page_value.width);
+        let height = (width * 0.58).clamp(80.0, 220.0).min(page_value.height);
+        let geometry = SceneGeometry::rectangle(
+            (page_value.width - width) * 0.5,
+            (page_value.height - height) * 0.5,
+            width,
+            height,
+        );
+        let at = snapshot
+            .page(page)?
+            .text_group(SceneTextGroupKind::Main)?
+            .map_or(At::End, |group| At::Before(group.id()));
+        let mut layer = None;
+        let patch = snapshot.patch(|edit| {
+            let added = edit.add_analysis_region::<BubbleRegion>(page, at, &geometry, None)?;
+            edit.set(
+                added,
+                &SceneRegionShape {
+                    origin: Origin::User,
+                    kind: shape,
+                },
+            )?;
+            edit.set(
+                added,
+                &SceneBubbleStyle {
+                    origin: Origin::User,
+                    fill_color: [255, 255, 255, 255],
+                    outline_color: [0, 0, 0, 255],
+                    outline_width: 3.0,
+                },
+            )?;
+            layer = Some(added);
+            Ok(())
+        })?;
+        Ok((
+            self.commit(patch).await?,
+            layer.expect("bubble layer was added while building the patch"),
+        ))
+    }
+
+    pub(crate) async fn set_bubble_style(
+        &mut self,
+        layer: EntityId,
+        style: BubbleStyleUpdate,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        snapshot
+            .component::<SceneBubbleStyle>(layer)?
+            .context("entity is not a speech-bubble layer")?;
+        if Self::is_effectively_locked(&snapshot, layer)? {
+            bail!("locked layers cannot be edited");
+        }
+        let patch = snapshot.patch(|edit| {
+            edit.promote_entity_to_user(layer)?;
+            edit.set(
+                layer,
+                &SceneRegionShape {
+                    origin: Origin::User,
+                    kind: style.shape,
+                },
+            )?;
+            edit.set(
+                layer,
+                &SceneBubbleStyle {
+                    origin: Origin::User,
+                    fill_color: style.fill_color,
+                    outline_color: style.outline_color,
+                    outline_width: style.outline_width,
+                },
+            )
+        })?;
+        self.commit(patch).await
     }
 
     pub(crate) async fn set_source_text(
@@ -948,6 +1114,284 @@ impl Project {
         self.commit(patch).await
     }
 
+    pub(crate) async fn copy_layers(&mut self, layers: Vec<EntityId>) -> Result<()> {
+        let snapshot = self.snapshot();
+        let mut selected = HashSet::new();
+        let mut source_page = None;
+        for layer in layers {
+            let page = if snapshot.page(layer).is_ok() {
+                layer
+            } else {
+                Self::containing_page(&snapshot, layer)?
+            };
+            if source_page
+                .replace(page)
+                .is_some_and(|current| current != page)
+            {
+                bail!("layers copied together must belong to one page");
+            }
+            if layer == page {
+                selected.insert(layer);
+            } else if snapshot.component::<SceneGroup>(layer)?.is_some() {
+                for descendant in snapshot.descendants(layer)? {
+                    if Self::is_content_layer(&snapshot, descendant.id())? {
+                        selected.insert(descendant.id());
+                    }
+                }
+            } else if Self::is_content_layer(&snapshot, layer)? {
+                selected.insert(layer);
+            } else {
+                bail!("only content layers and layer groups can be copied");
+            }
+        }
+        let source_page = source_page.context("copy requires at least one layer")?;
+        if selected.is_empty() {
+            bail!("the selected groups contain no copyable layers");
+        }
+        let mut ordered = Vec::with_capacity(selected.len());
+        if selected.remove(&source_page) {
+            ordered.push(source_page);
+        }
+        ordered.extend(
+            snapshot
+                .descendants(source_page)?
+                .filter_map(|entity| selected.contains(&entity.id()).then_some(entity.id())),
+        );
+        let mut copied = Vec::with_capacity(ordered.len());
+        for layer in ordered {
+            copied.push(Self::copy_layer(&snapshot, layer).await?);
+        }
+        self.clipboard = Some(LayerClipboard {
+            source_page,
+            last_paste_page: None,
+            paste_count: 0,
+            layers: copied,
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn paste_layers(&mut self, page: EntityId) -> Result<(Commit, Vec<EntityId>)> {
+        let clipboard = self
+            .clipboard
+            .clone()
+            .context("the layer clipboard is empty")?;
+        let snapshot = self.snapshot();
+        snapshot.page(page)?;
+        let root_at = snapshot
+            .page(page)?
+            .text_group(SceneTextGroupKind::Main)?
+            .map_or(At::End, |group| At::Before(group.id()));
+        let previous_pastes = if clipboard.last_paste_page == Some(page) {
+            clipboard.paste_count
+        } else {
+            0
+        };
+        let offset_steps = if clipboard.source_page == page {
+            previous_pastes.saturating_add(1)
+        } else {
+            previous_pastes
+        };
+        let offset = 10.0 * f64::from(offset_steps);
+        let mut pasted = Vec::with_capacity(clipboard.layers.len());
+        let patch = snapshot.patch(|edit| {
+            for copied in clipboard.layers {
+                let layer = match copied {
+                    CopiedLayer::Text {
+                        layout,
+                        frame,
+                        typography,
+                        visibility,
+                        lock,
+                        source,
+                        translation,
+                        role,
+                        ocr_candidate,
+                    } => {
+                        let content = edit.add_text_content(page, At::End)?;
+                        if let Some(value) = source {
+                            edit.set(content, &value)?;
+                        }
+                        if let Some(value) = translation {
+                            edit.set(content, &value)?;
+                        }
+                        edit.set_text_role(content, role.as_ref())?;
+                        if let Some(value) = ocr_candidate {
+                            edit.set(content, &value)?;
+                        }
+                        let layer = edit.add_text_layer(page, At::End, content, &layout)?;
+                        if let Some(mut value) = frame {
+                            offset_geometry(&mut value, offset);
+                            edit.set(layer, &value)?;
+                        }
+                        if let Some(value) = typography {
+                            edit.set(layer, &value)?;
+                        }
+                        if let Some(value) = visibility {
+                            edit.set(layer, &value)?;
+                        }
+                        if let Some(value) = lock {
+                            edit.set(layer, &value)?;
+                        }
+                        layer
+                    }
+                    CopiedLayer::Raster {
+                        layer: value,
+                        visibility,
+                        lock,
+                        asset,
+                    } => {
+                        let layer = edit.add_entity(page, root_at)?;
+                        edit.set(layer, &value)?;
+                        if let Some(value) = visibility {
+                            edit.set(layer, &value)?;
+                        }
+                        if let Some(value) = lock {
+                            edit.set(layer, &value)?;
+                        }
+                        if let Some(asset) = asset {
+                            set_copied_asset(edit, layer, &asset)?;
+                        }
+                        layer
+                    }
+                    CopiedLayer::Image {
+                        mut geometry,
+                        visibility,
+                        lock,
+                        asset,
+                    } => {
+                        let layer = edit.add_entity(page, root_at)?;
+                        offset_geometry(&mut geometry, offset);
+                        edit.set(layer, &geometry)?;
+                        if let Some(value) = visibility {
+                            edit.set(layer, &value)?;
+                        }
+                        if let Some(value) = lock {
+                            edit.set(layer, &value)?;
+                        }
+                        set_copied_asset(edit, layer, &asset)?;
+                        layer
+                    }
+                    CopiedLayer::Bubble {
+                        mut geometry,
+                        shape,
+                        style,
+                        visibility,
+                        lock,
+                    } => {
+                        offset_geometry(&mut geometry, offset);
+                        let layer = edit
+                            .add_analysis_region::<BubbleRegion>(page, root_at, &geometry, None)?;
+                        edit.set(
+                            layer,
+                            &SceneRegionShape {
+                                origin: Origin::User,
+                                kind: shape,
+                            },
+                        )?;
+                        edit.set(layer, &style)?;
+                        if let Some(value) = visibility {
+                            edit.set(layer, &value)?;
+                        }
+                        if let Some(value) = lock {
+                            edit.set(layer, &value)?;
+                        }
+                        layer
+                    }
+                };
+                pasted.push(layer);
+            }
+            Ok(())
+        })?;
+        let commit = self.commit(patch).await?;
+        if let Some(clipboard) = self.clipboard.as_mut() {
+            clipboard.paste_count = if clipboard.last_paste_page == Some(page) {
+                clipboard.paste_count.saturating_add(1)
+            } else {
+                1
+            };
+            clipboard.last_paste_page = Some(page);
+        }
+        Ok((commit, pasted))
+    }
+
+    async fn copy_layer(snapshot: &Snapshot, layer: EntityId) -> Result<CopiedLayer> {
+        let visibility = snapshot.component::<SceneVisibility>(layer)?;
+        let lock = snapshot.component::<SceneLayerLock>(layer)?;
+        if let Ok(page) = snapshot.page(layer) {
+            let page = page.page()?;
+            let asset = Self::copy_asset(snapshot, layer)
+                .await?
+                .context("the original artwork has no source asset")?;
+            return Ok(CopiedLayer::Image {
+                geometry: SceneGeometry::rectangle(0.0, 0.0, page.width, page.height),
+                visibility,
+                lock,
+                asset,
+            });
+        }
+        if snapshot.component::<SceneTextLayout>(layer)?.is_some() {
+            let text = snapshot.text_layer(layer)?;
+            let content = text.content()?;
+            return Ok(CopiedLayer::Text {
+                layout: text.layout()?,
+                frame: text.frame()?,
+                typography: text.typography()?,
+                visibility,
+                lock,
+                source: content.source()?,
+                translation: content.translation()?,
+                role: content.role()?,
+                ocr_candidate: snapshot.component::<SceneOcrCandidate>(content.id())?,
+            });
+        }
+        if let Some(value) = snapshot.component::<SceneRasterLayer>(layer)? {
+            return Ok(CopiedLayer::Raster {
+                layer: value,
+                visibility,
+                lock,
+                asset: Self::copy_asset(snapshot, layer).await?,
+            });
+        }
+        if let Some(style) = snapshot.component::<SceneBubbleStyle>(layer)? {
+            return Ok(CopiedLayer::Bubble {
+                geometry: snapshot
+                    .component::<SceneGeometry>(layer)?
+                    .context("bubble layer has no geometry")?,
+                shape: snapshot
+                    .component::<SceneRegionShape>(layer)?
+                    .map_or(RegionShapeKind::Rectangular, |shape| shape.kind),
+                style,
+                visibility,
+                lock,
+            });
+        }
+        let geometry = snapshot
+            .component::<SceneGeometry>(layer)?
+            .context("image layer has no geometry")?;
+        let asset = Self::copy_asset(snapshot, layer)
+            .await?
+            .context("image layer has no source asset")?;
+        Ok(CopiedLayer::Image {
+            geometry,
+            visibility,
+            lock,
+            asset,
+        })
+    }
+
+    async fn copy_asset(snapshot: &Snapshot, layer: EntityId) -> Result<Option<CopiedAsset>> {
+        let source = AssetRole::new("source")?;
+        let Some(asset) = snapshot.asset(layer, &source)? else {
+            return Ok(None);
+        };
+        let bytes = snapshot.read_blob(asset.blob).await?;
+        Ok(Some(CopiedAsset {
+            bytes: std::sync::Arc::from(bytes.as_ref()),
+            media_type: asset.media_type,
+            metadata: asset.metadata,
+        }))
+    }
+
     pub(crate) async fn delete_layers(&mut self, layers: Vec<EntityId>) -> Result<Commit> {
         let snapshot = self.snapshot();
         let mut expanded = Vec::new();
@@ -1242,6 +1686,146 @@ impl Project {
         ))
     }
 
+    pub(crate) async fn apply_raster_fill(
+        &mut self,
+        page: EntityId,
+        layer: EntityId,
+        point: ScenePoint,
+        color: [u8; 4],
+        tolerance: u8,
+    ) -> Result<Option<Commit>> {
+        if !point.x.is_finite() || !point.y.is_finite() {
+            bail!("raster fill point must be finite");
+        }
+        let snapshot = self.snapshot();
+        if Self::is_effectively_locked(&snapshot, layer)? {
+            bail!("locked raster layers cannot be edited");
+        }
+        let page_value = snapshot.page(page)?.page()?;
+        let page_width = page_value.width.round() as u32;
+        let page_height = page_value.height.round() as u32;
+        if page_width == 0 || page_height == 0 {
+            bail!("page dimensions must be positive");
+        }
+
+        let source = AssetRole::new("source")?;
+        let mut asset_attributes = Default::default();
+        let mut raster_layer = None;
+        let promote_layer;
+        let (mut image, placement) = if layer == page {
+            let asset = snapshot
+                .asset(page, &source)?
+                .context("the original artwork has no source asset")?;
+            asset_attributes = asset.metadata.attributes;
+            let bytes = snapshot.read_blob(asset.blob).await?;
+            let image = image::load_from_memory(&bytes)?.to_rgba8();
+            let placement = RasterPlacement::from_geometry(
+                &SceneGeometry::rectangle(0.0, 0.0, page_value.width, page_value.height),
+                image.width(),
+                image.height(),
+            )?;
+            promote_layer = snapshot
+                .component::<EntityOrigin>(page)?
+                .is_some_and(|origin| origin.origin != Origin::User);
+            (image, placement)
+        } else {
+            if snapshot.parent(layer)? != Some(page) {
+                bail!("the fill target must be a layer on the active page");
+            }
+            if let Some(target) = snapshot.component::<SceneRasterLayer>(layer)? {
+                if target.kind != RasterLayerKind::Paint {
+                    bail!("only paint raster layers accept color fills");
+                }
+                promote_layer = target.origin != Origin::User
+                    || snapshot
+                        .component::<EntityOrigin>(layer)?
+                        .is_some_and(|origin| origin.origin != Origin::User);
+                raster_layer = Some(target);
+                let image = match snapshot.asset(layer, &source)? {
+                    Some(asset) => {
+                        asset_attributes = asset.metadata.attributes;
+                        let bytes = snapshot.read_blob(asset.blob).await?;
+                        image::load_from_memory(&bytes)?.to_rgba8()
+                    }
+                    None => RgbaImage::new(page_width, page_height),
+                };
+                if image.dimensions() != (page_width, page_height) {
+                    bail!("raster layer dimensions must match the page");
+                }
+                (image, RasterPlacement::IDENTITY)
+            } else {
+                if snapshot.component::<SceneTextLayout>(layer)?.is_some()
+                    || snapshot.component::<SceneRegion>(layer)?.is_some()
+                    || snapshot.component::<SceneGroup>(layer)?.is_some()
+                {
+                    bail!("the fill target must be a paint or image layer");
+                }
+                let geometry = snapshot
+                    .component::<SceneGeometry>(layer)?
+                    .context("the imported image target has no geometry")?;
+                let asset = snapshot
+                    .asset(layer, &source)?
+                    .context("the imported image target has no source asset")?;
+                asset_attributes = asset.metadata.attributes;
+                let bytes = snapshot.read_blob(asset.blob).await?;
+                let image = image::load_from_memory(&bytes)?.to_rgba8();
+                let placement =
+                    RasterPlacement::from_geometry(&geometry, image.width(), image.height())?;
+                promote_layer = snapshot
+                    .component::<EntityOrigin>(layer)?
+                    .is_some_and(|origin| origin.origin != Origin::User);
+                (image, placement)
+            }
+        };
+
+        let (seed_x, seed_y) = placement.page_to_raster(point.x, point.y);
+        if !seed_x.is_finite()
+            || !seed_y.is_finite()
+            || seed_x < 0.0
+            || seed_y < 0.0
+            || seed_x >= f64::from(image.width())
+            || seed_y >= f64::from(image.height())
+        {
+            bail!("fill point is outside the selected image layer");
+        }
+        if !rasterize_fill(
+            &mut image,
+            seed_x.floor() as u32,
+            seed_y.floor() as u32,
+            color,
+            tolerance,
+        ) {
+            return Ok(None);
+        }
+
+        let (width, height) = image.dimensions();
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image).write_to(&mut bytes, ImageFormat::Png)?;
+        let patch = snapshot.patch(|edit| {
+            if promote_layer {
+                edit.promote_entity_to_user(layer)?;
+                if let Some(mut raster) = raster_layer {
+                    raster.origin = Origin::User;
+                    edit.set(layer, &raster)?;
+                }
+            }
+            edit.set_asset(
+                layer,
+                &source,
+                AssetInput::new(
+                    bytes.into_inner(),
+                    "image/png",
+                    AssetMetadata {
+                        width: Some(width),
+                        height: Some(height),
+                        attributes: asset_attributes,
+                    },
+                ),
+            )
+        })?;
+        Ok(Some(self.commit(patch).await?))
+    }
+
     pub(crate) async fn undo(&mut self) -> Result<Commit> {
         let revisions = self.undo.pop().ok_or_else(|| anyhow!("nothing to undo"))?;
         let commit = match self.session.undo_many(revisions.iter().copied()).await {
@@ -1439,6 +2023,24 @@ impl Project {
                 kind: raster.kind,
             });
         }
+        if let Some(style) = snapshot.component::<SceneBubbleStyle>(layer)? {
+            return Ok(Layer::Bubble {
+                id: layer,
+                parent,
+                locked,
+                geometry: snapshot
+                    .component::<SceneGeometry>(layer)?
+                    .map(Self::geometry_view)
+                    .context("bubble layer has no geometry")?,
+                visibility,
+                shape: snapshot
+                    .component::<SceneRegionShape>(layer)?
+                    .map_or(RegionShapeKind::Rectangular, |shape| shape.kind),
+                fill_color: style.fill_color,
+                outline_color: style.outline_color,
+                outline_width: style.outline_width,
+            });
+        }
         let geometry = snapshot
             .component::<SceneGeometry>(layer)?
             .map(Self::geometry_view)
@@ -1551,6 +2153,7 @@ impl Project {
         Ok(snapshot.component::<SceneGroup>(entity)?.is_some()
             || snapshot.component::<SceneTextLayout>(entity)?.is_some()
             || snapshot.component::<SceneRasterLayer>(entity)?.is_some()
+            || snapshot.component::<SceneBubbleStyle>(entity)?.is_some()
             || (snapshot.component::<SceneGeometry>(entity)?.is_some()
                 && snapshot
                     .asset(entity, &AssetRole::new("source")?)?
@@ -1559,6 +2162,7 @@ impl Project {
 
     fn is_transformable_layer(snapshot: &Snapshot, entity: EntityId) -> Result<bool> {
         Ok(snapshot.component::<SceneTextLayout>(entity)?.is_some()
+            || snapshot.component::<SceneBubbleStyle>(entity)?.is_some()
             || (snapshot.component::<SceneGeometry>(entity)?.is_some()
                 && snapshot.component::<SceneRegion>(entity)?.is_none()
                 && snapshot.component::<SceneRasterLayer>(entity)?.is_none()
@@ -1573,6 +2177,19 @@ impl Project {
             snapshot.component::<SceneGroup>(entity)?.is_none()
                 && Self::is_layer(snapshot, entity)?,
         )
+    }
+
+    fn containing_page(snapshot: &Snapshot, entity: EntityId) -> Result<EntityId> {
+        snapshot.entity(entity)?;
+        let mut current = entity;
+        loop {
+            if snapshot.page(current).is_ok() {
+                return Ok(current);
+            }
+            current = snapshot
+                .parent(current)?
+                .context("layer is not contained by a page")?;
+        }
     }
 
     fn collect_layer_views(
@@ -1662,6 +2279,30 @@ impl Project {
             .into(),
         })
     }
+}
+
+fn offset_geometry(geometry: &mut SceneGeometry, offset: f64) {
+    for point in &mut geometry.points {
+        point.x += offset;
+        point.y += offset;
+    }
+}
+
+fn set_copied_asset(
+    edit: &mut SceneEdit,
+    layer: EntityId,
+    asset: &CopiedAsset,
+) -> koharu_scene::Result<()> {
+    edit.set_asset(
+        layer,
+        &AssetRole::new("source")?,
+        AssetInput::new(
+            asset.bytes.clone(),
+            asset.media_type.clone(),
+            asset.metadata.clone(),
+        ),
+    )?;
+    Ok(())
 }
 
 fn validate_project_name(name: &str) -> Result<String> {
@@ -1803,6 +2444,71 @@ fn rasterize_stroke_with_placement(
     }
 }
 
+fn rasterize_fill(
+    image: &mut RgbaImage,
+    seed_x: u32,
+    seed_y: u32,
+    replacement: [u8; 4],
+    tolerance: u8,
+) -> bool {
+    let width = image.width();
+    let height = image.height();
+    if seed_x >= width || seed_y >= height {
+        return false;
+    }
+    let seed = image.get_pixel(seed_x, seed_y).0;
+    let matches_seed = |pixel: [u8; 4]| {
+        if seed[3] == 0 && pixel[3] == 0 {
+            true
+        } else {
+            seed.iter()
+                .zip(pixel)
+                .all(|(left, right)| left.abs_diff(right) <= tolerance)
+        }
+    };
+    let length = usize::try_from(u64::from(width) * u64::from(height))
+        .expect("decoded image dimensions fit in addressable memory");
+    let mut visited = vec![false; length];
+    let mut pending = VecDeque::from([(seed_x, seed_y)]);
+    visited[usize::try_from(u64::from(seed_y) * u64::from(width) + u64::from(seed_x))
+        .expect("pixel index fits in addressable memory")] = true;
+    let mut changed = false;
+
+    while let Some((x, y)) = pending.pop_front() {
+        let pixel = image.get_pixel(x, y).0;
+        if !matches_seed(pixel) {
+            continue;
+        }
+        if pixel != replacement {
+            image.put_pixel(x, y, image::Rgba(replacement));
+            changed = true;
+        }
+        for (next_x, next_y) in [
+            x.checked_sub(1).map(|next| (next, y)),
+            x.checked_add(1)
+                .filter(|next| *next < width)
+                .map(|next| (next, y)),
+            y.checked_sub(1).map(|next| (x, next)),
+            y.checked_add(1)
+                .filter(|next| *next < height)
+                .map(|next| (x, next)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let index = usize::try_from(
+                u64::from(next_y) * u64::from(width) + u64::from(next_x),
+            )
+            .expect("pixel index fits in addressable memory");
+            if !visited[index] {
+                visited[index] = true;
+                pending.push_back((next_x, next_y));
+            }
+        }
+    }
+    changed
+}
+
 fn reconcile_style_ranges(
     ranges: &mut Vec<koharu_scene::TextStyleRange>,
     old_text: &str,
@@ -1863,7 +2569,9 @@ fn reconcile_style_ranges(
 mod tests {
     use std::sync::Arc;
 
-    use koharu_scene::{Generation, OcrCandidate, ProducerId, TextStyleRange, WritingMode};
+    use koharu_scene::{
+        Generation, OcrCandidate, ProducerId, RegionSpec, TextStyleRange, WritingMode,
+    };
 
     use super::*;
 
@@ -2054,6 +2762,223 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bubble_layers_create_edit_copy_and_undo_as_regions() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 500.0, 700.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(patch).await.unwrap();
+        let page = page.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+
+        let (_, bubble) = project
+            .add_bubble_layer(page, RegionShapeKind::Circular)
+            .await
+            .unwrap();
+        let snapshot = project.snapshot();
+        assert_eq!(
+            snapshot
+                .component::<SceneRegion>(bubble)
+                .unwrap()
+                .unwrap()
+                .kind,
+            BubbleRegion::kind()
+        );
+        let geometry = snapshot
+            .component::<SceneGeometry>(bubble)
+            .unwrap()
+            .unwrap();
+        assert_eq!(geometry.points[0], ScenePoint { x: 170.0, y: 303.6 });
+        assert!(matches!(
+            Project::page(&snapshot, page)
+                .unwrap()
+                .layers
+                .into_iter()
+                .find(|layer| matches!(layer, Layer::Bubble { id, .. } if *id == bubble))
+                .unwrap(),
+            Layer::Bubble {
+                shape: RegionShapeKind::Circular,
+                fill_color: [255, 255, 255, 255],
+                outline_color: [0, 0, 0, 255],
+                outline_width: 3.0,
+                ..
+            }
+        ));
+
+        project
+            .set_bubble_style(
+                bubble,
+                BubbleStyleUpdate {
+                    shape: RegionShapeKind::Rectangular,
+                    fill_color: [240, 220, 200, 255],
+                    outline_color: [20, 30, 40, 255],
+                    outline_width: 6.5,
+                },
+            )
+            .await
+            .unwrap();
+        project.copy_layers(vec![bubble]).await.unwrap();
+        let (commit, pasted) = project.paste_layers(page).await.unwrap();
+        project.record_commit(&commit);
+        let pasted = pasted[0];
+        let snapshot = project.snapshot();
+        assert_eq!(
+            snapshot
+                .component::<SceneBubbleStyle>(pasted)
+                .unwrap()
+                .unwrap()
+                .outline_width,
+            6.5
+        );
+        assert_eq!(
+            snapshot
+                .component::<SceneGeometry>(pasted)
+                .unwrap()
+                .unwrap()
+                .points[0],
+            ScenePoint { x: 180.0, y: 313.6 }
+        );
+
+        project.undo().await.unwrap();
+        assert!(project.snapshot().entity(pasted).is_err());
+    }
+
+    #[tokio::test]
+    async fn copied_text_and_image_layers_paste_with_detached_content_and_undo() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 500.0, 700.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(patch).await.unwrap();
+        let page = page.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+
+        let (_, text) = project
+            .add_text_box(
+                page,
+                Frame {
+                    x: 20.0,
+                    y: 30.0,
+                    width: 140.0,
+                    height: 80.0,
+                    angle_degrees: 0.0,
+                },
+            )
+            .await
+            .unwrap();
+        project
+            .set_source_text(text, "boom".to_owned())
+            .await
+            .unwrap();
+        project
+            .set_translation(text, Some("kaboom".to_owned()))
+            .await
+            .unwrap();
+        project
+            .set_text_classification(text, Some(TextClassification::Sfx))
+            .await
+            .unwrap();
+        let image_bytes = Arc::<[u8]>::from([1_u8, 2, 3].as_slice());
+        let (_, image) = project
+            .add_image_layer(
+                page,
+                crate::commands::import::Page {
+                    name: "alternate.png".to_owned(),
+                    bytes: image_bytes.clone(),
+                    format: ImageFormat::Png,
+                    width: 100,
+                    height: 200,
+                },
+            )
+            .await
+            .unwrap();
+
+        project.copy_layers(vec![text, image]).await.unwrap();
+        assert!(project.info().can_paste);
+        let (commit, pasted) = project.paste_layers(page).await.unwrap();
+        project.record_commit(&commit);
+        assert_eq!(pasted.len(), 2);
+
+        let snapshot = project.snapshot();
+        let pasted_text = pasted
+            .iter()
+            .copied()
+            .find(|layer| {
+                snapshot
+                    .component::<SceneTextLayout>(*layer)
+                    .unwrap()
+                    .is_some()
+            })
+            .unwrap();
+        let pasted_image = pasted
+            .iter()
+            .copied()
+            .find(|layer| *layer != pasted_text)
+            .unwrap();
+        let content = snapshot.text_layer(pasted_text).unwrap().content().unwrap();
+        assert_eq!(
+            content.source().unwrap().unwrap().text.value,
+            "boom".to_owned()
+        );
+        assert_eq!(
+            content.translation().unwrap().unwrap().text.value,
+            "kaboom".to_owned()
+        );
+        assert_eq!(content.role().unwrap().unwrap().role, SceneTextRole::SFX);
+        assert!(
+            snapshot
+                .component::<SceneOcrCandidate>(content.id())
+                .unwrap()
+                .is_some()
+        );
+        let text_parent = snapshot.parent(pasted_text).unwrap().unwrap();
+        assert_eq!(
+            snapshot
+                .component::<SceneTextGroup>(text_parent)
+                .unwrap()
+                .unwrap()
+                .kind,
+            SceneTextGroupKind::Sfx
+        );
+        assert_eq!(
+            snapshot
+                .component::<SceneGeometry>(pasted_text)
+                .unwrap()
+                .unwrap()
+                .points[0],
+            ScenePoint { x: 30.0, y: 40.0 }
+        );
+        assert_eq!(
+            snapshot
+                .component::<SceneGeometry>(pasted_image)
+                .unwrap()
+                .unwrap()
+                .points[0],
+            ScenePoint { x: 10.0, y: 10.0 }
+        );
+        let source = AssetRole::new("source").unwrap();
+        let asset = snapshot.asset(pasted_image, &source).unwrap().unwrap();
+        assert_eq!(
+            snapshot.read_blob(asset.blob).await.unwrap().as_ref(),
+            image_bytes.as_ref()
+        );
+
+        project.undo().await.unwrap();
+        let snapshot = project.snapshot();
+        assert!(pasted.iter().all(|layer| snapshot.entity(*layer).is_err()));
+    }
+
+    #[tokio::test]
     async fn original_and_imported_image_erasing_are_undoable() {
         let mut session = Session::memory().await.unwrap();
         let mut page = None;
@@ -2202,6 +3127,95 @@ mod tests {
                 .unwrap()
                 .blob,
             erased_blob
+        );
+    }
+
+    #[tokio::test]
+    async fn color_fill_is_contiguous_tolerant_and_undoable() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 40.0, 20.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(patch).await.unwrap();
+        let page = page.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+        let image = RgbaImage::from_fn(4, 2, |x, y| {
+            let value = match (x, y) {
+                (0, _) => 10,
+                (1, 0) => 14,
+                (1, 1) => 80,
+                _ => 120,
+            };
+            image::Rgba([value, value, value, 255])
+        });
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut encoded, ImageFormat::Png)
+            .unwrap();
+        let source = AssetRole::new("source").unwrap();
+        let patch = project
+            .snapshot()
+            .patch(|edit| {
+                edit.set_asset(
+                    page,
+                    &source,
+                    AssetInput::new(
+                        encoded.into_inner(),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(4),
+                            height: Some(2),
+                            attributes: Default::default(),
+                        },
+                    ),
+                )
+            })
+            .unwrap();
+        project.commit(patch).await.unwrap();
+        let original_blob = project
+            .snapshot()
+            .asset(page, &source)
+            .unwrap()
+            .unwrap()
+            .blob;
+
+        let commit = project
+            .apply_raster_fill(
+                page,
+                page,
+                ScenePoint { x: 5.0, y: 5.0 },
+                [255, 0, 0, 255],
+                5,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        project.record_commit(&commit);
+        let filled = project.snapshot();
+        let asset = filled.asset(page, &source).unwrap().unwrap();
+        assert_ne!(asset.blob, original_blob);
+        let bytes = filled.read_blob(asset.blob).await.unwrap();
+        let image = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(0, 1).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(1, 0).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(1, 1).0, [80, 80, 80, 255]);
+        assert_eq!(image.get_pixel(2, 0).0, [120, 120, 120, 255]);
+
+        project.undo().await.unwrap();
+        assert_eq!(
+            project
+                .snapshot()
+                .asset(page, &source)
+                .unwrap()
+                .unwrap()
+                .blob,
+            original_blob
         );
     }
 

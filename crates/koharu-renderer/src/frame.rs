@@ -322,6 +322,12 @@ pub struct Presentation {
 pub enum LayerKind {
     Image(ImageMetadata),
     Text(TextMetadata),
+    Shape(ShapeMetadata),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShapeMetadata {
+    pub name: String,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -443,6 +449,17 @@ impl From<crate::bubble::LayoutBox> for RenderBounds {
 pub(crate) enum NodeDescriptor {
     Image(ImageNodeDescriptor),
     Text(Box<crate::text_renderer::TextNodeDescriptor>),
+    Shape(ShapeNodeDescriptor),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ShapeNodeDescriptor {
+    pub(crate) shape: koharu_scene::RegionShapeKind,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) fill_color: [u8; 4],
+    pub(crate) outline_color: [u8; 4],
+    pub(crate) outline_width: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -489,7 +506,7 @@ pub(crate) fn prepare_frame(
                 PreparedLayerKind::Raster,
                 PreparedContent::Raster(prepare_raster_tiles(image, &mut resources)?),
             )
-        } else if matches!(layer.kind(), LayerKind::Text(_)) {
+        } else if matches!(layer.kind(), LayerKind::Text(_) | LayerKind::Shape(_)) {
             for resource in layer.0.node.resources.iter() {
                 if !resources
                     .iter()
@@ -498,8 +515,13 @@ pub(crate) fn prepare_frame(
                     resources.push(resource.clone());
                 }
             }
+            let kind = if matches!(layer.kind(), LayerKind::Text(_)) {
+                PreparedLayerKind::Text
+            } else {
+                PreparedLayerKind::Vector
+            };
             (
-                PreparedLayerKind::Text,
+                kind,
                 PreparedContent::Vector(layer.0.node.scene.as_ref().clone()),
             )
         } else {

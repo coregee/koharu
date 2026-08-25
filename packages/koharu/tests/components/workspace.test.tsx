@@ -110,6 +110,7 @@ function installProject() {
     active_page: 'page',
     can_undo: false,
     can_redo: false,
+    can_paste: false,
   })
   queryClient.setQueryData(pagesKey, [])
   queryClient.setQueryData(pageKey, page)
@@ -208,6 +209,25 @@ describe('canvas interaction adapter', () => {
 
     expect(event.defaultPrevented).toBe(true)
     input.remove()
+  })
+
+  it('copies and pastes selected layers with the platform editing shortcuts', async () => {
+    installProject()
+    queryClient.setQueryData(projectKey, {
+      ...queryClient.getQueryData(projectKey)!,
+      can_paste: true,
+    })
+    useKoharuStore.setState({ selectedLayers: ['element'] })
+    const copy = vi.spyOn(commands, 'copyLayers').mockResolvedValue(null)
+    const paste = vi.spyOn(commands, 'pasteLayers').mockResolvedValue(['pasted'])
+    renderWorkspace()
+
+    fireEvent.keyDown(window, { key: 'c', ctrlKey: true })
+    await waitFor(() => expect(copy).toHaveBeenCalledWith(['element']))
+
+    fireEvent.keyDown(window, { key: 'v', ctrlKey: true })
+    await waitFor(() => expect(paste).toHaveBeenCalledWith('page'))
+    expect(useKoharuStore.getState().selectedLayers).toEqual(['pasted'])
   })
 
   it('announces WebGPU startup failures and offers recovery', () => {
@@ -464,6 +484,78 @@ describe('canvas interaction adapter', () => {
     )
     expect(canvas.beginTransform).not.toHaveBeenCalled()
     expect(commitTransform).not.toHaveBeenCalled()
+  })
+
+  it('rotates a detected source region from its visible rotation handle', async () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [
+        {
+          type: 'text',
+          id: 'element',
+          locked: false,
+          parent: 'page',
+          geometry: null,
+          visibility: { visible: true, opacity: 1 },
+          content: {
+            id: 'content',
+            source: { text: 'Source', language: 'en' },
+            translation: null,
+            classification: 'narration',
+            source_region: 'region',
+            include_for_ocr: true,
+          },
+          typography: null,
+          layout: 'paragraph',
+        },
+      ],
+      regions: [
+        {
+          id: 'region',
+          parent: 'page',
+          geometry: {
+            points: [
+              { x: 10, y: 20 },
+              { x: 110, y: 20 },
+              { x: 110, y: 70 },
+              { x: 10, y: 70 },
+            ],
+          },
+          kind: 'dev.koharu.region.text',
+          label: 'text',
+          shape: 'rectangular',
+        },
+      ],
+    }))
+    useKoharuStore.setState({ selectedLayers: ['element'] })
+    const setRegionGeometry = vi.spyOn(commands, 'setRegionGeometry').mockResolvedValue(null)
+    renderWorkspace()
+    Object.defineProperty(screen.getByTestId('canvas-overlay'), 'getBoundingClientRect', {
+      value: () => ({ x: 10, y: 20, width: 800, height: 600 }),
+    })
+    const handle = document.querySelector<HTMLElement>('[data-rotate-handle]')!
+
+    expect(handle).toBeInTheDocument()
+    expect(handle.querySelector('.lucide-rotate-cw')).toBeInTheDocument()
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 12, clientX: 70, clientY: 15 })
+    fireEvent.pointerMove(handle, {
+      pointerId: 12,
+      clientX: 101,
+      clientY: 20,
+      shiftKey: true,
+    })
+    fireEvent.pointerUp(handle, { pointerId: 12, clientX: 101, clientY: 20 })
+
+    await waitFor(() =>
+      expect(setRegionGeometry).toHaveBeenCalledWith('region', {
+        x: 10,
+        y: 20,
+        width: 100,
+        height: 50,
+        angle_degrees: 30,
+      }),
+    )
   })
 
   it('moves a detected source region by dragging inside it', async () => {

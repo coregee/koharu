@@ -12,6 +12,38 @@ use crate::{
 
 use super::Origin;
 
+/// Paint applied to an authored speech-bubble region.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct BubbleStyle {
+    pub origin: Origin,
+    pub fill_color: [u8; 4],
+    pub outline_color: [u8; 4],
+    pub outline_width: f32,
+}
+
+impl Component for BubbleStyle {
+    const KIND: &'static str = "dev.koharu.layer.bubble";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        self.origin.validate()?;
+        if self.outline_width.is_finite() && (0.0..=1_000.0).contains(&self.outline_width) {
+            Ok(())
+        } else {
+            Err(Error::invalid("bubble outline width is invalid"))
+        }
+    }
+
+    fn origin(&self) -> Option<&Origin> {
+        Some(&self.origin)
+    }
+
+    fn set_origin(&mut self, origin: Origin) -> bool {
+        self.origin = origin;
+        true
+    }
+}
+
 #[revisioned(revision = 1)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]

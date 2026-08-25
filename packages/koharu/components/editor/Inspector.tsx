@@ -8,6 +8,7 @@ import {
   ArrowDown,
   ArrowUp,
   Brush,
+  Circle,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -18,9 +19,11 @@ import {
   Layers3,
   Languages,
   Lock,
+  MessageCircle,
   Minus,
   Plus,
   ScanText,
+  Square,
   Trash2,
   Type,
   Unlock,
@@ -69,6 +72,7 @@ import { Checkbox } from '@koharu/ui/components/checkbox'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -814,6 +818,16 @@ function LayersInspector() {
     )
   }
 
+  const addBubbleLayer = (shape: RegionShapeKind) => {
+    void call(commands.addBubbleLayer, page.id, shape)
+      .then((added) => {
+        queryClient.setQueryData(pageKey, added.page)
+        selectLayers([added.layer])
+        void refresh(projectKey, pagesKey)
+      })
+      .catch(() => undefined)
+  }
+
   return (
     <div className='flex min-h-0 flex-1 flex-col'>
       <header className='flex h-8 shrink-0 items-center gap-1.5 border-b border-border/80 px-2'>
@@ -907,6 +921,32 @@ function LayersInspector() {
         </div>
       </ScrollArea>
       <div className='shrink-0 border-t border-border/80 p-1.5'>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='h-7 w-full justify-start gap-1.5 text-[10px]'
+              />
+            }
+          >
+            <MessageCircle className='size-3.5' />
+            {t('layers.addBubbleLayer')}
+            <ChevronDown className='ml-auto size-3' />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end' className='min-w-40'>
+            <DropdownMenuItem onClick={() => addBubbleLayer('circular')}>
+              <Circle />
+              {t('layers.bubbleShapes.oval')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => addBubbleLayer('rectangular')}>
+              <Square />
+              {t('layers.bubbleShapes.rectangular')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           type='button'
           variant='ghost'
@@ -1166,6 +1206,29 @@ function LayerEditor({
       .catch(() => undefined)
   }
 
+  const setBubbleStyle = (
+    update: Partial<
+      Pick<
+        Extract<Layer, { type: 'bubble' }>,
+        'shape' | 'fill_color' | 'outline_color' | 'outline_width'
+      >
+    >,
+  ) => {
+    if (layer.type !== 'bubble') return
+    void call(commands.setBubbleStyle, layer.id, {
+      shape: update.shape ?? layer.shape,
+      fill_color: update.fill_color ?? layer.fill_color,
+      outline_color: update.outline_color ?? layer.outline_color,
+      outline_width: update.outline_width ?? layer.outline_width,
+    }).then(
+      (next) => {
+        queryClient.setQueryData(pageKey, next)
+        void refresh(projectKey)
+      },
+      () => undefined,
+    )
+  }
+
   const rerunOcr = () => {
     if (!isTextLayer(layer) || !region || !layer.content.include_for_ocr || processing) return
     void call(
@@ -1355,6 +1418,71 @@ function LayerEditor({
           </InspectorField>
         </>
       )}
+      {layer.type === 'bubble' && (
+        <>
+          <InspectorField label={t('layers.bubbleShape')}>
+            <Select
+              value={layer.shape}
+              disabled={processing}
+              onValueChange={(shape) => setBubbleStyle({ shape: shape as RegionShapeKind })}
+            >
+              <SelectTrigger
+                size='sm'
+                aria-label={t('layers.bubbleShapeLabel', { name })}
+                className='w-full min-w-0'
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='circular'>{t('layers.bubbleShapes.oval')}</SelectItem>
+                <SelectItem value='rectangular'>{t('layers.bubbleShapes.rectangular')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </InspectorField>
+          <div className='grid grid-cols-2 gap-1.5'>
+            <InspectorField label={t('layers.bubbleFill')}>
+              <ColorWell
+                size='sm'
+                allowTransparent
+                label={t('layers.bubbleFillLabel', { name })}
+                value={rgbaToOptionalHex(layer.fill_color)}
+                onChange={(color) => setBubbleStyle({ fill_color: optionalHexToRgba(color) })}
+              />
+            </InspectorField>
+            <InspectorField label={t('layers.bubbleOutline')}>
+              <ColorWell
+                size='sm'
+                allowTransparent
+                label={t('layers.bubbleOutlineLabel', { name })}
+                value={rgbaToOptionalHex(layer.outline_color)}
+                onChange={(color) => setBubbleStyle({ outline_color: optionalHexToRgba(color) })}
+              />
+            </InspectorField>
+          </div>
+          <InspectorField label={t('layers.bubbleOutlineWidth')}>
+            <NumberField
+              min={0}
+              max={100}
+              step={0.5}
+              value={layer.outline_width}
+              disabled={processing}
+              onValueCommitted={(width) => {
+                if (width !== null) setBubbleStyle({ outline_width: Math.max(0, width) })
+              }}
+            >
+              <NumberFieldGroup>
+                <NumberFieldDecrement aria-label={t('layers.decreaseBubbleOutline')}>
+                  <Minus />
+                </NumberFieldDecrement>
+                <NumberFieldInput aria-label={t('layers.bubbleOutlineWidthLabel', { name })} />
+                <NumberFieldIncrement aria-label={t('layers.increaseBubbleOutline')}>
+                  <Plus />
+                </NumberFieldIncrement>
+              </NumberFieldGroup>
+            </NumberField>
+          </InspectorField>
+        </>
+      )}
     </div>
   )
 }
@@ -1481,6 +1609,14 @@ function rgbaToHex([red, green, blue]: [number, number, number, number]): string
     .join('')}`.toUpperCase()
 }
 
+function rgbaToOptionalHex(color: [number, number, number, number]): string | null {
+  return color[3] === 0 ? null : rgbaToHex(color)
+}
+
+function optionalHexToRgba(hex: string | null): [number, number, number, number] {
+  return hex === null ? [0, 0, 0, 0] : hexToRgba(hex)
+}
+
 function hexToRgba(hex: string): [number, number, number, number] {
   const value = hex.replace('#', '')
   return [
@@ -1495,6 +1631,7 @@ function layerIcon(layer: Layer): typeof Type {
   if (layer.type === 'group') return Folder
   if (layer.type === 'raster') return Brush
   if (layer.type === 'text') return Type
+  if (layer.type === 'bubble') return MessageCircle
   return ImageIcon
 }
 
@@ -1509,6 +1646,7 @@ function localizedLayerName(layer: Layer, index: number, t: TFunction): string {
     const text = layer.content.translation?.text || layer.content.source?.text
     return text?.trim() || t('layers.textName', { index: index + 1 })
   }
+  if (layer.type === 'bubble') return t('layers.bubbleName', { index: index + 1 })
   if (layer.type === 'artwork') return t('layers.originalArtwork')
   return t('layers.imageName', { index: index + 1 })
 }
@@ -1528,5 +1666,6 @@ function localizedLayerKind(layer: Layer, t: TFunction): string {
     }
     return t('layers.kinds.text')
   }
+  if (layer.type === 'bubble') return t('layers.kinds.bubble')
   return t('layers.kinds.image')
 }

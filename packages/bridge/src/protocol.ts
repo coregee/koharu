@@ -18,6 +18,7 @@ export const commands = {
 	active_page: EntityId | null,
 	can_undo: boolean,
 	can_redo: boolean,
+	can_paste: boolean,
 } | null>) => __TAURI_INVOKE<StartupState>("subscribe", { onCanvas: mapChannel(onCanvas, (v) => ({...v,revision:v.revision==null?v.revision:v.revision})), onJob, onDownload, onResources: mapChannel(onResources, (v) => ({...v,devices:v.devices.map(i=>({...i,memory_budget:i.memory_budget==null?i.memory_budget:i.memory_budget,memory_used:i.memory_used==null?i.memory_used:i.memory_used,utilization:i.utilization==null?i.utilization:i.utilization}))})), onProject }).then((v) => (({...v,preferences:({...v.preferences,pipeline:({...v.preferences.pipeline,translation:({...v.preferences.pipeline.translation,generation:({...v.preferences.pipeline.translation.generation,temperature:v.preferences.pipeline.translation.generation.temperature==null?v.preferences.pipeline.translation.generation.temperature:v.preferences.pipeline.translation.generation.temperature,top_p:v.preferences.pipeline.translation.generation.top_p==null?v.preferences.pipeline.translation.generation.top_p:v.preferences.pipeline.translation.generation.top_p,min_p:v.preferences.pipeline.translation.generation.min_p==null?v.preferences.pipeline.translation.generation.min_p:v.preferences.pipeline.translation.generation.min_p,repeat_penalty:v.preferences.pipeline.translation.generation.repeat_penalty==null?v.preferences.pipeline.translation.generation.repeat_penalty:v.preferences.pipeline.translation.generation.repeat_penalty,frequency_penalty:v.preferences.pipeline.translation.generation.frequency_penalty==null?v.preferences.pipeline.translation.generation.frequency_penalty:v.preferences.pipeline.translation.generation.frequency_penalty,presence_penalty:v.preferences.pipeline.translation.generation.presence_penalty==null?v.preferences.pipeline.translation.generation.presence_penalty:v.preferences.pipeline.translation.generation.presence_penalty})}),processor:({...v.preferences.pipeline.processor,"koharu-layout-rfdetr-seg-2xl":v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})})}),jobs:v.jobs.map(i=>i),canvas:({...v.canvas,revision:v.canvas.revision==null?v.canvas.revision:v.canvas.revision})}) as typeof v)),
 	getProject: () => __TAURI_INVOKE<{
 	name: string,
@@ -25,6 +26,7 @@ export const commands = {
 	active_page: EntityId | null,
 	can_undo: boolean,
 	can_redo: boolean,
+	can_paste: boolean,
 } | null>("get_project"),
 	getPages: () => __TAURI_INVOKE<PageSummary[]>("get_pages").then((v) => (v.map(i=>i) as typeof v)),
 	getPage: () => __TAURI_INVOKE<{
@@ -33,14 +35,14 @@ export const commands = {
 	size: PageSize,
 	layers: Layer[],
 	regions: AnalysisRegion[],
-} | null>("get_page").then((v) => (v==null?v:({...v,regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
+} | null>("get_page").then((v) => (v==null?v:({...v,layers:v.layers.map(i=>i),regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
 	listProjects: () => __TAURI_INVOKE<ProjectSummary[]>("list_projects"),
 	createProject: (name: string) => __TAURI_INVOKE<null>("create_project", { name }),
 	openProject: (name: string) => __TAURI_INVOKE<null>("open_project", { name }),
 	deleteProject: (name: string) => __TAURI_INVOKE<null>("delete_project", { name }),
 	closeProject: () => __TAURI_INVOKE<null>("close_project"),
 	importPages: (source: PageImportSource) => __TAURI_INVOKE<null>("import_pages", { source }),
-	selectPage: (page: EntityId) => __TAURI_INVOKE<PageSelection>("select_page", { page }).then((v) => (({...v,page:({...v.page,regions:v.page.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))})}) as typeof v)),
+	selectPage: (page: EntityId) => __TAURI_INVOKE<PageSelection>("select_page", { page }).then((v) => (({...v,page:({...v.page,layers:v.page.layers.map(i=>i),regions:v.page.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))})}) as typeof v)),
 	renamePage: (page: EntityId, label: string) => __TAURI_INVOKE<null>("rename_page", { page, label }),
 	setTranslationSystemPrompt: (template: string | null) => __TAURI_INVOKE<null>("set_translation_system_prompt", { template }),
 	deletePages: (pages: EntityId[]) => __TAURI_INVOKE<null>("delete_pages", { pages }),
@@ -54,16 +56,20 @@ export const commands = {
 	setRegionGeometry: (region: EntityId, frame: Frame) => __TAURI_INVOKE<null>("set_region_geometry", { region, frame }),
 	setRegionShape: (region: EntityId, shape: RegionShapeKind) => __TAURI_INVOKE<null>("set_region_shape", { region, shape }),
 	setVisibility: (layers: EntityId[], visible: boolean | null, opacity: number | null) => __TAURI_INVOKE<null>("set_visibility", { layers, visible, opacity: opacity==null?opacity:opacity }),
-	setLayerLocked: (layers: EntityId[], locked: boolean) => __TAURI_INVOKE<Page>("set_layer_locked", { layers, locked }).then((v) => (({...v,regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
+	setLayerLocked: (layers: EntityId[], locked: boolean) => __TAURI_INVOKE<Page>("set_layer_locked", { layers, locked }).then((v) => (({...v,layers:v.layers.map(i=>i),regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
 	addImageLayer: (page: EntityId) => __TAURI_INVOKE<{
 	id: EntityId,
 	label: string,
 	size: PageSize,
 	layers: Layer[],
 	regions: AnalysisRegion[],
-} | null>("add_image_layer", { page }).then((v) => (v==null?v:({...v,regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
+} | null>("add_image_layer", { page }).then((v) => (v==null?v:({...v,layers:v.layers.map(i=>i),regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
+	addBubbleLayer: (page: EntityId, shape: RegionShapeKind) => __TAURI_INVOKE<AddedLayer>("add_bubble_layer", { page, shape }).then((v) => (({...v,page:({...v.page,layers:v.page.layers.map(i=>i),regions:v.page.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))})}) as typeof v)),
+	setBubbleStyle: (layer: EntityId, style: BubbleStyleUpdate) => __TAURI_INVOKE<Page>("set_bubble_style", { layer, style }).then((v) => (({...v,layers:v.layers.map(i=>i),regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
+	copyLayers: (layers: EntityId[]) => __TAURI_INVOKE<null>("copy_layers", { layers }),
+	pasteLayers: (page: EntityId) => __TAURI_INVOKE<EntityId[]>("paste_layers", { page }),
 	deleteLayers: (layers: EntityId[]) => __TAURI_INVOKE<null>("delete_layers", { layers }),
-	moveLayer: (layer: EntityId, parent: EntityId, index: number) => __TAURI_INVOKE<Page>("move_layer", { layer, parent, index }).then((v) => (({...v,regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
+	moveLayer: (layer: EntityId, parent: EntityId, index: number) => __TAURI_INVOKE<Page>("move_layer", { layer, parent, index }).then((v) => (({...v,layers:v.layers.map(i=>i),regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
 	undo: () => __TAURI_INVOKE<null>("undo"),
 	redo: () => __TAURI_INVOKE<null>("redo"),
 	process: (scope: Scope, operation: Operation) => __TAURI_INVOKE<JobId>("process", { scope, operation }),
@@ -81,11 +87,12 @@ export const commands = {
 	prepareCanvasPage: (page: EntityId) => __TAURI_INVOKE<{
 	revision: Revision,
 	page: Page,
-} | null>("prepare_canvas_page", { page }).then((v) => (v==null?v:({...v,page:({...v.page,regions:v.page.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))})}) as typeof v)),
+} | null>("prepare_canvas_page", { page }).then((v) => (v==null?v:({...v,page:({...v.page,layers:v.page.layers.map(i=>i),regions:v.page.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))})}) as typeof v)),
 	getCanvasPageManifest: (page: EntityId, revision: Revision) => __TAURI_INVOKE<CanvasBytes>("get_canvas_page_manifest", { page, revision }),
 	getCanvasPageResource: (page: EntityId, revision: Revision, resource: string) => __TAURI_INVOKE<CanvasBytes>("get_canvas_page_resource", { page, revision, resource }),
 	addTextBox: (frame: Frame) => __TAURI_INVOKE<LayerCommit>("add_text_box", { frame }),
 	commitPaint: (expectedRevision: Revision, layer: string | null, points: Point[], brush: PaintBrush) => __TAURI_INVOKE<LayerCommit>("commit_paint", { expectedRevision, layer, points: points.map(i=>i), brush }),
+	commitFill: (expectedRevision: Revision, layer: EntityId, point: Point, color: [number, number, number, number], tolerance: number) => __TAURI_INVOKE<LayerCommit>("commit_fill", { expectedRevision, layer, point, color, tolerance }),
 	commitCensor: (expectedRevision: Revision, layer: string | null, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_censor", { expectedRevision, layer, points: points.map(i=>i), diameter }),
 	commitErase: (expectedRevision: Revision, layer: EntityId, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_erase", { expectedRevision, layer, points: points.map(i=>i), diameter }),
 	commitTransform: (expectedRevision: Revision, elements: TransformFrame[]) => __TAURI_INVOKE<number | null>("commit_transform", { expectedRevision, elements }).then((v) => (v==null?v:v as typeof v)),
@@ -97,6 +104,11 @@ export type Account = {
 	id: string,
 	email: string | null,
 	plan: string | null,
+};
+
+export type AddedLayer = {
+	page: Page,
+	layer: EntityId,
 };
 
 export type AgentStatus = {
@@ -122,6 +134,13 @@ export type Bounds = {
 	y: number,
 	width: number,
 	height: number,
+};
+
+export type BubbleStyleUpdate = {
+	shape: RegionShapeKind,
+	fill_color: [number, number, number, number],
+	outline_color: [number, number, number, number],
+	outline_width: number,
 };
 
 export type CaiyunConfig = Record<string, never>;
@@ -309,7 +328,7 @@ export type LanguageChoice = {
 	name: string,
 };
 
-export type Layer = { type: "group"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; name: string; role: GroupRole | null } | { type: "text"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry | null; visibility: LayerVisibility; content: TextContent; typography: Typography | null; layout: TextLayoutKind } | { type: "raster"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; image: string | null; name: string; kind: RasterLayerKind } | { type: "image"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string } | { type: "artwork"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string };
+export type Layer = { type: "group"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; name: string; role: GroupRole | null } | { type: "text"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry | null; visibility: LayerVisibility; content: TextContent; typography: Typography | null; layout: TextLayoutKind } | { type: "raster"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; image: string | null; name: string; kind: RasterLayerKind } | { type: "image"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string } | { type: "bubble"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; shape: RegionShapeKind; fill_color: [number, number, number, number]; outline_color: [number, number, number, number]; outline_width: number } | { type: "artwork"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string };
 
 export type LayerCommit = {
 	revision: Revision,
@@ -438,6 +457,7 @@ export type ProjectInfo = {
 	active_page: EntityId | null,
 	can_undo: boolean,
 	can_redo: boolean,
+	can_paste: boolean,
 };
 
 export type ProjectSummary = {
