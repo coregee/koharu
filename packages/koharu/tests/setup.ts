@@ -89,6 +89,7 @@ beforeEach(() => {
     brush: { diameter: 48, color: '#111111' },
     fillTolerance: 32,
     removeSelectionTool: 'pen',
+    censorSelectionTool: 'brush',
     inspector: 'copy',
     processingScope: 'page',
     processingStages: ['detection', 'ocr', 'translation', 'inpainting', 'decensor'],

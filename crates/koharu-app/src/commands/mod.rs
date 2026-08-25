@@ -116,6 +116,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri::Cef> {
             canvas::commit_paint,
             canvas::commit_fill,
             canvas::commit_censor,
+            canvas::commit_mosaic,
             canvas::commit_erase,
             canvas::commit_transform,
             canvas::commit_inpaint,

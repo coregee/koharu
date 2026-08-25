@@ -48,9 +48,11 @@ impl Component for BubbleStyle {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum RasterLayerKind {
+    Artwork,
     Cleanup,
     Paint,
     Censor,
+    Mosaic,
     Segmentation,
 }
 

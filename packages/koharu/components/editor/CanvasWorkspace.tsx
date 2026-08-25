@@ -51,6 +51,7 @@ import {
   commands,
   type Frame,
   type InpaintSelection,
+  type MosaicRegion,
   type Page,
   type Point,
   type TransformFrame,
@@ -77,6 +78,13 @@ type Gesture =
   | { kind: 'region-move'; pointer: number; start: Point; original: TransformFrame }
   | { kind: 'text'; pointer: number; start: Point; frame: Frame }
   | { kind: 'inpaint-selection'; pointer: number; selection: InpaintSelection }
+  | {
+      kind: 'mosaic-region'
+      pointer: number
+      revision: number
+      layer: string | null
+      region: MosaicRegion
+    }
   | StrokeGesture
 
 interface StrokeGesture {
@@ -118,6 +126,7 @@ export function CanvasWorkspace() {
   const [draft, setDraft] = useState<Frame | null>(null)
   const [inpaintSelections, setInpaintSelections] = useState<InpaintSelection[]>([])
   const [inpaintDraft, setInpaintDraft] = useState<InpaintSelection | null>(null)
+  const [mosaicDraft, setMosaicDraft] = useState<MosaicRegion | null>(null)
   const [inpaintPending, setInpaintPending] = useState(false)
   const [hovered, setHovered] = useState<string | null>(null)
   const [cursor, setCursor] = useState<Point | null>(null)
@@ -137,6 +146,7 @@ export function CanvasWorkspace() {
   const brush = useKoharuStore((state) => state.brush)
   const fillTolerance = useKoharuStore((state) => state.fillTolerance)
   const removeSelectionTool = useKoharuStore((state) => state.removeSelectionTool)
+  const censorSelectionTool = useKoharuStore((state) => state.censorSelectionTool)
   const processing = useKoharuStore((state) =>
     Object.values(state.jobs).some((job) => job.state === 'running'),
   )
@@ -175,6 +185,7 @@ export function CanvasWorkspace() {
       : undefined
   const activePaintRaster = activeRaster?.kind === 'paint' ? activeRaster : undefined
   const activeCensorRaster = activeRaster?.kind === 'censor' ? activeRaster : undefined
+  const activeMosaicRaster = activeRaster?.kind === 'mosaic' ? activeRaster : undefined
   const activeFillTarget =
     activeEraseTarget?.type === 'raster' && activeEraseTarget.kind !== 'paint'
       ? undefined
@@ -324,11 +335,12 @@ export function CanvasWorkspace() {
   const cancelGesture = useCallback(() => {
     const current = gesture.current
     gesture.current = null
-    if (current?.kind === 'paint' || current?.kind === 'erase') {
+    if (current?.kind === 'paint' || current?.kind === 'erase' || current?.kind === 'censor') {
       strokeUpdates.clear()
       canvas?.cancelStroke()
     }
     if (current?.kind === 'inpaint-selection') setInpaintDraft(null)
+    if (current?.kind === 'mosaic-region') setMosaicDraft(null)
     if (transformActive.current) {
       transformUpdates.clear()
       transformActive.current = false
@@ -438,6 +450,8 @@ export function CanvasWorkspace() {
   }, [pageId, resetInpaintSelection])
 
   useEffect(() => cancelGesture, [cancelGesture, removeSelectionTool])
+
+  useEffect(() => cancelGesture, [cancelGesture, censorSelectionTool])
 
   useEffect(() => {
     const editable = (target: EventTarget | null) =>
@@ -642,6 +656,9 @@ export function CanvasWorkspace() {
       if (current.selection.type === 'pen') current.selection.points.push(...points)
       else current.selection.end = point
       setInpaintDraft({ ...current.selection })
+    } else if (current.kind === 'mosaic-region') {
+      current.region.end = point
+      setMosaicDraft({ ...current.region })
     }
   }
 
@@ -684,6 +701,18 @@ export function CanvasWorkspace() {
     } else if (current.kind === 'inpaint-selection') {
       setInpaintSelections((selections) => [...selections, current.selection])
       setInpaintDraft(null)
+    } else if (current.kind === 'mosaic-region') {
+      setMosaicDraft(null)
+      commitPending.current = true
+      void enqueue(() =>
+        call(commands.commitMosaic, current.revision, current.layer, current.region),
+      )
+        .then((result) => {
+          selectLayers([result.layer])
+          return refresh(projectKey, pagesKey, pageKey)
+        })
+        .catch(() => undefined)
+        .finally(() => (commitPending.current = false))
     } else if (current.kind === 'paint' || current.kind === 'erase' || current.kind === 'censor') {
       strokeUpdates.commit()
       try {
@@ -749,7 +778,8 @@ export function CanvasWorkspace() {
           style={{
             cursor:
               page && canvasState.status === 'ready'
-                ? tool === 'remove' && removeSelectionTool !== 'pen'
+                ? (tool === 'remove' && removeSelectionTool !== 'pen') ||
+                  (tool === 'censor' && censorSelectionTool !== 'brush')
                   ? 'crosshair'
                   : canvasCursors[tool]
                 : undefined,
@@ -911,6 +941,23 @@ export function CanvasWorkspace() {
               }
               setInpaintDraft(selection)
             } else if (tool === 'censor') {
+              if (censorSelectionTool !== 'brush') {
+                const region: MosaicRegion = {
+                  type: censorSelectionTool,
+                  start: point,
+                  end: point,
+                }
+                gesture.current = {
+                  kind: 'mosaic-region',
+                  pointer: event.pointerId,
+                  revision: canvasRevision,
+                  layer: activeMosaicRaster?.id ?? null,
+                  region,
+                }
+                setMosaicDraft(region)
+                event.preventDefault()
+                return
+              }
               strokeUpdates.clear()
               gesture.current = {
                 kind: 'censor',
@@ -967,7 +1014,8 @@ export function CanvasWorkspace() {
             event.preventDefault()
             if (
               event.altKey &&
-              (isBrushTool(tool) || (tool === 'remove' && removeSelectionTool === 'pen'))
+              ((isBrushTool(tool) && (tool !== 'censor' || censorSelectionTool === 'brush')) ||
+                (tool === 'remove' && removeSelectionTool === 'pen'))
             ) {
               if (event.deltaY !== 0) {
                 const currentBrush = useKoharuStore.getState().brush
@@ -1038,10 +1086,12 @@ export function CanvasWorkspace() {
               cursor={cursor}
               brushSize={brush.diameter}
               showBrushCursor={
-                isBrushTool(tool) || (tool === 'remove' && removeSelectionTool === 'pen')
+                (isBrushTool(tool) && (tool !== 'censor' || censorSelectionTool === 'brush')) ||
+                (tool === 'remove' && removeSelectionTool === 'pen')
               }
               inpaintSelections={tool === 'remove' ? inpaintSelections : []}
               inpaintDraft={tool === 'remove' ? inpaintDraft : null}
+              mosaicDraft={tool === 'censor' ? mosaicDraft : null}
               onTransformStart={beginTransform}
               onTransformFrame={updateTransform}
               onTransformEnd={finishTransform}

@@ -649,9 +649,11 @@ impl Traversal<'_> {
                         f64::from(self.height),
                     );
                     let kind = match raster.kind {
+                        RasterLayerKind::Artwork => ImageKind::Artwork,
                         RasterLayerKind::Cleanup => ImageKind::Cleanup,
                         RasterLayerKind::Paint => ImageKind::Paint,
                         RasterLayerKind::Censor => ImageKind::Censor,
+                        RasterLayerKind::Mosaic => ImageKind::Mosaic,
                         RasterLayerKind::Segmentation => ImageKind::Segmentation,
                     };
                     self.layers.push(image_draft(

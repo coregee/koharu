@@ -260,6 +260,7 @@
       "paint": "Pintura",
       "segmentation": "Máscara de segmentación",
       "censor": "Máscara de censura",
+      "mosaic": "Máscara de mosaico",
       "text": "Texto",
       "mainTextGroup": "Grupo de texto principal",
       "sfxTextGroup": "Grupo de texto SFX"
@@ -577,6 +578,11 @@
     "increaseFillTolerance": "Aumentar tolerancia de relleno",
     "pan": "Desplazar",
     "remove": "Eliminar",
+    "censorSelection": {
+      "brush": "Pincel de censura con barra",
+      "circle": "Región de mosaico circular",
+      "rectangle": "Región de mosaico rectangular"
+    },
     "removeSelection": {
       "circle": "Selección circular",
       "pen": "Selección con lápiz",

@@ -16,6 +16,7 @@ import type {
   Frame,
   Geometry,
   InpaintSelection,
+  MosaicRegion,
   Page,
   Point,
   TransformFrame,
@@ -35,6 +36,7 @@ interface CanvasOverlayProps {
   showBrushCursor: boolean
   inpaintSelections: readonly InpaintSelection[]
   inpaintDraft: InpaintSelection | null
+  mosaicDraft: MosaicRegion | null
   onTransformStart: (elements: TransformFrame[]) => void
   onTransformFrame: (elements: TransformFrame[]) => void
   onTransformEnd: () => void
@@ -57,6 +59,7 @@ export function CanvasOverlay({
   showBrushCursor,
   inpaintSelections,
   inpaintDraft,
+  mosaicDraft,
   onTransformStart,
   onTransformFrame,
   onTransformEnd,
@@ -165,6 +168,7 @@ export function CanvasOverlay({
           selections={inpaintDraft ? [...inpaintSelections, inpaintDraft] : inpaintSelections}
         />
       )}
+      {mosaicDraft && <MosaicRegionOverlay page={page} camera={camera} region={mosaicDraft} />}
       {showBrushCursor && cursor && (
         <div
           className='absolute rounded-full border border-white/95 shadow-[0_0_0_1px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.45)]'
@@ -201,6 +205,59 @@ export function CanvasOverlay({
         />
       ) : null}
     </div>
+  )
+}
+
+function MosaicRegionOverlay({
+  page,
+  camera,
+  region,
+}: {
+  page: Page
+  camera: Camera
+  region: MosaicRegion
+}) {
+  const clipId = useId().replaceAll(':', '')
+  const dpr = window.devicePixelRatio
+  const scale = camera.zoom / dpr
+  const screenPoint = (point: Point) => ({
+    x: (point.x * camera.zoom + camera.translation[0]) / dpr,
+    y: (point.y * camera.zoom + camera.translation[1]) / dpr,
+  })
+  const pageOrigin = screenPoint({ x: 0, y: 0 })
+  const bounds =
+    region.type === 'circle'
+      ? constrainedSelectionBounds(region.start, region.end)
+      : rectangleSelectionBounds(region.start, region.end)
+  const topLeft = screenPoint({ x: bounds.left, y: bounds.top })
+  const width = bounds.width * scale
+  const height = bounds.height * scale
+
+  return (
+    <svg data-testid='mosaic-region-overlay' className='absolute inset-0 size-full overflow-hidden'>
+      <defs>
+        <clipPath id={clipId}>
+          <rect
+            x={pageOrigin.x}
+            y={pageOrigin.y}
+            width={page.size.width * scale}
+            height={page.size.height * scale}
+          />
+        </clipPath>
+      </defs>
+      <g
+        clipPath={`url(#${clipId})`}
+        fill='rgb(34 197 94 / 0.3)'
+        stroke='rgb(134 239 172 / 0.95)'
+        strokeWidth={1.5}
+      >
+        {region.type === 'circle' ? (
+          <circle cx={topLeft.x + width / 2} cy={topLeft.y + height / 2} r={width / 2} />
+        ) : (
+          <rect x={topLeft.x} y={topLeft.y} width={width} height={height} />
+        )}
+      </g>
+    </svg>
   )
 }
 
@@ -300,7 +357,20 @@ export function constrainedSelectionBounds(start: Point, end: Point) {
   return {
     left: Math.min(start.x, endX),
     top: Math.min(start.y, endY),
+    width: size,
+    height: size,
     size,
+  }
+}
+
+function rectangleSelectionBounds(start: Point, end: Point) {
+  const endX = Math.abs(end.x - start.x) < 1 ? start.x + (end.x < start.x ? -1 : 1) : end.x
+  const endY = Math.abs(end.y - start.y) < 1 ? start.y + (end.y < start.y ? -1 : 1) : end.y
+  return {
+    left: Math.min(start.x, endX),
+    top: Math.min(start.y, endY),
+    width: Math.abs(endX - start.x),
+    height: Math.abs(endY - start.y),
   }
 }
 

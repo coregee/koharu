@@ -260,6 +260,7 @@
       "paint": "绘制",
       "segmentation": "分割蒙版",
       "censor": "审查遮罩",
+      "mosaic": "马赛克遮罩",
       "text": "文本",
       "mainTextGroup": "主文本组",
       "sfxTextGroup": "音效文本组"
@@ -577,6 +578,11 @@
     "increaseFillTolerance": "增大填充容差",
     "pan": "平移",
     "remove": "移除",
+    "censorSelection": {
+      "brush": "条形审查画笔",
+      "circle": "圆形马赛克区域",
+      "rectangle": "矩形马赛克区域"
+    },
     "removeSelection": {
       "circle": "圆形选区",
       "pen": "画笔选区",

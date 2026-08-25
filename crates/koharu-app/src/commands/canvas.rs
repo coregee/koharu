@@ -34,6 +34,13 @@ pub enum InpaintSelection {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MosaicRegion {
+    Circle { start: Point, end: Point },
+    Rectangle { start: Point, end: Point },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Type)]
 pub struct PaintBrush {
     pub diameter: f32,
     pub color: [u8; 4],
@@ -238,6 +245,64 @@ pub(crate) async fn commit_censor(
         &canvas_channel,
     )
     .await
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "mosaic_region_committed",
+    skip_all,
+    fields(origin = "user", shape = ?region),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn commit_mosaic(
+    expected_revision: Revision,
+    layer: Option<EntityId>,
+    region: MosaicRegion,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<LayerCommit, Error> {
+    let (commit, page, element) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let snapshot = project.snapshot();
+        ensure_revision(snapshot.revision(), expected_revision)?;
+        let page = project
+            .active_page()
+            .context("the project has no active page")?;
+        let page_value = snapshot.page(page)?.page()?;
+        let (points, diameter) = mosaic_stroke(
+            page_value.width.round() as u32,
+            page_value.height.round() as u32,
+            region,
+        )?;
+        let (commit, element) = project
+            .apply_raster_stroke(
+                page,
+                layer,
+                RasterStrokeMode::Paint,
+                RasterLayerKind::Mosaic,
+                [0, 255, 0, 180],
+                diameter,
+                points
+                    .into_iter()
+                    .map(|point| koharu_scene::Point {
+                        x: point.x,
+                        y: point.y,
+                    })
+                    .collect(),
+            )
+            .await?;
+        project.record_commit(&commit);
+        (commit, project.active_page(), element)
+    };
+    desktop.synchronize(&commit.snapshot, page, &commit).await?;
+    canvas_channel.channel.publish(desktop.canvas_state());
+    Ok(LayerCommit {
+        revision: commit.revision,
+        layer: element,
+    })
 }
 
 #[tracing::instrument(
@@ -467,24 +532,100 @@ fn validate_inpaint_selections(selections: &[InpaintSelection]) -> anyhow::Resul
                 if points.is_empty() || !diameter.is_finite() || *diameter <= 0.0 {
                     bail!("an inpaint pen selection requires points and a positive diameter");
                 }
-                validate_points(points)?;
+                validate_finite_points(points)?;
             }
             InpaintSelection::Circle { start, end } | InpaintSelection::Square { start, end } => {
-                validate_points(&[*start, *end])?;
+                validate_finite_points(&[*start, *end])?;
             }
         }
     }
     Ok(())
 }
 
-fn validate_points(points: &[Point]) -> anyhow::Result<()> {
+fn validate_finite_points(points: &[Point]) -> anyhow::Result<()> {
     if points
         .iter()
         .any(|point| !point.x.is_finite() || !point.y.is_finite())
     {
-        bail!("inpaint selection points must be finite");
+        bail!("selection points must be finite");
     }
     Ok(())
+}
+
+fn mosaic_stroke(
+    width: u32,
+    height: u32,
+    region: MosaicRegion,
+) -> anyhow::Result<(Vec<Point>, f32)> {
+    if width == 0 || height == 0 {
+        bail!("page dimensions must be positive");
+    }
+    let (start, end) = match region {
+        MosaicRegion::Circle { start, end } | MosaicRegion::Rectangle { start, end } => {
+            (start, end)
+        }
+    };
+    validate_finite_points(&[start, end])?;
+    match region {
+        MosaicRegion::Circle { .. } => {
+            let [left, top, right, bottom] = constrained_bounds(start, end);
+            if right <= 0.0 || bottom <= 0.0 || left >= f64::from(width) || top >= f64::from(height)
+            {
+                bail!("mosaic circle does not intersect the page");
+            }
+            Ok((
+                vec![Point {
+                    x: (left + right) * 0.5,
+                    y: (top + bottom) * 0.5,
+                }],
+                (right - left) as f32,
+            ))
+        }
+        MosaicRegion::Rectangle { .. } => {
+            let [left, top, right, bottom] = rectangle_bounds(start, end);
+            let clipped_left = left.max(0.0);
+            let clipped_top = top.max(0.0);
+            let clipped_right = right.min(f64::from(width));
+            let clipped_bottom = bottom.min(f64::from(height));
+            if clipped_left >= clipped_right || clipped_top >= clipped_bottom {
+                bail!("mosaic rectangle does not intersect the page");
+            }
+            let first_row = clipped_top.floor() as u32;
+            let last_row = clipped_bottom.ceil().min(f64::from(height)) as u32;
+            let mut points = Vec::with_capacity((last_row - first_row) as usize * 2);
+            for (offset, row) in (first_row..last_row).enumerate() {
+                let y = (f64::from(row) + 0.5).clamp(clipped_top, clipped_bottom);
+                let pair = if offset.is_multiple_of(2) {
+                    [clipped_left, clipped_right]
+                } else {
+                    [clipped_right, clipped_left]
+                };
+                points.extend(pair.map(|x| Point { x, y }));
+            }
+            Ok((points, 1.0))
+        }
+    }
+}
+
+fn rectangle_bounds(start: Point, end: Point) -> [f64; 4] {
+    let delta_x = end.x - start.x;
+    let delta_y = end.y - start.y;
+    let end_x = if delta_x.abs() < 1.0 {
+        start.x + if delta_x < 0.0 { -1.0 } else { 1.0 }
+    } else {
+        end.x
+    };
+    let end_y = if delta_y.abs() < 1.0 {
+        start.y + if delta_y < 0.0 { -1.0 } else { 1.0 }
+    } else {
+        end.y
+    };
+    [
+        start.x.min(end_x),
+        start.y.min(end_y),
+        start.x.max(end_x),
+        start.y.max(end_y),
+    ]
 }
 
 fn ensure_revision(actual: Revision, expected: Revision) -> anyhow::Result<()> {
@@ -700,5 +841,33 @@ mod tests {
             }])
             .is_err()
         );
+    }
+
+    #[test]
+    fn mosaic_regions_become_page_clipped_strokes() {
+        let (circle, diameter) = mosaic_stroke(
+            20,
+            10,
+            MosaicRegion::Circle {
+                start: Point { x: 2.0, y: 2.0 },
+                end: Point { x: 8.0, y: 4.0 },
+            },
+        )
+        .unwrap();
+        assert_eq!(circle, [Point { x: 5.0, y: 5.0 }]);
+        assert_eq!(diameter, 6.0);
+
+        let (rectangle, diameter) = mosaic_stroke(
+            20,
+            10,
+            MosaicRegion::Rectangle {
+                start: Point { x: -2.0, y: 3.0 },
+                end: Point { x: 4.0, y: 5.0 },
+            },
+        )
+        .unwrap();
+        assert_eq!(diameter, 1.0);
+        assert_eq!(rectangle.first(), Some(&Point { x: 0.0, y: 3.5 }));
+        assert_eq!(rectangle.last(), Some(&Point { x: 0.0, y: 4.5 }));
     }
 }

@@ -27,6 +27,7 @@ import {
   MIN_FILL_TOLERANCE,
   useKoharuStore,
   type CanvasTool,
+  type CensorSelectionTool,
   type RemoveSelectionTool,
 } from '@/lib/store'
 import { Button } from '@koharu/ui/components/button'
@@ -65,13 +66,15 @@ export function ToolBar() {
   const brush = useKoharuStore((state) => state.brush)
   const fillTolerance = useKoharuStore((state) => state.fillTolerance)
   const removeSelectionTool = useKoharuStore((state) => state.removeSelectionTool)
+  const censorSelectionTool = useKoharuStore((state) => state.censorSelectionTool)
   const setTool = useKoharuStore((state) => state.setTool)
   const setBrush = useKoharuStore((state) => state.setBrush)
   const setFillTolerance = useKoharuStore((state) => state.setFillTolerance)
   const setRemoveSelectionTool = useKoharuStore((state) => state.setRemoveSelectionTool)
+  const setCensorSelectionTool = useKoharuStore((state) => state.setCensorSelectionTool)
   const shortcuts = useKoharuStore((state) => state.shortcuts)
-  const hasBrush = isBrushTool(active)
-  const hasControls = hasBrush || active === 'fill' || active === 'remove'
+  const hasBrush = isBrushTool(active) && (active !== 'censor' || censorSelectionTool === 'brush')
+  const hasControls = hasBrush || active === 'fill' || active === 'remove' || active === 'censor'
 
   return (
     <aside className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'>
@@ -113,6 +116,9 @@ export function ToolBar() {
           {active === 'remove' && (
             <RemoveSelectionTools value={removeSelectionTool} onChange={setRemoveSelectionTool} />
           )}
+          {active === 'censor' && (
+            <CensorSelectionTools value={censorSelectionTool} onChange={setCensorSelectionTool} />
+          )}
           {(hasBrush || (active === 'remove' && removeSelectionTool === 'pen')) && (
             <BrushSize
               value={brush.diameter}
@@ -124,6 +130,42 @@ export function ToolBar() {
       )}
     </aside>
   )
+}
+
+const censorSelectionTools = [
+  ['brush', Brush],
+  ['circle', Circle],
+  ['rectangle', Square],
+] as const satisfies ReadonlyArray<readonly [CensorSelectionTool, typeof Brush]>
+
+function CensorSelectionTools({
+  value,
+  onChange,
+}: {
+  value: CensorSelectionTool
+  onChange: (value: CensorSelectionTool) => void
+}) {
+  const { t } = useTranslation()
+  return censorSelectionTools.map(([tool, Icon]) => (
+    <Tooltip key={tool}>
+      <TooltipTrigger
+        render={
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon'
+            aria-label={t(`tools.censorSelection.${tool}`)}
+            data-active={value === tool}
+            className='size-8 rounded-xl text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+            onClick={() => onChange(tool)}
+          />
+        }
+      >
+        <Icon className='size-4' />
+      </TooltipTrigger>
+      <TooltipContent side='right'>{t(`tools.censorSelection.${tool}`)}</TooltipContent>
+    </Tooltip>
+  ))
 }
 
 const removeSelectionTools = [

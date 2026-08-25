@@ -260,6 +260,7 @@
       "paint": "ペイント",
       "segmentation": "セグメンテーションマスク",
       "censor": "検閲マスク",
+      "mosaic": "モザイクマスク",
       "text": "テキスト",
       "mainTextGroup": "メインテキストグループ",
       "sfxTextGroup": "効果音テキストグループ"
@@ -577,6 +578,11 @@
     "increaseFillTolerance": "塗りつぶし許容値を上げる",
     "pan": "移動",
     "remove": "削除",
+    "censorSelection": {
+      "brush": "黒塗り検閲ブラシ",
+      "circle": "円形モザイク領域",
+      "rectangle": "長方形モザイク領域"
+    },
     "removeSelection": {
       "circle": "円形選択",
       "pen": "ペン選択",

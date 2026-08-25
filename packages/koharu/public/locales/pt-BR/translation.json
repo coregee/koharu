@@ -260,6 +260,7 @@
       "paint": "Pintura",
       "segmentation": "Máscara de segmentação",
       "censor": "Máscara de censura",
+      "mosaic": "Máscara de mosaico",
       "text": "Texto",
       "mainTextGroup": "Grupo de texto principal",
       "sfxTextGroup": "Grupo de texto de efeitos sonoros"
@@ -577,6 +578,11 @@
     "increaseFillTolerance": "Aumentar tolerância do preenchimento",
     "pan": "Mover",
     "remove": "Remover",
+    "censorSelection": {
+      "brush": "Pincel de censura em barra",
+      "circle": "Região de mosaico circular",
+      "rectangle": "Região de mosaico retangular"
+    },
     "removeSelection": {
       "circle": "Seleção circular",
       "pen": "Seleção com caneta",

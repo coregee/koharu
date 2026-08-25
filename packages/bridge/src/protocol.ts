@@ -94,6 +94,7 @@ export const commands = {
 	commitPaint: (expectedRevision: Revision, layer: string | null, points: Point[], brush: PaintBrush) => __TAURI_INVOKE<LayerCommit>("commit_paint", { expectedRevision, layer, points: points.map(i=>i), brush }),
 	commitFill: (expectedRevision: Revision, layer: EntityId, point: Point, color: [number, number, number, number], tolerance: number) => __TAURI_INVOKE<LayerCommit>("commit_fill", { expectedRevision, layer, point, color, tolerance }),
 	commitCensor: (expectedRevision: Revision, layer: string | null, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_censor", { expectedRevision, layer, points: points.map(i=>i), diameter }),
+	commitMosaic: (expectedRevision: Revision, layer: string | null, region: MosaicRegion) => __TAURI_INVOKE<LayerCommit>("commit_mosaic", { expectedRevision, layer, region }),
 	commitErase: (expectedRevision: Revision, layer: EntityId, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_erase", { expectedRevision, layer, points: points.map(i=>i), diameter }),
 	commitTransform: (expectedRevision: Revision, elements: TransformFrame[]) => __TAURI_INVOKE<number | null>("commit_transform", { expectedRevision, elements }).then((v) => (v==null?v:v as typeof v)),
 	commitInpaint: (expectedRevision: Revision, selections: InpaintSelection[]) => __TAURI_INVOKE<string | null>("commit_inpaint", { expectedRevision, selections: selections.map(i=>i) }),
@@ -378,6 +379,8 @@ export type ModelSelection = {
 	context_window?: number | null,
 };
 
+export type MosaicRegion = { type: "circle"; start: Point; end: Point } | { type: "rectangle"; start: Point; end: Point };
+
 export type OcrModel = { model: "paddleocr-vl-1.6" } | { model: "paddleocr-vl-manga" } | { model: "manga-ocr" } | { model: "baberu-ocr" };
 
 export type OpenAiCompatibleConfig = {
@@ -485,7 +488,7 @@ export type Quantization = {
 	name: string,
 };
 
-export type RasterLayerKind = "cleanup" | "paint" | "censor" | "segmentation";
+export type RasterLayerKind = "cleanup" | "paint" | "censor" | "mosaic" | "segmentation";
 
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 

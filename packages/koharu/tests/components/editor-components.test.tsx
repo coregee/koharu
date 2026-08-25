@@ -638,6 +638,24 @@ describe('greenfield editor', () => {
     expect(screen.getByRole('button', { name: 'Brush size: 48 pixels' })).toBeInTheDocument()
   })
 
+  it('switches between bar brush and mosaic region tools', () => {
+    installProject()
+    useKoharuStore.setState({ tool: 'censor', censorSelectionTool: 'brush' })
+    render(
+      <TooltipProvider>
+        <ToolBar />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Circular mosaic region' }))
+    expect(useKoharuStore.getState().censorSelectionTool).toBe('circle')
+    expect(screen.queryByRole('button', { name: 'Brush size: 48 pixels' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Rectangular mosaic region' }))
+    expect(useKoharuStore.getState().censorSelectionTool).toBe('rectangle')
+    fireEvent.click(screen.getByRole('button', { name: 'Bar censor brush' }))
+    expect(screen.getByRole('button', { name: 'Brush size: 48 pixels' })).toBeInTheDocument()
+  })
+
   it('adjusts fill tolerance from the toolbar popover', async () => {
     const user = userEvent.setup()
     installProject()

@@ -20,8 +20,10 @@ use koharu_scene::{
 use super::{StageInput, StageProcessor, finish};
 use crate::ModelCell;
 
-const MODEL: &str = "diffusioncreampy-bar-sdxl";
+const MODEL: &str = "diffusioncreampy-sdxl";
 const CROP_PADDING: u32 = 128;
+const BAR_MASK_EXPANSION: u8 = 2;
+const MOSAIC_MASK_EXPANSION: u8 = 8;
 
 pub(super) struct Processor {
     device: koharu_ml::Device,
@@ -49,7 +51,12 @@ impl StageProcessor for Processor {
                 && input
                     .scene
                     .component::<RasterLayer>(entity)?
-                    .is_some_and(|layer| layer.kind == RasterLayerKind::Censor)
+                    .is_some_and(|layer| {
+                        matches!(
+                            layer.kind,
+                            RasterLayerKind::Censor | RasterLayerKind::Mosaic
+                        )
+                    })
                 && input
                     .scene
                     .asset(entity, &AssetRole::new("source")?)?
@@ -84,15 +91,35 @@ impl StageProcessor for Processor {
             .cloned()
             .ok_or_else(|| anyhow!("decensor model is not loaded"))?;
         let prepared = prepare(&input).await?;
-        if prepared.mask.as_raw().iter().all(|value| *value == 0) {
+        if mask_is_empty(&prepared.bar_mask) && mask_is_empty(&prepared.mosaic_mask) {
             return finish(input.scene.edit());
         }
         let image = prepared.image.clone();
-        let mask = prepared.mask.clone();
-        let generated =
-            tokio::task::spawn_blocking(move || decensor_regions(&model, &image, &mask))
-                .await
-                .context("decensor task panicked")??;
+        let bar_mask = prepared.bar_mask.clone();
+        let mosaic_mask = prepared.mosaic_mask.clone();
+        let generated = tokio::task::spawn_blocking(move || {
+            let mut output = image.to_rgb8();
+            if !mask_is_empty(&bar_mask) {
+                output = decensor_regions(
+                    &model,
+                    &DynamicImage::ImageRgb8(output),
+                    &bar_mask,
+                    DecensorPass::Bar,
+                )?;
+            }
+            if !mask_is_empty(&mosaic_mask) {
+                let expanded = dilate(&mosaic_mask, Norm::LInf, MOSAIC_MASK_EXPANSION);
+                output = decensor_regions(
+                    &model,
+                    &DynamicImage::ImageRgb8(output),
+                    &expanded,
+                    DecensorPass::Mosaic,
+                )?;
+            }
+            Ok::<_, anyhow::Error>(output)
+        })
+        .await
+        .context("decensor task panicked")??;
 
         write_result(&input.scene, input.page, prepared, generated)
     }
@@ -107,9 +134,18 @@ fn write_result(
     let mut cleanup = prepared
         .cleanup
         .unwrap_or_else(|| RgbaImage::new(generated.width(), generated.height()));
-    let blend_mask = DynamicImage::ImageLuma8(dilate(&prepared.mask, Norm::LInf, 2))
-        .blur(4.0)
-        .to_luma8();
+    let bar_blend =
+        DynamicImage::ImageLuma8(dilate(&prepared.bar_mask, Norm::LInf, BAR_MASK_EXPANSION))
+            .blur(4.0)
+            .to_luma8();
+    let mosaic_blend = DynamicImage::ImageLuma8(dilate(
+        &prepared.mosaic_mask,
+        Norm::LInf,
+        MOSAIC_MASK_EXPANSION,
+    ))
+    .blur(16.0)
+    .to_luma8();
+    let blend_mask = merge_masks(&bar_blend, &mosaic_blend);
     for (x, y, target) in cleanup.enumerate_pixels_mut() {
         let alpha = blend_mask.get_pixel(x, y)[0];
         if alpha == 0 {
@@ -121,7 +157,7 @@ fn write_result(
     let mut bytes = Cursor::new(Vec::new());
     DynamicImage::ImageRgba8(cleanup).write_to(&mut bytes, ImageFormat::Png)?;
 
-    // A censor mask is an explicit user-authored delegation. Its result,
+    // A decensor mask is an explicit user-authored delegation. Its result,
     // the cleanup pixels, and hiding the consumed mask therefore remain
     // user edits rather than claiming ownership for the pipeline producer.
     let mut edit = scene.edit();
@@ -155,7 +191,7 @@ fn write_result(
             },
         ),
     )?;
-    for entity in prepared.censor_entities {
+    for entity in prepared.mask_entities {
         edit.observe::<Visibility>(entity)?;
         edit.set(
             entity,
@@ -171,10 +207,11 @@ fn write_result(
 
 struct Prepared {
     image: DynamicImage,
-    mask: GrayImage,
+    bar_mask: GrayImage,
+    mosaic_mask: GrayImage,
     cleanup: Option<RgbaImage>,
     cleanup_entity: Option<koharu_scene::EntityId>,
-    censor_entities: Vec<koharu_scene::EntityId>,
+    mask_entities: Vec<koharu_scene::EntityId>,
 }
 
 async fn prepare(input: &StageInput) -> Result<Prepared> {
@@ -186,8 +223,9 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
     let mut composite = original.to_rgba8();
     let mut cleanup = None;
     let mut cleanup_entity = None;
-    let mut censor_entities = Vec::new();
-    let mut mask = GrayImage::new(original.width(), original.height());
+    let mut mask_entities = Vec::new();
+    let mut bar_mask = GrayImage::new(original.width(), original.height());
+    let mut mosaic_mask = GrayImage::new(original.width(), original.height());
     for entity in input.scene.children(input.page)? {
         let Some(layer) = input.scene.component::<RasterLayer>(entity)? else {
             continue;
@@ -199,6 +237,9 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
             bail!("raster layer dimensions do not match page {}", input.page);
         }
         match layer.kind {
+            RasterLayerKind::Artwork => {
+                image::imageops::overlay(&mut composite, &image.to_rgba8(), 0, 0);
+            }
             RasterLayerKind::Cleanup => {
                 let image = image.to_rgba8();
                 image::imageops::overlay(&mut composite, &image, 0, 0);
@@ -209,21 +250,29 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
                 image::imageops::overlay(&mut composite, &image.to_rgba8(), 0, 0);
             }
             RasterLayerKind::Censor if input.contains_entity(entity)? => {
-                for (target, source) in mask.iter_mut().zip(image.to_rgba8().pixels()) {
+                for (target, source) in bar_mask.iter_mut().zip(image.to_rgba8().pixels()) {
                     *target = (*target).max(source[3]);
                 }
-                censor_entities.push(entity);
+                mask_entities.push(entity);
+            }
+            RasterLayerKind::Mosaic if input.contains_entity(entity)? => {
+                for (target, source) in mosaic_mask.iter_mut().zip(image.to_rgba8().pixels()) {
+                    *target = (*target).max(source[3]);
+                }
+                mask_entities.push(entity);
             }
             RasterLayerKind::Censor => {}
+            RasterLayerKind::Mosaic => {}
             RasterLayerKind::Segmentation => {}
         }
     }
     Ok(Prepared {
         image: DynamicImage::ImageRgba8(composite),
-        mask,
+        bar_mask,
+        mosaic_mask,
         cleanup,
         cleanup_entity,
-        censor_entities,
+        mask_entities,
     })
 }
 
@@ -231,6 +280,7 @@ fn decensor_regions(
     model: &Arc<Mutex<Decensor>>,
     image: &DynamicImage,
     mask: &GrayImage,
+    pass: DecensorPass,
 ) -> Result<image::RgbImage> {
     let binary = GrayImage::from_fn(mask.width(), mask.height(), |x, y| {
         Luma([(mask.get_pixel(x, y)[0] >= 32) as u8 * u8::MAX])
@@ -259,10 +309,17 @@ fn decensor_regions(
             image::imageops::crop_imm(&output, left, top, right - left, bottom - top).to_image();
         let crop_mask =
             image::imageops::crop_imm(mask, left, top, right - left, bottom - top).to_image();
-        let generated = model
+        let model = model
             .lock()
-            .map_err(|_| anyhow!("decensor model lock was poisoned"))?
-            .inference(&DynamicImage::ImageRgb8(crop), &crop_mask, -1)?;
+            .map_err(|_| anyhow!("decensor model lock was poisoned"))?;
+        let generated = match pass {
+            DecensorPass::Bar => {
+                model.inference_bar(&DynamicImage::ImageRgb8(crop), &crop_mask, -1)?
+            }
+            DecensorPass::Mosaic => {
+                model.inference_mosaic(&DynamicImage::ImageRgb8(crop), &crop_mask, -1)?
+            }
+        };
         let generated = DynamicImage::ImageRgb8(generated)
             .resize_exact(
                 right - left,
@@ -281,6 +338,22 @@ fn decensor_regions(
     Ok(output)
 }
 
+#[derive(Clone, Copy)]
+enum DecensorPass {
+    Bar,
+    Mosaic,
+}
+
+fn mask_is_empty(mask: &GrayImage) -> bool {
+    mask.as_raw().iter().all(|value| *value == 0)
+}
+
+fn merge_masks(first: &GrayImage, second: &GrayImage) -> GrayImage {
+    GrayImage::from_fn(first.width(), first.height(), |x, y| {
+        Luma([first.get_pixel(x, y)[0].max(second.get_pixel(x, y)[0])])
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use image::{Rgb, RgbImage};
@@ -289,11 +362,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn result_may_update_user_cleanup_and_censor_visibility() {
+    async fn result_updates_user_cleanup_and_hides_consumed_decensor_masks() {
         let mut session = Session::memory().await.unwrap();
         let mut page = None;
         let mut cleanup = None;
         let mut censor = None;
+        let mut mosaic = None;
         let patch = session
             .snapshot()
             .patch(|edit| {
@@ -340,16 +414,35 @@ mod tests {
                 page = Some(page_id);
                 cleanup = Some(cleanup_id);
                 censor = Some(censor_id);
+                let mosaic_id = edit.add_entity(page_id, At::End)?;
+                edit.set(
+                    mosaic_id,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Mosaic".to_owned(),
+                        kind: RasterLayerKind::Mosaic,
+                    },
+                )?;
+                edit.set(
+                    mosaic_id,
+                    &Visibility {
+                        origin: Origin::User,
+                        visible: true,
+                        opacity: 1.0,
+                    },
+                )?;
+                mosaic = Some(mosaic_id);
                 Ok(())
             })
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
         let prepared = Prepared {
             image: DynamicImage::new_rgba8(2, 2),
-            mask: GrayImage::from_pixel(2, 2, Luma([255])),
+            bar_mask: GrayImage::from_pixel(2, 2, Luma([255])),
+            mosaic_mask: GrayImage::new(2, 2),
             cleanup: Some(RgbaImage::new(2, 2)),
             cleanup_entity: cleanup,
-            censor_entities: vec![censor.unwrap()],
+            mask_entities: vec![censor.unwrap(), mosaic.unwrap()],
         };
 
         let patch = write_result(
@@ -370,6 +463,14 @@ mod tests {
         assert_eq!(
             snapshot
                 .component::<Visibility>(censor.unwrap())
+                .unwrap()
+                .unwrap()
+                .visible,
+            false
+        );
+        assert_eq!(
+            snapshot
+                .component::<Visibility>(mosaic.unwrap())
                 .unwrap()
                 .unwrap()
                 .visible,

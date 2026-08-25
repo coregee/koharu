@@ -1638,6 +1638,7 @@ impl Project {
         DynamicImage::ImageRgba8(image).write_to(&mut bytes, ImageFormat::Png)?;
         let layer_label = match new_layer_kind {
             RasterLayerKind::Censor => "Censor",
+            RasterLayerKind::Mosaic => "Mosaic",
             RasterLayerKind::Paint => "Paint",
             RasterLayerKind::Cleanup => "Cleanup",
             RasterLayerKind::Segmentation => "Segmentation",

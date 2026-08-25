@@ -260,6 +260,7 @@
       "paint": "Boyama",
       "segmentation": "Segmentasyon maskesi",
       "censor": "Sansür maskesi",
+      "mosaic": "Mozaik maskesi",
       "text": "Metin",
       "mainTextGroup": "Ana metin grubu",
       "sfxTextGroup": "SFX metin grubu"
@@ -577,6 +578,11 @@
     "increaseFillTolerance": "Dolgu toleransını artır",
     "pan": "Kaydır",
     "remove": "Kaldır",
+    "censorSelection": {
+      "brush": "Çubuk sansür fırçası",
+      "circle": "Dairesel mozaik bölgesi",
+      "rectangle": "Dikdörtgen mozaik bölgesi"
+    },
     "removeSelection": {
       "circle": "Daire seçimi",
       "pen": "Kalem seçimi",

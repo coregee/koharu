@@ -333,9 +333,11 @@ pub struct ShapeMetadata {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ImageKind {
     Source,
+    Artwork,
     Cleanup,
     Paint,
     Censor,
+    Mosaic,
     Segmentation,
     Embedded,
 }

@@ -266,6 +266,7 @@
       "segmentation": "Segmentation mask",
       "bubble": "Speech bubble",
       "censor": "Censor mask",
+      "mosaic": "Mosaic mask",
       "text": "Text",
       "mainTextGroup": "Main text group",
       "sfxTextGroup": "SFX text group"
@@ -592,6 +593,11 @@
     "increaseFillTolerance": "Increase fill tolerance",
     "pan": "Pan",
     "remove": "Remove",
+    "censorSelection": {
+      "brush": "Bar censor brush",
+      "circle": "Circular mosaic region",
+      "rectangle": "Rectangular mosaic region"
+    },
     "removeSelection": {
       "circle": "Circle selection",
       "pen": "Pen selection",

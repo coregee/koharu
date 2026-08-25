@@ -260,6 +260,7 @@
       "paint": "페인트",
       "segmentation": "세그멘테이션 마스크",
       "censor": "검열 마스크",
+      "mosaic": "모자이크 마스크",
       "text": "텍스트",
       "mainTextGroup": "메인 텍스트 그룹",
       "sfxTextGroup": "효과음 텍스트 그룹"
@@ -577,6 +578,11 @@
     "increaseFillTolerance": "채우기 허용 오차 늘리기",
     "pan": "이동",
     "remove": "제거",
+    "censorSelection": {
+      "brush": "막대 검열 브러시",
+      "circle": "원형 모자이크 영역",
+      "rectangle": "직사각형 모자이크 영역"
+    },
     "removeSelection": {
       "circle": "원 선택",
       "pen": "펜 선택",

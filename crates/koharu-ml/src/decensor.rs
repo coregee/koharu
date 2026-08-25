@@ -1,10 +1,13 @@
-//! DiffusionCreamPy-inspired bar removal through stable-diffusion.cpp.
+//! DiffusionCreamPy-inspired bar and mosaic removal through stable-diffusion.cpp.
 //!
-//! The model, 1024px crop, Euler/Beta sampler, ten steps, CFG 5, edge-filled
-//! input, and masked-image conditioning follow `DiffusionCreamPy-Bar-CNet++.json`.
-//! Its SDXL ControlNet Union ProMax cannot be loaded by Koharu's current
-//! stable-diffusion.cpp runtime, whose ControlNet implementation is SD 1.5-only,
-//! so masked SDXL generation owns that conditioning responsibility here.
+//! Both passes use the workflow's model, 1024px crop, Euler/Beta sampler, ten
+//! steps, and masked-image conditioning. Bar removal follows
+//! `DiffusionCreamPy-Bar-CNet++.json` with an edge-filled input, CFG 5, and full
+//! denoise. Mosaic removal follows `DiffusionCreamPy-Mosaic-CNet++.json` with a
+//! source-preserving input, CFG 7, and 0.5 denoise. The mosaic workflow's tile
+//! ControlNet cannot be loaded by Koharu's current stable-diffusion.cpp runtime,
+//! whose ControlNet implementation is SD 1.5-only, so the mosaic pass uses its
+//! demosaiced source as masked SDXL img2img conditioning instead.
 
 use std::{collections::VecDeque, sync::Mutex};
 
@@ -49,7 +52,7 @@ impl Decensor {
             }),
             ..ContextParams::default()
         })
-        .context("failed to load DiffusionCreamPy bar-removal components")?;
+        .context("failed to load DiffusionCreamPy decensor components")?;
         ensure!(
             context.supports_image_generation(),
             "DiffusionCreamPy context does not support image generation"
@@ -59,7 +62,31 @@ impl Decensor {
         })
     }
 
-    pub fn inference(&self, image: &DynamicImage, mask: &GrayImage, seed: i64) -> Result<RgbImage> {
+    pub fn inference_bar(
+        &self,
+        image: &DynamicImage,
+        mask: &GrayImage,
+        seed: i64,
+    ) -> Result<RgbImage> {
+        self.inference(image, mask, seed, DecensorPass::Bar)
+    }
+
+    pub fn inference_mosaic(
+        &self,
+        image: &DynamicImage,
+        mask: &GrayImage,
+        seed: i64,
+    ) -> Result<RgbImage> {
+        self.inference(image, mask, seed, DecensorPass::Mosaic)
+    }
+
+    fn inference(
+        &self,
+        image: &DynamicImage,
+        mask: &GrayImage,
+        seed: i64,
+        pass: DecensorPass,
+    ) -> Result<RgbImage> {
         ensure!(
             image.dimensions() == mask.dimensions(),
             "decensor image and mask dimensions differ"
@@ -72,7 +99,14 @@ impl Decensor {
         let output_dimensions = image.dimensions();
         let image = resize_rgb(&image.to_rgb8(), RESOLUTION, RESOLUTION)?;
         let mask = resize_mask(mask, RESOLUTION, RESOLUTION)?;
-        let init_image = edge_fill(&image, &mask);
+        let init_image = match pass {
+            DecensorPass::Bar => edge_fill(&image, &mask),
+            DecensorPass::Mosaic => demosaic(&image),
+        };
+        let (text_cfg, strength) = match pass {
+            DecensorPass::Bar => (5.0, 1.0),
+            DecensorPass::Mosaic => (7.0, 0.5),
+        };
         let mut context = self
             .context
             .lock()
@@ -87,7 +121,7 @@ impl Decensor {
                 height: RESOLUTION as i32,
                 sample: SampleParams {
                     guidance: GuidanceParams {
-                        text_cfg: 5.0,
+                        text_cfg,
                         ..GuidanceParams::default()
                     },
                     scheduler: Scheduler::Beta,
@@ -95,7 +129,7 @@ impl Decensor {
                     sample_steps: 10,
                     ..SampleParams::default()
                 },
-                strength: 1.0,
+                strength,
                 seed,
                 batch_count: 1,
                 ..ImageGenerationParams::default()
@@ -106,6 +140,12 @@ impl Decensor {
             .context("DiffusionCreamPy returned no image")?;
         resize_rgb(&generated, output_dimensions.0, output_dimensions.1)
     }
+}
+
+#[derive(Clone, Copy)]
+enum DecensorPass {
+    Bar,
+    Mosaic,
 }
 
 fn resize_rgb(image: &RgbImage, width: u32, height: u32) -> Result<RgbImage> {
@@ -175,6 +215,10 @@ fn edge_fill(image: &RgbImage, mask: &GrayImage) -> RgbImage {
     output
 }
 
+fn demosaic(image: &RgbImage) -> RgbImage {
+    DynamicImage::ImageRgb8(image.clone()).blur(4.0).to_rgb8()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +234,18 @@ mod tests {
         assert_eq!(filled.get_pixel(0, 0), image.get_pixel(0, 0));
         assert_eq!(filled.get_pixel(1, 1), image.get_pixel(1, 0));
         assert_ne!(filled.get_pixel(1, 1), image.get_pixel(1, 1));
+    }
+
+    #[test]
+    fn demosaic_preserves_dimensions_and_smooths_pixel_boundaries() {
+        let image = RgbImage::from_fn(9, 9, |x, _| {
+            image::Rgb(if x < 4 { [0, 0, 0] } else { [255, 255, 255] })
+        });
+
+        let blurred = demosaic(&image);
+
+        assert_eq!(blurred.dimensions(), image.dimensions());
+        assert!(blurred.get_pixel(4, 4)[0] > 0);
+        assert!(blurred.get_pixel(4, 4)[0] < 255);
     }
 }

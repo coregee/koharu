@@ -936,6 +936,31 @@ describe('canvas interaction adapter', () => {
     expect(screen.queryByTestId('inpaint-selection-overlay')).not.toBeInTheDocument()
   })
 
+  it('commits a mosaic region without starting a censor brush stroke', async () => {
+    installProject()
+    useKoharuStore.setState({ tool: 'censor', censorSelectionTool: 'rectangle' })
+    const commit = vi.spyOn(commands, 'commitMosaic').mockResolvedValue({
+      revision: 2,
+      layer: 'mosaic',
+    })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 16, clientX: 30, clientY: 40 })
+    fireEvent.pointerMove(surface, { pointerId: 16, clientX: 70, clientY: 60 })
+    expect(screen.getByTestId('mosaic-region-overlay')).toBeInTheDocument()
+    fireEvent.pointerUp(surface, { pointerId: 16, clientX: 70, clientY: 60 })
+
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(1, null, {
+        type: 'rectangle',
+        start: { x: 20, y: 20 },
+        end: { x: 60, y: 40 },
+      }),
+    )
+    expect(canvas.beginStroke).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('mosaic-region-overlay')).not.toBeInTheDocument()
+  })
+
   it('creates the same OCR-candidate text box on click and drag', async () => {
     installProject()
     useKoharuStore.setState({ tool: 'text' })

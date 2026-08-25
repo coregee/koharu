@@ -175,7 +175,7 @@ mod tests {
                 "paddleocr-vl-1.6",
                 "local",
                 "lama",
-                "diffusioncreampy-bar-sdxl",
+                "diffusioncreampy-sdxl",
             ]
         );
     }

@@ -161,9 +161,11 @@ pub(crate) async fn build(
             let image = image.expect("image branch was selected above");
             let name = image.name.clone().unwrap_or_else(|| match image.kind {
                 ImageKind::Source | ImageKind::Embedded => "Image".to_owned(),
+                ImageKind::Artwork => "Artwork".to_owned(),
                 ImageKind::Cleanup => "Cleanup".to_owned(),
                 ImageKind::Paint => "Paint".to_owned(),
                 ImageKind::Censor => "Censor".to_owned(),
+                ImageKind::Mosaic => "Mosaic".to_owned(),
                 ImageKind::Segmentation => "Segmentation".to_owned(),
             });
             validate_pixels(&name, &rendered.image)?;
