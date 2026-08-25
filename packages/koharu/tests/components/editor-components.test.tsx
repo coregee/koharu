@@ -549,8 +549,8 @@ describe('greenfield editor', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Brush' }))
-    expect(useKoharuStore.getState().tool).toBe('draw')
-    fireEvent.click(screen.getByRole('button', { name: 'Text' }))
+    expect(useKoharuStore.getState().tool).toBe('brush')
+    fireEvent.click(screen.getByRole('button', { name: 'Add text layer' }))
     expect(screen.getByTestId('type-inspector')).toBeInTheDocument()
     expect(screen.getByTestId('type-font-picker')).toHaveTextContent('Noto Sans')
     expect(screen.getByTestId('type-size')).toHaveValue('')
@@ -606,7 +606,7 @@ describe('greenfield editor', () => {
   it('adjusts brush size from the toolbar popover', async () => {
     const user = userEvent.setup()
     installProject()
-    useKoharuStore.setState({ tool: 'draw' })
+    useKoharuStore.setState({ tool: 'brush' })
     render(
       <TooltipProvider>
         <ToolBar />
@@ -620,40 +620,36 @@ describe('greenfield editor', () => {
     expect(useKoharuStore.getState().brush.diameter).toBe(49)
   })
 
-  it('switches between Remove selection tools', () => {
+  it('keeps contextual shape tools when changing modes', () => {
     installProject()
-    useKoharuStore.setState({ tool: 'remove', removeSelectionTool: 'pen' })
+    useKoharuStore.setState({ toolMode: 'paint', tool: 'brush' })
     render(
       <TooltipProvider>
         <ToolBar />
       </TooltipProvider>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Circle selection' }))
-    expect(useKoharuStore.getState().removeSelectionTool).toBe('circle')
-    fireEvent.click(screen.getByRole('button', { name: 'Square selection' }))
-    expect(useKoharuStore.getState().removeSelectionTool).toBe('square')
+    fireEvent.click(screen.getByRole('button', { name: 'Removal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Oval' }))
+    expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'removal', tool: 'oval' })
+    fireEvent.click(screen.getByRole('button', { name: 'Decensor' }))
+    expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'decensor', tool: 'oval' })
     expect(screen.queryByRole('button', { name: 'Brush size: 48 pixels' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Pen selection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Brush' }))
     expect(screen.getByRole('button', { name: 'Brush size: 48 pixels' })).toBeInTheDocument()
   })
 
-  it('switches between bar brush and mosaic region tools', () => {
+  it('falls back to Paint mode for the eyedropper', () => {
     installProject()
-    useKoharuStore.setState({ tool: 'censor', censorSelectionTool: 'brush' })
+    useKoharuStore.setState({ toolMode: 'decensor', tool: 'brush' })
     render(
       <TooltipProvider>
         <ToolBar />
       </TooltipProvider>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Circular mosaic region' }))
-    expect(useKoharuStore.getState().censorSelectionTool).toBe('circle')
-    expect(screen.queryByRole('button', { name: 'Brush size: 48 pixels' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Rectangular mosaic region' }))
-    expect(useKoharuStore.getState().censorSelectionTool).toBe('rectangle')
-    fireEvent.click(screen.getByRole('button', { name: 'Bar censor brush' }))
-    expect(screen.getByRole('button', { name: 'Brush size: 48 pixels' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Eyedropper' }))
+    expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'paint', tool: 'eyedropper' })
   })
 
   it('adjusts fill tolerance from the toolbar popover', async () => {

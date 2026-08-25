@@ -91,13 +91,13 @@ export const commands = {
 	getCanvasPageManifest: (page: EntityId, revision: Revision) => __TAURI_INVOKE<CanvasBytes>("get_canvas_page_manifest", { page, revision }),
 	getCanvasPageResource: (page: EntityId, revision: Revision, resource: string) => __TAURI_INVOKE<CanvasBytes>("get_canvas_page_resource", { page, revision, resource }),
 	addTextBox: (frame: Frame) => __TAURI_INVOKE<LayerCommit>("add_text_box", { frame }),
-	commitPaint: (expectedRevision: Revision, layer: string | null, points: Point[], brush: PaintBrush) => __TAURI_INVOKE<LayerCommit>("commit_paint", { expectedRevision, layer, points: points.map(i=>i), brush }),
+	commitRasterBrush: (expectedRevision: Revision, layer: string | null, mode: CanvasRasterMode, points: Point[], brush: PaintBrush) => __TAURI_INVOKE<LayerCommit>("commit_raster_brush", { expectedRevision, layer, mode, points: points.map(i=>i), brush }),
+	commitRasterShape: (expectedRevision: Revision, layer: string | null, mode: CanvasRasterMode, shape: RasterShape, color: [number, number, number, number]) => __TAURI_INVOKE<LayerCommit>("commit_raster_shape", { expectedRevision, layer, mode, shape, color }),
+	commitRasterErase: (expectedRevision: Revision, layer: EntityId, mode: CanvasRasterMode, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_raster_erase", { expectedRevision, layer, mode, points: points.map(i=>i), diameter }),
 	commitFill: (expectedRevision: Revision, layer: EntityId, point: Point, color: [number, number, number, number], tolerance: number) => __TAURI_INVOKE<LayerCommit>("commit_fill", { expectedRevision, layer, point, color, tolerance }),
-	commitCensor: (expectedRevision: Revision, layer: string | null, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_censor", { expectedRevision, layer, points: points.map(i=>i), diameter }),
-	commitMosaic: (expectedRevision: Revision, layer: string | null, region: MosaicRegion) => __TAURI_INVOKE<LayerCommit>("commit_mosaic", { expectedRevision, layer, region }),
-	commitErase: (expectedRevision: Revision, layer: EntityId, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_erase", { expectedRevision, layer, points: points.map(i=>i), diameter }),
 	commitTransform: (expectedRevision: Revision, elements: TransformFrame[]) => __TAURI_INVOKE<number | null>("commit_transform", { expectedRevision, elements }).then((v) => (v==null?v:v as typeof v)),
-	commitInpaint: (expectedRevision: Revision, selections: InpaintSelection[]) => __TAURI_INVOKE<string | null>("commit_inpaint", { expectedRevision, selections: selections.map(i=>i) }),
+	resetRemovalMask: (expectedRevision: Revision, layer: EntityId) => __TAURI_INVOKE<Revision>("reset_removal_mask", { expectedRevision, layer }),
+	commitInpaint: (expectedRevision: Revision) => __TAURI_INVOKE<JobId>("commit_inpaint", { expectedRevision }),
 };
 
 /* Types */
@@ -154,6 +154,8 @@ export type CanvasPagePreparation = {
 	revision: Revision,
 	page: Page,
 };
+
+export type CanvasRasterMode = "paint" | "removal" | "bar_censor" | "mosaic_censor";
 
 export type CanvasState = {
 	page: EntityId | null,
@@ -295,8 +297,6 @@ export type GrokConfig = Record<string, never>;
 
 export type GroupRole = "main_text" | "sfx_text";
 
-export type InpaintSelection = { type: "pen"; points: Point[]; diameter: number } | { type: "circle"; start: Point; end: Point } | { type: "square"; start: Point; end: Point };
-
 export type InpaintingModel = { model: "lama" } | { model: "aot-inpainting" } | {
 	model: "flux2-klein",
 } & Flux2KleinConfig | {
@@ -331,7 +331,7 @@ export type LanguageChoice = {
 	name: string,
 };
 
-export type Layer = { type: "group"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; name: string; role: GroupRole | null } | { type: "text"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry | null; visibility: LayerVisibility; content: TextContent; typography: Typography | null; layout: TextLayoutKind } | { type: "raster"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; image: string | null; name: string; kind: RasterLayerKind } | { type: "image"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string } | { type: "bubble"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; shape: RegionShapeKind; fill_color: [number, number, number, number]; outline_color: [number, number, number, number]; outline_width: number } | { type: "artwork"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string };
+export type Layer = { type: "group"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; name: string; role: GroupRole | null } | { type: "text"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry | null; visibility: LayerVisibility; content: TextContent; typography: Typography | null; layout: TextLayoutKind } | { type: "raster"; id: EntityId; parent: EntityId | null; locked: boolean; visibility: LayerVisibility; image: string | null; name: string; kind: RasterLayerKind; consumed: boolean } | { type: "image"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string } | { type: "bubble"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; shape: RegionShapeKind; fill_color: [number, number, number, number]; outline_color: [number, number, number, number]; outline_width: number } | { type: "artwork"; id: EntityId; parent: EntityId | null; locked: boolean; geometry: Geometry; visibility: LayerVisibility; image: string };
 
 export type LayerCommit = {
 	revision: Revision,
@@ -378,8 +378,6 @@ export type ModelSelection = {
 	reasoning?: boolean,
 	context_window?: number | null,
 };
-
-export type MosaicRegion = { type: "circle"; start: Point; end: Point } | { type: "rectangle"; start: Point; end: Point };
 
 export type OcrModel = { model: "paddleocr-vl-1.6" } | { model: "paddleocr-vl-manga" } | { model: "manga-ocr" } | { model: "baberu-ocr" };
 
@@ -489,6 +487,8 @@ export type Quantization = {
 };
 
 export type RasterLayerKind = "artwork" | "cleanup" | "paint" | "censor" | "mosaic" | "segmentation";
+
+export type RasterShape = { type: "oval"; frame: Frame } | { type: "rectangle"; frame: Frame };
 
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 

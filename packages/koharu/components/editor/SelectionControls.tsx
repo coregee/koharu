@@ -19,6 +19,7 @@ interface SelectionControlsProps {
   frame: Frame
   camera: Camera
   edgesOnly: boolean
+  draggable?: boolean
   rotatable?: boolean
   onTransformStart: (elements: TransformFrame[]) => void
   onTransformFrame: (elements: TransformFrame[]) => void
@@ -26,6 +27,7 @@ interface SelectionControlsProps {
 }
 
 type ControlGesture =
+  | { kind: 'move'; pointer: number; original: Frame; start: Point }
   | { kind: 'resize'; pointer: number; original: Frame; handle: ResizeHandle }
   | { kind: 'rotate'; pointer: number; original: Frame; start: Point }
 
@@ -51,6 +53,7 @@ export function SelectionControls({
   frame,
   camera,
   edgesOnly,
+  draggable = false,
   rotatable = true,
   onTransformStart,
   onTransformFrame,
@@ -77,6 +80,15 @@ export function SelectionControls({
     onTransformStart([{ element, frame }])
   }
 
+  const startMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || gesture.current) return
+    const start = eventPoint(event)
+    if (!start) return
+    capture(event)
+    gesture.current = { kind: 'move', pointer: event.pointerId, original: frame, start }
+    onTransformStart([{ element, frame }])
+  }
+
   const startRotate = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || gesture.current) return
     const start = eventPoint(event)
@@ -94,19 +106,25 @@ export function SelectionControls({
     const point = eventPoint(event)
     if (!point) return
     const next =
-      current.kind === 'resize'
-        ? resizeFrame(
-            current.original,
-            current.handle,
-            point,
-            window.devicePixelRatio / camera.zoom,
-          )
-        : rotateFrame(
-            current.original,
-            current.start,
-            point,
-            event.ctrlKey || event.shiftKey ? 15 : undefined,
-          )
+      current.kind === 'move'
+        ? {
+            ...current.original,
+            x: current.original.x + point.x - current.start.x,
+            y: current.original.y + point.y - current.start.y,
+          }
+        : current.kind === 'resize'
+          ? resizeFrame(
+              current.original,
+              current.handle,
+              point,
+              window.devicePixelRatio / camera.zoom,
+            )
+          : rotateFrame(
+              current.original,
+              current.start,
+              point,
+              event.ctrlKey || event.shiftKey ? 15 : undefined,
+            )
     onTransformFrame([{ element, frame: next }])
   }
 
@@ -149,6 +167,16 @@ export function SelectionControls({
         transformOrigin: '50% 50%',
       }}
     >
+      {draggable && (
+        <div
+          data-canvas-control
+          data-transform-body
+          className='pointer-events-auto absolute inset-0 cursor-move touch-none'
+          onPointerDown={startMove}
+          {...pointerEvents}
+        />
+      )}
+
       {handles.map(({ handle, left, top, cursor }) => (
         <div
           key={handle}

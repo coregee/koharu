@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use anyhow::{Context as _, bail};
-use image::{GrayImage, ImageEncoder as _, codecs::png::PngEncoder};
 use koharu_desktop::{CanvasState, Desktop, Frame, TransformFrame};
 use koharu_rasterizer::ResourceId;
 use koharu_scene::{EntityId, RasterLayerKind, Revision};
@@ -25,19 +22,20 @@ pub struct Point {
     pub y: f64,
 }
 
-#[derive(Clone, Debug, Deserialize, Type)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum InpaintSelection {
-    Pen { points: Vec<Point>, diameter: f32 },
-    Circle { start: Point, end: Point },
-    Square { start: Point, end: Point },
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CanvasRasterMode {
+    Paint,
+    Removal,
+    BarCensor,
+    MosaicCensor,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Type)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum MosaicRegion {
-    Circle { start: Point, end: Point },
-    Rectangle { start: Point, end: Point },
+pub enum RasterShape {
+    Oval { frame: Frame },
+    Rectangle { frame: Frame },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Type)]
@@ -185,29 +183,31 @@ pub(crate) async fn add_text_box(
 
 #[tracing::instrument(
     target = "koharu_metrics",
-    name = "paint_committed",
+    name = "raster_brush_committed",
     skip_all,
-    fields(origin = "user", point_count = points.len(), size = f64::from(brush.diameter)),
+    fields(origin = "user", mode = ?mode, point_count = points.len(), size = f64::from(brush.diameter)),
 )]
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn commit_paint(
+pub(crate) async fn commit_raster_brush(
     expected_revision: Revision,
     layer: Option<EntityId>,
+    mode: CanvasRasterMode,
     points: Vec<Point>,
     brush: PaintBrush,
     desktop: State<'_, Desktop>,
     project: State<'_, CurrentProject>,
     canvas_channel: State<'_, CanvasChannel>,
 ) -> Result<LayerCommit, Error> {
-    commit_raster_stroke(
+    let (kind, color) = raster_style(mode, brush.color);
+    commit_raster_edit(
         expected_revision,
         layer,
         points,
         brush.diameter,
-        brush.color,
+        color,
         RasterStrokeMode::Paint,
-        RasterLayerKind::Paint,
+        kind,
         &desktop,
         &project,
         &canvas_channel,
@@ -217,119 +217,80 @@ pub(crate) async fn commit_paint(
 
 #[tracing::instrument(
     target = "koharu_metrics",
-    name = "censor_mask_committed",
+    name = "raster_shape_committed",
     skip_all,
-    fields(origin = "user", point_count = points.len(), size = f64::from(diameter)),
+    fields(origin = "user", mode = ?mode, shape = ?shape),
 )]
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn commit_censor(
+pub(crate) async fn commit_raster_shape(
     expected_revision: Revision,
     layer: Option<EntityId>,
-    points: Vec<Point>,
-    diameter: f32,
+    mode: CanvasRasterMode,
+    shape: RasterShape,
+    color: [u8; 4],
     desktop: State<'_, Desktop>,
     project: State<'_, CurrentProject>,
     canvas_channel: State<'_, CanvasChannel>,
 ) -> Result<LayerCommit, Error> {
-    commit_raster_stroke(
-        expected_revision,
-        layer,
-        points,
-        diameter,
-        [0, 255, 0, 180],
-        RasterStrokeMode::Paint,
-        RasterLayerKind::Censor,
-        &desktop,
-        &project,
-        &canvas_channel,
-    )
-    .await
-}
-
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "mosaic_region_committed",
-    skip_all,
-    fields(origin = "user", shape = ?region),
-)]
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn commit_mosaic(
-    expected_revision: Revision,
-    layer: Option<EntityId>,
-    region: MosaicRegion,
-    desktop: State<'_, Desktop>,
-    project: State<'_, CurrentProject>,
-    canvas_channel: State<'_, CanvasChannel>,
-) -> Result<LayerCommit, Error> {
-    let (commit, page, element) = {
-        let mut project = project.project.lock().await;
-        let project = project.as_mut().context("no project is open")?;
+    let (width, height) = {
+        let project = project.project.lock().await;
+        let project = project.as_ref().context("no project is open")?;
         let snapshot = project.snapshot();
         ensure_revision(snapshot.revision(), expected_revision)?;
         let page = project
             .active_page()
             .context("the project has no active page")?;
         let page_value = snapshot.page(page)?.page()?;
-        let (points, diameter) = mosaic_stroke(
+        (
             page_value.width.round() as u32,
             page_value.height.round() as u32,
-            region,
-        )?;
-        let (commit, element) = project
-            .apply_raster_stroke(
-                page,
-                layer,
-                RasterStrokeMode::Paint,
-                RasterLayerKind::Mosaic,
-                [0, 255, 0, 180],
-                diameter,
-                points
-                    .into_iter()
-                    .map(|point| koharu_scene::Point {
-                        x: point.x,
-                        y: point.y,
-                    })
-                    .collect(),
-            )
-            .await?;
-        project.record_commit(&commit);
-        (commit, project.active_page(), element)
+        )
     };
-    desktop.synchronize(&commit.snapshot, page, &commit).await?;
-    canvas_channel.channel.publish(desktop.canvas_state());
-    Ok(LayerCommit {
-        revision: commit.revision,
-        layer: element,
-    })
+    let (points, diameter) = shape_stroke(width, height, shape)?;
+    let (kind, color) = raster_style(mode, color);
+    commit_raster_edit(
+        expected_revision,
+        layer,
+        points,
+        diameter,
+        color,
+        RasterStrokeMode::Paint,
+        kind,
+        &desktop,
+        &project,
+        &canvas_channel,
+    )
+    .await
 }
 
 #[tracing::instrument(
     target = "koharu_metrics",
-    name = "erase_committed",
+    name = "raster_erase_committed",
     skip_all,
-    fields(origin = "user", point_count = points.len(), size = f64::from(diameter)),
+    fields(origin = "user", mode = ?mode, point_count = points.len(), size = f64::from(diameter)),
 )]
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn commit_erase(
+pub(crate) async fn commit_raster_erase(
     expected_revision: Revision,
     layer: EntityId,
+    mode: CanvasRasterMode,
     points: Vec<Point>,
     diameter: f32,
     desktop: State<'_, Desktop>,
     project: State<'_, CurrentProject>,
     canvas_channel: State<'_, CanvasChannel>,
 ) -> Result<LayerCommit, Error> {
-    commit_raster_stroke(
+    let (kind, _) = raster_style(mode, [0; 4]);
+    commit_raster_edit(
         expected_revision,
         Some(layer),
         points,
         diameter,
         [0; 4],
         RasterStrokeMode::Erase,
-        RasterLayerKind::Paint,
+        kind,
         &desktop,
         &project,
         &canvas_channel,
@@ -390,7 +351,7 @@ pub(crate) async fn commit_fill(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn commit_raster_stroke(
+async fn commit_raster_edit(
     expected_revision: Revision,
     layer: Option<EntityId>,
     points: Vec<Point>,
@@ -471,161 +432,199 @@ pub(crate) async fn commit_transform(
 
 #[tracing::instrument(
     target = "koharu_metrics",
+    name = "removal_mask_reset",
+    skip_all,
+    fields(origin = "user")
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn reset_removal_mask(
+    expected_revision: Revision,
+    layer: EntityId,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<Revision, Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        ensure_revision(project.snapshot().revision(), expected_revision)?;
+        let page = project
+            .active_page()
+            .context("the project has no active page")?;
+        let commit = project.reset_removal_mask(page, layer).await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    desktop.synchronize(&commit.snapshot, page, &commit).await?;
+    canvas_channel.channel.publish(desktop.canvas_state());
+    Ok(commit.revision)
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
     name = "inpaint_requested",
     skip_all,
-    fields(origin = "user", selection_count = selections.len()),
+    fields(origin = "user")
 )]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn commit_inpaint(
     expected_revision: Revision,
-    selections: Vec<InpaintSelection>,
     handle: AppHandle<Cef>,
     project: State<'_, CurrentProject>,
-) -> Result<Option<JobId>, Error> {
-    validate_inpaint_selections(&selections)?;
-    let (page, width, height) = {
+) -> Result<JobId, Error> {
+    let page = {
         let project = project.project.lock().await;
         let project = project.as_ref().context("no project is open")?;
         let snapshot = project.snapshot();
         ensure_revision(snapshot.revision(), expected_revision)?;
-        let page = project
+        project
             .active_page()
-            .context("the project has no active page")?;
-        let page_value = snapshot.page(page)?.page()?;
-        (
-            page,
-            page_value.width.round() as u32,
-            page_value.height.round() as u32,
-        )
+            .context("the project has no active page")?
     };
-    let (png, bounds) =
-        tokio::task::spawn_blocking(move || encode_mask(width, height, &selections))
-            .await
-            .context("inpaint mask worker stopped unexpectedly")??;
-    *handle.state::<Processing>().inpainting_mask.lock() = Some(koharu_pipeline::InpaintingMask {
-        page,
-        png: Arc::from(png),
-    });
-    Ok(Some(
-        processing::process(
-            handle.clone(),
-            koharu_pipeline::Scope::Region { page, bounds },
-            koharu_pipeline::Operation::Only {
-                stage: koharu_pipeline::Stage::Inpainting,
-            },
-            handle.state::<CurrentProject>(),
-            handle.state::<Processing>(),
-            handle.state::<JobChannel>(),
-        )
-        .await?,
-    ))
+    Ok(processing::process(
+        handle.clone(),
+        koharu_pipeline::Scope::Pages(vec![page]),
+        koharu_pipeline::Operation::Only {
+            stage: koharu_pipeline::Stage::Inpainting,
+        },
+        handle.state::<CurrentProject>(),
+        handle.state::<Processing>(),
+        handle.state::<JobChannel>(),
+    )
+    .await?)
 }
 
-fn validate_inpaint_selections(selections: &[InpaintSelection]) -> anyhow::Result<()> {
-    if selections.is_empty() {
-        bail!("an inpaint request requires at least one selection");
+fn raster_style(mode: CanvasRasterMode, paint: [u8; 4]) -> (RasterLayerKind, [u8; 4]) {
+    match mode {
+        CanvasRasterMode::Paint => (RasterLayerKind::Paint, paint),
+        CanvasRasterMode::Removal => (RasterLayerKind::Segmentation, [168, 85, 247, 255]),
+        CanvasRasterMode::BarCensor => (RasterLayerKind::Censor, [0, 255, 0, 180]),
+        CanvasRasterMode::MosaicCensor => (RasterLayerKind::Mosaic, [0, 255, 0, 180]),
     }
-    for selection in selections {
-        match selection {
-            InpaintSelection::Pen { points, diameter } => {
-                if points.is_empty() || !diameter.is_finite() || *diameter <= 0.0 {
-                    bail!("an inpaint pen selection requires points and a positive diameter");
-                }
-                validate_finite_points(points)?;
-            }
-            InpaintSelection::Circle { start, end } | InpaintSelection::Square { start, end } => {
-                validate_finite_points(&[*start, *end])?;
-            }
-        }
-    }
-    Ok(())
 }
 
-fn validate_finite_points(points: &[Point]) -> anyhow::Result<()> {
-    if points
-        .iter()
-        .any(|point| !point.x.is_finite() || !point.y.is_finite())
-    {
-        bail!("selection points must be finite");
-    }
-    Ok(())
-}
-
-fn mosaic_stroke(
-    width: u32,
-    height: u32,
-    region: MosaicRegion,
-) -> anyhow::Result<(Vec<Point>, f32)> {
+fn shape_stroke(width: u32, height: u32, shape: RasterShape) -> anyhow::Result<(Vec<Point>, f32)> {
     if width == 0 || height == 0 {
         bail!("page dimensions must be positive");
     }
-    let (start, end) = match region {
-        MosaicRegion::Circle { start, end } | MosaicRegion::Rectangle { start, end } => {
-            (start, end)
-        }
+    let (frame, oval) = match shape {
+        RasterShape::Oval { frame } => (frame, true),
+        RasterShape::Rectangle { frame } => (frame, false),
     };
-    validate_finite_points(&[start, end])?;
-    match region {
-        MosaicRegion::Circle { .. } => {
-            let [left, top, right, bottom] = constrained_bounds(start, end);
-            if right <= 0.0 || bottom <= 0.0 || left >= f64::from(width) || top >= f64::from(height)
-            {
-                bail!("mosaic circle does not intersect the page");
-            }
-            Ok((
-                vec![Point {
-                    x: (left + right) * 0.5,
-                    y: (top + bottom) * 0.5,
-                }],
-                (right - left) as f32,
-            ))
-        }
-        MosaicRegion::Rectangle { .. } => {
-            let [left, top, right, bottom] = rectangle_bounds(start, end);
-            let clipped_left = left.max(0.0);
-            let clipped_top = top.max(0.0);
-            let clipped_right = right.min(f64::from(width));
-            let clipped_bottom = bottom.min(f64::from(height));
-            if clipped_left >= clipped_right || clipped_top >= clipped_bottom {
-                bail!("mosaic rectangle does not intersect the page");
-            }
-            let first_row = clipped_top.floor() as u32;
-            let last_row = clipped_bottom.ceil().min(f64::from(height)) as u32;
-            let mut points = Vec::with_capacity((last_row - first_row) as usize * 2);
-            for (offset, row) in (first_row..last_row).enumerate() {
-                let y = (f64::from(row) + 0.5).clamp(clipped_top, clipped_bottom);
-                let pair = if offset.is_multiple_of(2) {
-                    [clipped_left, clipped_right]
-                } else {
-                    [clipped_right, clipped_left]
-                };
-                points.extend(pair.map(|x| Point { x, y }));
-            }
-            Ok((points, 1.0))
-        }
-    }
-}
-
-fn rectangle_bounds(start: Point, end: Point) -> [f64; 4] {
-    let delta_x = end.x - start.x;
-    let delta_y = end.y - start.y;
-    let end_x = if delta_x.abs() < 1.0 {
-        start.x + if delta_x < 0.0 { -1.0 } else { 1.0 }
-    } else {
-        end.x
-    };
-    let end_y = if delta_y.abs() < 1.0 {
-        start.y + if delta_y < 0.0 { -1.0 } else { 1.0 }
-    } else {
-        end.y
-    };
-    [
-        start.x.min(end_x),
-        start.y.min(end_y),
-        start.x.max(end_x),
-        start.y.max(end_y),
+    if ![
+        frame.x,
+        frame.y,
+        frame.width,
+        frame.height,
+        frame.angle_degrees,
     ]
+    .into_iter()
+    .all(f32::is_finite)
+    {
+        bail!("raster shape frame must be finite");
+    }
+    if frame.width <= 0.0 || frame.height <= 0.0 {
+        bail!("raster shape dimensions must be positive");
+    }
+
+    let frame_x = f64::from(frame.x);
+    let frame_y = f64::from(frame.y);
+    let frame_width = f64::from(frame.width);
+    let frame_height = f64::from(frame.height);
+    let center = Point {
+        x: frame_x + frame_width * 0.5,
+        y: frame_y + frame_height * 0.5,
+    };
+    let angle = f64::from(frame.angle_degrees).to_radians();
+    let width_axis = Point {
+        x: angle.cos(),
+        y: angle.sin(),
+    };
+    let height_axis = Point {
+        x: -width_axis.y,
+        y: width_axis.x,
+    };
+    let radius_x = frame_width * 0.5;
+    let radius_y = frame_height * 0.5;
+    let extent_x = if oval {
+        (radius_x * width_axis.x).hypot(radius_y * height_axis.x)
+    } else {
+        radius_x * width_axis.x.abs() + radius_y * height_axis.x.abs()
+    };
+    let extent_y = if oval {
+        (radius_x * width_axis.y).hypot(radius_y * height_axis.y)
+    } else {
+        radius_x * width_axis.y.abs() + radius_y * height_axis.y.abs()
+    };
+    if center.x + extent_x <= 0.0
+        || center.x - extent_x >= f64::from(width)
+        || center.y + extent_y <= 0.0
+        || center.y - extent_y >= f64::from(height)
+    {
+        bail!("raster shape does not intersect the page");
+    }
+
+    let page_corners = [
+        Point { x: 0.0, y: 0.0 },
+        Point {
+            x: f64::from(width),
+            y: 0.0,
+        },
+        Point {
+            x: f64::from(width),
+            y: f64::from(height),
+        },
+        Point {
+            x: 0.0,
+            y: f64::from(height),
+        },
+    ];
+    let projected_y = page_corners
+        .map(|point| (point.x - center.x) * height_axis.x + (point.y - center.y) * height_axis.y);
+    let projected_x = page_corners
+        .map(|point| (point.x - center.x) * width_axis.x + (point.y - center.y) * width_axis.y);
+    if projected_x.into_iter().fold(f64::NEG_INFINITY, f64::max) <= -radius_x
+        || projected_x.into_iter().fold(f64::INFINITY, f64::min) >= radius_x
+    {
+        bail!("raster shape does not intersect the page");
+    }
+    let local_top = projected_y
+        .into_iter()
+        .fold(f64::INFINITY, f64::min)
+        .max(-radius_y);
+    let local_bottom = projected_y
+        .into_iter()
+        .fold(f64::NEG_INFINITY, f64::max)
+        .min(radius_y);
+    if local_top >= local_bottom {
+        bail!("raster shape does not intersect the page");
+    }
+    let row_count = (local_bottom - local_top).ceil().max(1.0) as usize;
+    let row_height = (local_bottom - local_top) / row_count as f64;
+    let mut points = Vec::with_capacity(row_count * 2);
+    for row in 0..row_count {
+        let local_y = local_top + (row as f64 + 0.5) * row_height;
+        let half_width = if oval {
+            radius_x * (1.0 - (local_y / radius_y).powi(2)).max(0.0).sqrt()
+        } else {
+            radius_x
+        };
+        let endpoints = [-half_width, half_width].map(|local_x| Point {
+            x: center.x + local_x * width_axis.x + local_y * height_axis.x,
+            y: center.y + local_x * width_axis.y + local_y * height_axis.y,
+        });
+        points.extend(if row.is_multiple_of(2) {
+            endpoints
+        } else {
+            [endpoints[1], endpoints[0]]
+        });
+    }
+    if points.is_empty() {
+        bail!("raster shape does not cover any page pixels");
+    }
+    Ok((points, 1.0))
 }
 
 fn ensure_revision(actual: Revision, expected: Revision) -> anyhow::Result<()> {
@@ -635,239 +634,72 @@ fn ensure_revision(actual: Revision, expected: Revision) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn encode_mask(
-    width: u32,
-    height: u32,
-    selections: &[InpaintSelection],
-) -> anyhow::Result<(Vec<u8>, koharu_pipeline::Bounds)> {
-    if width == 0 || height == 0 {
-        bail!("page dimensions must be positive");
-    }
-    let mut image = GrayImage::new(width, height);
-    let mut dirty = None::<[u32; 4]>;
-    for selection in selections {
-        match selection {
-            InpaintSelection::Pen { points, diameter } => {
-                paint_pen(&mut image, &mut dirty, points, *diameter);
-            }
-            InpaintSelection::Circle { start, end } => {
-                paint_circle(&mut image, &mut dirty, *start, *end);
-            }
-            InpaintSelection::Square { start, end } => {
-                paint_square(&mut image, &mut dirty, *start, *end);
-            }
-        }
-    }
-    let [left, top, right, bottom] =
-        dirty.context("inpaint selection does not intersect the page")?;
-    let mut png = Vec::new();
-    PngEncoder::new(&mut png).write_image(
-        image.as_raw(),
-        width,
-        height,
-        image::ExtendedColorType::L8,
-    )?;
-    Ok((
-        png,
-        koharu_pipeline::Bounds {
-            x: f64::from(left),
-            y: f64::from(top),
-            width: f64::from(right - left + 1),
-            height: f64::from(bottom - top + 1),
-        },
-    ))
-}
-
-fn paint_pen(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, points: &[Point], diameter: f32) {
-    let width = image.width();
-    let height = image.height();
-    let radius = f64::from(diameter) * 0.5;
-    for (start, end) in points
-        .iter()
-        .zip(points.iter().skip(1))
-        .chain(points.last().map(|point| (point, point)))
-    {
-        let left = (start.x.min(end.x) - radius - 0.5).floor().max(0.0) as u32;
-        let top = (start.y.min(end.y) - radius - 0.5).floor().max(0.0) as u32;
-        let right = (start.x.max(end.x) + radius + 0.5)
-            .ceil()
-            .min(f64::from(width)) as u32;
-        let bottom = (start.y.max(end.y) + radius + 0.5)
-            .ceil()
-            .min(f64::from(height)) as u32;
-        let dx = end.x - start.x;
-        let dy = end.y - start.y;
-        let length_squared = dx.mul_add(dx, dy * dy);
-        for y in top..bottom {
-            for x in left..right {
-                let px = f64::from(x) + 0.5;
-                let py = f64::from(y) + 0.5;
-                let progress = if length_squared <= f64::EPSILON {
-                    0.0
-                } else {
-                    (((px - start.x) * dx + (py - start.y) * dy) / length_squared).clamp(0.0, 1.0)
-                };
-                let nearest_x = start.x + progress * dx;
-                let nearest_y = start.y + progress * dy;
-                let distance = (px - nearest_x).hypot(py - nearest_y);
-                let coverage = ((radius + 0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
-                if coverage == 0 {
-                    continue;
-                }
-                paint_pixel(image, dirty, x, y, coverage);
-            }
-        }
-    }
-}
-
-fn paint_circle(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, start: Point, end: Point) {
-    let [left, top, right, bottom] = constrained_bounds(start, end);
-    let center_x = (left + right) * 0.5;
-    let center_y = (top + bottom) * 0.5;
-    let radius = (right - left) * 0.5;
-    let pixel_bounds =
-        clipped_pixel_bounds(image, left - 0.5, top - 0.5, right + 0.5, bottom + 0.5);
-    for y in pixel_bounds[1]..pixel_bounds[3] {
-        for x in pixel_bounds[0]..pixel_bounds[2] {
-            let distance = (f64::from(x) + 0.5 - center_x).hypot(f64::from(y) + 0.5 - center_y);
-            let coverage = ((radius + 0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
-            if coverage > 0 {
-                paint_pixel(image, dirty, x, y, coverage);
-            }
-        }
-    }
-}
-
-fn paint_square(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, start: Point, end: Point) {
-    let [left, top, right, bottom] = constrained_bounds(start, end);
-    let pixel_bounds = clipped_pixel_bounds(image, left, top, right, bottom);
-    for y in pixel_bounds[1]..pixel_bounds[3] {
-        for x in pixel_bounds[0]..pixel_bounds[2] {
-            paint_pixel(image, dirty, x, y, 255);
-        }
-    }
-}
-
-fn constrained_bounds(start: Point, end: Point) -> [f64; 4] {
-    let delta_x = end.x - start.x;
-    let delta_y = end.y - start.y;
-    let size = delta_x.abs().max(delta_y.abs()).max(1.0);
-    let end_x = start.x + size.copysign(if delta_x == 0.0 { 1.0 } else { delta_x });
-    let end_y = start.y + size.copysign(if delta_y == 0.0 { 1.0 } else { delta_y });
-    [
-        start.x.min(end_x),
-        start.y.min(end_y),
-        start.x.max(end_x),
-        start.y.max(end_y),
-    ]
-}
-
-fn clipped_pixel_bounds(
-    image: &GrayImage,
-    left: f64,
-    top: f64,
-    right: f64,
-    bottom: f64,
-) -> [u32; 4] {
-    [
-        left.floor().max(0.0) as u32,
-        top.floor().max(0.0) as u32,
-        right.ceil().min(f64::from(image.width())).max(0.0) as u32,
-        bottom.ceil().min(f64::from(image.height())).max(0.0) as u32,
-    ]
-}
-
-fn paint_pixel(image: &mut GrayImage, dirty: &mut Option<[u32; 4]>, x: u32, y: u32, coverage: u8) {
-    let pixel = image.get_pixel_mut(x, y);
-    pixel.0[0] = pixel.0[0].max(coverage);
-    *dirty = Some(match *dirty {
-        Some([min_x, min_y, max_x, max_y]) => {
-            [min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y)]
-        }
-        None => [x, y, x, y],
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn combined_inpaint_selections_share_one_mask_and_bounds() {
-        let selections = [
-            InpaintSelection::Pen {
-                points: vec![Point { x: 2.0, y: 2.0 }, Point { x: 4.0, y: 2.0 }],
-                diameter: 2.0,
-            },
-            InpaintSelection::Square {
-                start: Point { x: 6.0, y: 6.0 },
-                end: Point { x: 8.0, y: 7.0 },
-            },
-        ];
-
-        let (png, bounds) = encode_mask(12, 12, &selections).unwrap();
-        let mask = image::load_from_memory(&png).unwrap().into_luma8();
-
-        assert!(mask.get_pixel(2, 2).0[0] > 0);
-        assert_eq!(mask.get_pixel(7, 7).0[0], 255);
-        assert_eq!(mask.get_pixel(10, 10).0[0], 0);
-        assert!(bounds.x <= 2.0);
-        assert!(bounds.y <= 2.0);
-        assert!(bounds.x + bounds.width >= 8.0);
-        assert!(bounds.y + bounds.height >= 8.0);
-    }
-
-    #[test]
-    fn circle_selection_does_not_fill_its_constrained_square_corners() {
-        let selections = [InpaintSelection::Circle {
-            start: Point { x: 2.0, y: 2.0 },
-            end: Point { x: 8.0, y: 4.0 },
-        }];
-
-        let (png, _) = encode_mask(12, 12, &selections).unwrap();
-        let mask = image::load_from_memory(&png).unwrap().into_luma8();
-
-        assert_eq!(mask.get_pixel(2, 2).0[0], 0);
-        assert_eq!(mask.get_pixel(5, 5).0[0], 255);
-    }
-
-    #[test]
-    fn inpaint_selection_validation_rejects_empty_requests() {
-        assert!(validate_inpaint_selections(&[]).is_err());
-        assert!(
-            validate_inpaint_selections(&[InpaintSelection::Pen {
-                points: Vec::new(),
-                diameter: 12.0,
-            }])
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn mosaic_regions_become_page_clipped_strokes() {
-        let (circle, diameter) = mosaic_stroke(
+    fn oval_shapes_preserve_the_drag_aspect() {
+        let (oval, diameter) = shape_stroke(
             20,
             10,
-            MosaicRegion::Circle {
-                start: Point { x: 2.0, y: 2.0 },
-                end: Point { x: 8.0, y: 4.0 },
-            },
-        )
-        .unwrap();
-        assert_eq!(circle, [Point { x: 5.0, y: 5.0 }]);
-        assert_eq!(diameter, 6.0);
-
-        let (rectangle, diameter) = mosaic_stroke(
-            20,
-            10,
-            MosaicRegion::Rectangle {
-                start: Point { x: -2.0, y: 3.0 },
-                end: Point { x: 4.0, y: 5.0 },
+            RasterShape::Oval {
+                frame: Frame {
+                    x: 2.0,
+                    y: 2.0,
+                    width: 6.0,
+                    height: 2.0,
+                    angle_degrees: 0.0,
+                },
             },
         )
         .unwrap();
         assert_eq!(diameter, 1.0);
-        assert_eq!(rectangle.first(), Some(&Point { x: 0.0, y: 3.5 }));
-        assert_eq!(rectangle.last(), Some(&Point { x: 0.0, y: 4.5 }));
+        assert_eq!(oval.len(), 4);
+        assert!(oval.iter().all(|point| (2.0..=8.0).contains(&point.x)));
+        assert!(oval.iter().all(|point| (2.0..=4.0).contains(&point.y)));
+        assert!(oval[0].x < oval[1].x);
+        assert!(oval[2].x > oval[3].x);
+    }
+
+    #[test]
+    fn rectangle_shapes_can_cross_the_page_edge() {
+        let (rectangle, diameter) = shape_stroke(
+            20,
+            10,
+            RasterShape::Rectangle {
+                frame: Frame {
+                    x: -2.0,
+                    y: 3.0,
+                    width: 6.0,
+                    height: 2.0,
+                    angle_degrees: 0.0,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(diameter, 1.0);
+        assert_eq!(rectangle.first(), Some(&Point { x: -2.0, y: 3.5 }));
+        assert_eq!(rectangle.last(), Some(&Point { x: -2.0, y: 4.5 }));
+    }
+
+    #[test]
+    fn rotated_shapes_generate_rotated_scanlines() {
+        let (rectangle, _) = shape_stroke(
+            20,
+            20,
+            RasterShape::Rectangle {
+                frame: Frame {
+                    x: 5.0,
+                    y: 7.0,
+                    width: 10.0,
+                    height: 4.0,
+                    angle_degrees: 45.0,
+                },
+            },
+        )
+        .unwrap();
+        assert!(rectangle[0].x < rectangle[1].x);
+        assert!(rectangle[0].y < rectangle[1].y);
     }
 }

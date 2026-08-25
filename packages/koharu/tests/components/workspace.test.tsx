@@ -73,6 +73,7 @@ const paintLayer: Layer = {
   image: 'paint-image',
   name: 'Paint 1',
   kind: 'paint',
+  consumed: false,
 }
 
 const originalArtworkLayer: Layer = {
@@ -101,6 +102,19 @@ const artworkLayer: Layer = {
   image: 'artwork-image',
   name: 'Artwork',
   kind: 'artwork',
+  consumed: false,
+}
+
+const segmentationLayer: Layer = {
+  type: 'raster',
+  locked: false,
+  id: 'segmentation',
+  parent: 'page',
+  visibility: { visible: true, opacity: 0.45 },
+  image: 'segmentation-image',
+  name: 'Text Segmentation',
+  kind: 'segmentation',
+  consumed: false,
 }
 
 let nextAnimationFrame = 1
@@ -142,7 +156,7 @@ function installProject() {
   })
   queryClient.setQueryData(pagesKey, [])
   queryClient.setQueryData(pageKey, page)
-  useKoharuStore.setState({ selectedLayers: [], tool: 'select' })
+  useKoharuStore.setState({ selectedLayers: [], toolMode: 'paint', tool: 'select' })
   useKoharuStore.setState({
     canvasPage: 'page',
     canvasRevision: 1,
@@ -275,9 +289,14 @@ describe('canvas interaction adapter', () => {
       ...page,
       layers: [originalArtworkLayer, artworkLayer, ...page.layers],
     }))
-    useKoharuStore.setState({ tool: 'draw', brush: { diameter: 48, color: '#FFFFFF' } })
+    useKoharuStore.setState({
+      toolMode: 'paint',
+      tool: 'brush',
+      selectedLayers: ['artwork'],
+      brush: { diameter: 48, color: '#FFFFFF' },
+    })
     const commit = vi
-      .spyOn(commands, 'commitPaint')
+      .spyOn(commands, 'commitRasterBrush')
       .mockResolvedValue({ revision: 2, layer: 'paint' })
     const surface = renderWorkspace()
     expect(surface).toHaveStyle({ cursor: 'none' })
@@ -296,17 +315,24 @@ describe('canvas interaction adapter', () => {
     })
     expect(canvas.extendStroke).toHaveBeenCalledWith(expect.arrayContaining([{ x: 45, y: 45 }]))
     expect(canvas.finishStroke).toHaveBeenCalledOnce()
-    expect(commit).toHaveBeenCalledWith(1, 'artwork', expect.arrayContaining([{ x: 45, y: 45 }]), {
-      diameter: 48,
-      color: [255, 255, 255, 255],
-    })
+    expect(commit).toHaveBeenCalledWith(
+      1,
+      'artwork',
+      'paint',
+      expect.arrayContaining([{ x: 45, y: 45 }]),
+      { diameter: 48, color: [255, 255, 255, 255] },
+    )
   })
 
   it('paints a dedicated green censor mask layer', async () => {
     installProject()
-    useKoharuStore.setState({ tool: 'censor', brush: { diameter: 32, color: '#FFFFFF' } })
+    useKoharuStore.setState({
+      toolMode: 'decensor',
+      tool: 'brush',
+      brush: { diameter: 32, color: '#FFFFFF' },
+    })
     const commit = vi
-      .spyOn(commands, 'commitCensor')
+      .spyOn(commands, 'commitRasterBrush')
       .mockResolvedValue({ revision: 2, layer: 'censor' })
     const surface = renderWorkspace()
 
@@ -321,7 +347,13 @@ describe('canvas interaction adapter', () => {
       diameter: 32,
       color: [0, 255, 0, 180],
     })
-    expect(commit).toHaveBeenCalledWith(1, null, expect.arrayContaining([{ x: 20, y: 20 }]), 32)
+    expect(commit).toHaveBeenCalledWith(
+      1,
+      null,
+      'bar_censor',
+      expect.arrayContaining([{ x: 20, y: 20 }]),
+      { diameter: 32, color: [0, 255, 0, 180] },
+    )
   })
 
   it.each([
@@ -329,9 +361,9 @@ describe('canvas interaction adapter', () => {
     ['generation', { canvasGeneration: 2 }],
   ])('cancels an active gesture when the canvas %s changes', async (_name, update) => {
     installProject()
-    useKoharuStore.setState({ tool: 'draw', brush: { diameter: 48, color: '#FFFFFF' } })
+    useKoharuStore.setState({ tool: 'brush', brush: { diameter: 48, color: '#FFFFFF' } })
     const commit = vi
-      .spyOn(commands, 'commitPaint')
+      .spyOn(commands, 'commitRasterBrush')
       .mockResolvedValue({ revision: 2, layer: 'paint' })
     const surface = renderWorkspace()
 
@@ -770,7 +802,7 @@ describe('canvas interaction adapter', () => {
     }))
     useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['paint'] })
     const commit = vi
-      .spyOn(commands, 'commitErase')
+      .spyOn(commands, 'commitRasterErase')
       .mockResolvedValue({ revision: 2, layer: 'paint' })
     const surface = renderWorkspace()
 
@@ -784,7 +816,13 @@ describe('canvas interaction adapter', () => {
       point: { x: 20, y: 20 },
       diameter: 48,
     })
-    expect(commit).toHaveBeenCalledWith(1, 'paint', expect.arrayContaining([{ x: 20, y: 20 }]), 48)
+    expect(commit).toHaveBeenCalledWith(
+      1,
+      'paint',
+      'paint',
+      expect.arrayContaining([{ x: 20, y: 20 }]),
+      48,
+    )
   })
 
   it('targets the detected segmentation layer with the eraser', async () => {
@@ -802,12 +840,17 @@ describe('canvas interaction adapter', () => {
           image: 'segmentation-image',
           name: 'Text Segmentation',
           kind: 'segmentation',
+          consumed: false,
         },
       ],
     }))
-    useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['segmentation'] })
+    useKoharuStore.setState({
+      toolMode: 'removal',
+      tool: 'eraser',
+      selectedLayers: ['segmentation'],
+    })
     const commit = vi
-      .spyOn(commands, 'commitErase')
+      .spyOn(commands, 'commitRasterErase')
       .mockResolvedValue({ revision: 2, layer: 'segmentation' })
     const surface = renderWorkspace()
 
@@ -818,6 +861,7 @@ describe('canvas interaction adapter', () => {
       expect(commit).toHaveBeenCalledWith(
         1,
         'segmentation',
+        'removal',
         expect.arrayContaining([{ x: 20, y: 20 }]),
         48,
       ),
@@ -834,7 +878,7 @@ describe('canvas interaction adapter', () => {
     installProject()
     useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['element'] })
     const commit = vi
-      .spyOn(commands, 'commitErase')
+      .spyOn(commands, 'commitRasterErase')
       .mockResolvedValue({ revision: 2, layer: 'element' })
     const surface = renderWorkspace()
 
@@ -851,6 +895,7 @@ describe('canvas interaction adapter', () => {
     expect(commit).toHaveBeenCalledWith(
       1,
       'element',
+      'paint',
       expect.arrayContaining([{ x: 20, y: 20 }]),
       48,
     )
@@ -885,14 +930,16 @@ describe('canvas interaction adapter', () => {
     }))
     useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['page'] })
     const commit = vi
-      .spyOn(commands, 'commitErase')
+      .spyOn(commands, 'commitRasterErase')
       .mockResolvedValue({ revision: 2, layer: 'artwork' })
     const surface = renderWorkspace()
 
     fireEvent.pointerDown(surface, { button: 0, pointerId: 13, clientX: 30, clientY: 40 })
     fireEvent.pointerUp(surface, { pointerId: 13, clientX: 30, clientY: 40 })
 
-    await waitFor(() => expect(commit).toHaveBeenCalledWith(1, 'artwork', expect.any(Array), 48))
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(1, 'artwork', 'paint', expect.any(Array), 48),
+    )
     expect(canvas.beginStroke).toHaveBeenCalledWith({
       kind: 'erase',
       layer: 'artwork',
@@ -901,78 +948,204 @@ describe('canvas interaction adapter', () => {
     })
   })
 
-  it('stages Remove selections until the user starts inpainting', async () => {
+  it('edits the reusable removal mask before explicitly starting inpainting', async () => {
     installProject()
-    useKoharuStore.setState({ tool: 'remove' })
-    const commit = vi.spyOn(commands, 'commitInpaint').mockResolvedValue('job')
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [...page.layers, segmentationLayer],
+    }))
+    useKoharuStore.setState({ toolMode: 'removal', tool: 'brush' })
+    const brushCommit = vi
+      .spyOn(commands, 'commitRasterBrush')
+      .mockResolvedValue({ revision: 2, layer: 'segmentation' })
+    const inpaint = vi.spyOn(commands, 'commitInpaint').mockResolvedValue('job')
     const surface = renderWorkspace()
 
     fireEvent.pointerDown(surface, { button: 0, pointerId: 12, clientX: 30, clientY: 40 })
     fireEvent.pointerMove(surface, { pointerId: 12, clientX: 40, clientY: 50 })
-    fireEvent.pointerUp(surface, { pointerId: 12, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 12, clientX: 40, clientY: 50 })
 
-    expect(commit).not.toHaveBeenCalled()
-    expect(canvas.beginStroke).not.toHaveBeenCalled()
-    expect(screen.getByTestId('inpaint-selection-overlay')).toBeInTheDocument()
-    expect(screen.getByText('Selections: 1')).toBeInTheDocument()
+    await waitFor(() => expect(brushCommit).toHaveBeenCalledOnce())
+    expect(brushCommit).toHaveBeenCalledWith(
+      1,
+      'segmentation',
+      'removal',
+      expect.arrayContaining([
+        { x: 20, y: 20 },
+        { x: 30, y: 30 },
+      ]),
+      { diameter: 48, color: [168, 85, 247, 255] },
+    )
+    expect(inpaint).not.toHaveBeenCalled()
+    expect(screen.getByText('Removal mask ready')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Inpaint Selection' }))
-    await waitFor(() => expect(commit).toHaveBeenCalledOnce())
-    expect(commit).toHaveBeenCalledWith(1, [
-      {
-        type: 'pen',
-        points: expect.arrayContaining([
-          { x: 20, y: 20 },
-          { x: 30, y: 30 },
-        ]),
-        diameter: 48,
-      },
-    ])
-    await waitFor(() => expect(screen.getByText('Selections: 0')).toBeInTheDocument())
+    await waitFor(() => expect(inpaint).toHaveBeenCalledWith(1))
   })
 
-  it('accumulates circle and square Remove selections and can reset them', () => {
+  it('starts a new removal mask instead of editing one already consumed by inpainting', async () => {
     installProject()
-    useKoharuStore.setState({ tool: 'remove', removeSelectionTool: 'circle' })
-    const commit = vi.spyOn(commands, 'commitInpaint').mockResolvedValue('job')
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [...page.layers, { ...segmentationLayer, consumed: true }],
+    }))
+    useKoharuStore.setState({
+      toolMode: 'removal',
+      tool: 'brush',
+      selectedLayers: ['segmentation'],
+    })
+    const commit = vi
+      .spyOn(commands, 'commitRasterBrush')
+      .mockResolvedValue({ revision: 2, layer: 'new-segmentation' })
     const surface = renderWorkspace()
 
-    fireEvent.pointerDown(surface, { button: 0, pointerId: 14, clientX: 30, clientY: 40 })
-    fireEvent.pointerUp(surface, { pointerId: 14, clientX: 70, clientY: 60 })
-    act(() => useKoharuStore.setState({ removeSelectionTool: 'square' }))
-    fireEvent.pointerDown(surface, { button: 0, pointerId: 15, clientX: 90, clientY: 100 })
-    fireEvent.pointerUp(surface, { pointerId: 15, clientX: 120, clientY: 140 })
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 27, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 27, clientX: 30, clientY: 40 })
 
-    expect(screen.getByText('Selections: 2')).toBeInTheDocument()
-    expect(commit).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
-    expect(screen.getByText('Selections: 0')).toBeInTheDocument()
-    expect(screen.queryByTestId('inpaint-selection-overlay')).not.toBeInTheDocument()
+    await waitFor(() => expect(commit).toHaveBeenCalledOnce())
+    expect(commit).toHaveBeenCalledWith(1, null, 'removal', expect.any(Array), expect.any(Object))
   })
 
-  it('commits a mosaic region without starting a censor brush stroke', async () => {
+  it('resets the current unconsumed removal mask', async () => {
     installProject()
-    useKoharuStore.setState({ tool: 'censor', censorSelectionTool: 'rectangle' })
-    const commit = vi.spyOn(commands, 'commitMosaic').mockResolvedValue({
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [...page.layers, segmentationLayer],
+    }))
+    useKoharuStore.setState({ toolMode: 'removal', tool: 'brush' })
+    const reset = vi.spyOn(commands, 'resetRemovalMask').mockResolvedValue(2)
+    renderWorkspace()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    await waitFor(() => expect(reset).toHaveBeenCalledWith(1, 'segmentation'))
+  })
+
+  it('keeps shapes editable for dragging, resizing, and rotation until click-away', async () => {
+    installProject()
+    useKoharuStore.setState({ toolMode: 'removal', tool: 'rectangle' })
+    const commit = vi.spyOn(commands, 'commitRasterShape').mockResolvedValue({
+      revision: 2,
+      layer: 'segmentation',
+    })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 18, clientX: 30, clientY: 40 })
+    fireEvent.pointerMove(surface, { pointerId: 18, clientX: 70, clientY: 60 })
+    fireEvent.pointerUp(surface, { pointerId: 18, clientX: 70, clientY: 60 })
+
+    expect(commit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('raster-shape-overlay')).toBeInTheDocument()
+    expect(document.querySelector('[data-transform-body]')).toBeInTheDocument()
+    expect(document.querySelectorAll('[data-resize-handle]')).toHaveLength(8)
+    expect(document.querySelector('[data-rotate-handle]')).toBeInTheDocument()
+
+    const body = document.querySelector('[data-transform-body]')!
+    fireEvent.pointerDown(body, { button: 0, pointerId: 19, clientX: 40, clientY: 30 })
+    fireEvent.pointerMove(body, { pointerId: 19, clientX: 50, clientY: 45 })
+    fireEvent.pointerUp(body, { pointerId: 19, clientX: 50, clientY: 45 })
+
+    const resize = document.querySelector('[data-resize-handle="se"]')!
+    fireEvent.pointerDown(resize, { button: 0, pointerId: 20, clientX: 70, clientY: 55 })
+    fireEvent.pointerMove(resize, { pointerId: 20, clientX: 90, clientY: 75 })
+    fireEvent.pointerUp(resize, { pointerId: 20, clientX: 90, clientY: 75 })
+
+    const rotate = document.querySelector('[data-rotate-handle]')!
+    fireEvent.pointerDown(rotate, { button: 0, pointerId: 21, clientX: 60, clientY: 15 })
+    fireEvent.pointerMove(rotate, {
+      pointerId: 21,
+      clientX: 100,
+      clientY: 55,
+      ctrlKey: true,
+    })
+    fireEvent.pointerUp(rotate, {
+      pointerId: 21,
+      clientX: 100,
+      clientY: 55,
+      ctrlKey: true,
+    })
+
+    fireEvent.pointerDown(document.body, { button: 0, pointerId: 22 })
+    await waitFor(() => expect(commit).toHaveBeenCalledOnce())
+    expect(commit).toHaveBeenCalledWith(
+      1,
+      null,
+      'removal',
+      {
+        type: 'rectangle',
+        frame: { x: 30, y: 35, width: 60, height: 40, angle_degrees: 90 },
+      },
+      [168, 85, 247, 255],
+    )
+    expect(screen.queryByTestId('raster-shape-overlay')).not.toBeInTheDocument()
+  })
+
+  it('constrains an oval to a circle while Ctrl or Shift is held', async () => {
+    installProject()
+    useKoharuStore.setState({ toolMode: 'removal', tool: 'oval' })
+    const commit = vi.spyOn(commands, 'commitRasterShape').mockResolvedValue({
+      revision: 2,
+      layer: 'segmentation',
+    })
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 23, clientX: 30, clientY: 40 })
+    fireEvent.pointerMove(surface, {
+      pointerId: 23,
+      clientX: 70,
+      clientY: 60,
+      shiftKey: true,
+    })
+    fireEvent.pointerUp(surface, {
+      pointerId: 23,
+      clientX: 70,
+      clientY: 60,
+      shiftKey: true,
+    })
+    fireEvent.pointerDown(document.body, { button: 0, pointerId: 24 })
+
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(
+        1,
+        null,
+        'removal',
+        {
+          type: 'oval',
+          frame: { x: 20, y: 20, width: 40, height: 40, angle_degrees: 0 },
+        },
+        [168, 85, 247, 255],
+      ),
+    )
+  })
+
+  it('rasterizes decensor shapes into a mosaic censor layer on click-away', async () => {
+    installProject()
+    useKoharuStore.setState({ toolMode: 'decensor', tool: 'rectangle' })
+    const commit = vi.spyOn(commands, 'commitRasterShape').mockResolvedValue({
       revision: 2,
       layer: 'mosaic',
     })
     const surface = renderWorkspace()
 
-    fireEvent.pointerDown(surface, { button: 0, pointerId: 16, clientX: 30, clientY: 40 })
-    fireEvent.pointerMove(surface, { pointerId: 16, clientX: 70, clientY: 60 })
-    expect(screen.getByTestId('mosaic-region-overlay')).toBeInTheDocument()
-    fireEvent.pointerUp(surface, { pointerId: 16, clientX: 70, clientY: 60 })
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 25, clientX: 30, clientY: 40 })
+    fireEvent.pointerMove(surface, { pointerId: 25, clientX: 70, clientY: 60 })
+    fireEvent.pointerUp(surface, { pointerId: 25, clientX: 70, clientY: 60 })
 
+    expect(commit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('raster-shape-overlay')).toBeInTheDocument()
+    fireEvent.pointerDown(document.body, { button: 0, pointerId: 26 })
     await waitFor(() =>
-      expect(commit).toHaveBeenCalledWith(1, null, {
-        type: 'rectangle',
-        start: { x: 20, y: 20 },
-        end: { x: 60, y: 40 },
-      }),
+      expect(commit).toHaveBeenCalledWith(
+        1,
+        null,
+        'mosaic_censor',
+        {
+          type: 'rectangle',
+          frame: { x: 20, y: 20, width: 40, height: 20, angle_degrees: 0 },
+        },
+        [0, 255, 0, 180],
+      ),
     )
     expect(canvas.beginStroke).not.toHaveBeenCalled()
-    expect(screen.queryByTestId('mosaic-region-overlay')).not.toBeInTheDocument()
   })
 
   it('creates the same OCR-candidate text box on click and drag', async () => {

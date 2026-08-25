@@ -189,7 +189,7 @@ fn write_result(
             AssetMetadata {
                 width: Some(generated.width()),
                 height: Some(generated.height()),
-                attributes: BTreeMap::new(),
+                attributes: prepared.cleanup_attributes,
             },
         ),
     )?;
@@ -213,6 +213,7 @@ struct Prepared {
     mosaic_mask: GrayImage,
     cleanup: Option<RgbaImage>,
     cleanup_entity: Option<koharu_scene::EntityId>,
+    cleanup_attributes: BTreeMap<String, String>,
     mask_entities: Vec<koharu_scene::EntityId>,
 }
 
@@ -225,6 +226,7 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
     let mut composite = original.to_rgba8();
     let mut cleanup = None;
     let mut cleanup_entity = None;
+    let mut cleanup_attributes = BTreeMap::new();
     let mut mask_entities = Vec::new();
     let mut bar_mask = GrayImage::new(original.width(), original.height());
     let mut mosaic_mask = GrayImage::new(original.width(), original.height());
@@ -247,6 +249,10 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
                 image::imageops::overlay(&mut composite, &image, 0, 0);
                 cleanup = Some(image);
                 cleanup_entity = Some(entity);
+                cleanup_attributes = input
+                    .scene
+                    .asset(entity, &AssetRole::new("source")?)?
+                    .map_or_else(BTreeMap::new, |asset| asset.metadata.attributes);
             }
             RasterLayerKind::Paint => {
                 image::imageops::overlay(&mut composite, &image.to_rgba8(), 0, 0);
@@ -274,6 +280,7 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
         mosaic_mask,
         cleanup,
         cleanup_entity,
+        cleanup_attributes,
         mask_entities,
     })
 }
@@ -444,6 +451,10 @@ mod tests {
             mosaic_mask: GrayImage::new(2, 2),
             cleanup: Some(RgbaImage::new(2, 2)),
             cleanup_entity: cleanup,
+            cleanup_attributes: BTreeMap::from([(
+                "dev.koharu.test".to_owned(),
+                "preserved".to_owned(),
+            )]),
             mask_entities: vec![censor.unwrap(), mosaic.unwrap()],
         };
 
@@ -456,11 +467,16 @@ mod tests {
         .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
 
-        assert!(
+        assert_eq!(
             snapshot
                 .asset(cleanup.unwrap(), &AssetRole::new("source").unwrap())
                 .unwrap()
-                .is_some()
+                .unwrap()
+                .metadata
+                .attributes
+                .get("dev.koharu.test")
+                .map(String::as_str),
+            Some("preserved")
         );
         assert_eq!(
             snapshot

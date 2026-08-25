@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "請選擇頁面以開始。",
+    "eraserRequiresLayer": "使用橡皮擦前，請為此模式選擇可編輯圖層。",
     "fit": "適應視窗",
     "fillRequiresImage": "使用填色前，請選擇可編輯的繪圖或影像圖層。",
     "inpaintSelection": "修復選取範圍",
-    "inpaintSelectionCount": "選取範圍：{{count}}",
+    "removalMaskEmpty": "請繪製移除遮罩以繼續",
+    "removalMaskReady": "移除遮罩已就緒",
     "surface": "Koharu 畫布",
     "unavailable": "WebGPU 畫布無法使用"
   },
@@ -260,8 +262,8 @@
       "image": "影像",
       "paint": "繪製",
       "segmentation": "分割遮罩",
-      "censor": "審查遮罩",
-      "mosaic": "馬賽克遮罩",
+      "censor": "條形審查遮罩",
+      "mosaic": "馬賽克審查遮罩",
       "text": "文字",
       "mainTextGroup": "主要文字群組",
       "sfxTextGroup": "音效文字群組"
@@ -564,34 +566,37 @@
     "zoom": "縮放"
   },
   "tools": {
+    "brush": "筆刷",
     "brushSize": "筆刷大小",
     "brushSizeInput": "筆刷大小",
     "brushSizePixels": "筆刷大小：{{size}} 像素",
     "brushSizeShort": "{{size}} 像素",
-    "color_picker": "取色器",
     "decreaseBrushSize": "減少筆刷大小",
     "decreaseFillTolerance": "減少填色容差",
-    "draw": "繪圖",
     "eraser": "橡皮擦",
+    "eyedropper": "取色器",
     "fill": "填色",
     "fillTolerance": "填色容差",
     "fillToleranceValue": "填色容差：{{value}}",
     "increaseBrushSize": "增加筆刷大小",
     "increaseFillTolerance": "增加填色容差",
-    "pan": "平移",
-    "remove": "移除",
-    "censorSelection": {
-      "brush": "條形審查筆刷",
-      "circle": "圓形馬賽克區域",
-      "rectangle": "矩形馬賽克區域"
+    "modes": {
+      "decensor": "去除審查",
+      "paint": "繪圖",
+      "removal": "移除"
     },
-    "removeSelection": {
-      "circle": "圓形選取",
-      "pen": "畫筆選取",
-      "square": "方形選取"
+    "oval": "橢圓",
+    "pan": "平移",
+    "rectangle": "矩形",
+    "sections": {
+      "mode": "工具模式",
+      "settings": "設定",
+      "supplemental": "輔助",
+      "tool": "工具"
     },
     "select": "選取",
-    "text": "文字"
+    "text": "新增文字圖層",
+    "toolbar": "畫布工具"
   },
   "updater": {
     "available": {

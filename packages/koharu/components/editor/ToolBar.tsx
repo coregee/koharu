@@ -8,13 +8,15 @@ import {
   Minus,
   MousePointer2,
   PaintBucket,
+  Palette,
   Pipette,
   Plus,
-  Sparkles,
   ScanLine,
+  Sparkles,
   Square,
   Type,
 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ColorWell } from '@/components/controls/ColorWell'
@@ -27,8 +29,7 @@ import {
   MIN_FILL_TOLERANCE,
   useKoharuStore,
   type CanvasTool,
-  type CensorSelectionTool,
-  type RemoveSelectionTool,
+  type ToolMode,
 } from '@/lib/store'
 import { Button } from '@koharu/ui/components/button'
 import {
@@ -47,161 +48,169 @@ import {
 import { Slider } from '@koharu/ui/components/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/tooltip'
 
-const tools = [
+const modes = [
+  ['removal', Sparkles],
+  ['decensor', ScanLine],
+  ['paint', Palette],
+] as const satisfies ReadonlyArray<readonly [ToolMode, typeof Brush]>
+
+const contextualTools = [
+  ['brush', Brush],
+  ['eraser', Eraser],
+  ['oval', Circle],
+  ['rectangle', Square],
+  ['eyedropper', Pipette],
+  ['fill', PaintBucket],
+] as const satisfies ReadonlyArray<readonly [CanvasTool, typeof Brush]>
+
+const supplementalTools = [
   ['select', MousePointer2],
   ['text', Type],
-  ['draw', Brush],
-  ['fill', PaintBucket],
-  ['eraser', Eraser],
-  ['color_picker', Pipette],
-  ['remove', Sparkles],
-  ['censor', ScanLine],
   ['pan', Hand],
-] as const satisfies ReadonlyArray<readonly [CanvasTool, typeof MousePointer2]>
+] as const satisfies ReadonlyArray<readonly [CanvasTool, typeof Brush]>
 
 export function ToolBar() {
   const { t } = useTranslation()
   const page = usePage().data
-  const active = useKoharuStore((state) => state.tool)
+  const mode = useKoharuStore((state) => state.toolMode)
+  const tool = useKoharuStore((state) => state.tool)
   const brush = useKoharuStore((state) => state.brush)
   const fillTolerance = useKoharuStore((state) => state.fillTolerance)
-  const removeSelectionTool = useKoharuStore((state) => state.removeSelectionTool)
-  const censorSelectionTool = useKoharuStore((state) => state.censorSelectionTool)
+  const setToolMode = useKoharuStore((state) => state.setToolMode)
   const setTool = useKoharuStore((state) => state.setTool)
   const setBrush = useKoharuStore((state) => state.setBrush)
   const setFillTolerance = useKoharuStore((state) => state.setFillTolerance)
-  const setRemoveSelectionTool = useKoharuStore((state) => state.setRemoveSelectionTool)
-  const setCensorSelectionTool = useKoharuStore((state) => state.setCensorSelectionTool)
   const shortcuts = useKoharuStore((state) => state.shortcuts)
-  const hasBrush = isBrushTool(active) && (active !== 'censor' || censorSelectionTool === 'brush')
-  const hasControls = hasBrush || active === 'fill' || active === 'remove' || active === 'censor'
+  const showsColor =
+    mode === 'paint' &&
+    (tool === 'brush' || tool === 'oval' || tool === 'rectangle' || tool === 'fill')
+  const showsSize = isBrushTool(tool)
+  const showsSettings = showsColor || showsSize || tool === 'fill'
 
   return (
-    <aside className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'>
-      <div className='flex flex-col items-center py-0.5'>
-        {tools.map(([tool, Icon], index) => (
-          <div key={tool} className='contents'>
-            {index === tools.length - 1 && <span className='my-1 h-px w-5 bg-border' />}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    disabled={!page}
-                    aria-label={t(`tools.${tool}`)}
-                    data-active={active === tool}
-                    className='relative text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
-                    onClick={() => setTool(tool)}
-                  />
-                }
-              >
-                <Icon className='size-4' />
-              </TooltipTrigger>
-              <TooltipContent side='right'>
-                {t(`tools.${tool}`)}
-                <span className='ml-2 opacity-60'>{shortcuts[tool].toUpperCase()}</span>
-              </TooltipContent>
-            </Tooltip>
-          </div>
+    <aside
+      aria-label={t('tools.toolbar')}
+      className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'
+    >
+      <ToolbarSection label={t('tools.sections.mode')}>
+        {modes.map(([candidate, Icon]) => (
+          <ToolbarButton
+            key={candidate}
+            Icon={Icon}
+            label={t(`tools.modes.${candidate}`)}
+            shortcut={shortcuts[candidate]}
+            active={mode === candidate}
+            disabled={!page}
+            onClick={() => setToolMode(candidate)}
+          />
         ))}
-      </div>
+      </ToolbarSection>
 
-      {hasControls && (
-        <div className='flex flex-col items-center gap-1 border-t border-border/80 py-1.5'>
-          {(active === 'draw' || active === 'fill') && (
+      <ToolbarSection label={t('tools.sections.tool')} divided>
+        {contextualTools.map(([candidate, Icon]) => (
+          <ToolbarButton
+            key={candidate}
+            Icon={Icon}
+            label={t(`tools.${candidate}`)}
+            shortcut={shortcuts[candidate]}
+            active={tool === candidate}
+            disabled={!page}
+            onClick={() => setTool(candidate)}
+          />
+        ))}
+      </ToolbarSection>
+
+      {showsSettings && (
+        <ToolbarSection label={t('tools.sections.settings')} divided>
+          {showsColor && (
             <ColorWell value={brush.color} onChange={(color) => setBrush({ ...brush, color })} />
           )}
-          {active === 'remove' && (
-            <RemoveSelectionTools value={removeSelectionTool} onChange={setRemoveSelectionTool} />
-          )}
-          {active === 'censor' && (
-            <CensorSelectionTools value={censorSelectionTool} onChange={setCensorSelectionTool} />
-          )}
-          {(hasBrush || (active === 'remove' && removeSelectionTool === 'pen')) && (
+          {showsSize && (
             <BrushSize
               value={brush.diameter}
               onChange={(diameter) => setBrush({ ...brush, diameter })}
             />
           )}
-          {active === 'fill' && <FillTolerance value={fillTolerance} onChange={setFillTolerance} />}
-        </div>
+          {tool === 'fill' && <FillTolerance value={fillTolerance} onChange={setFillTolerance} />}
+        </ToolbarSection>
       )}
+
+      <ToolbarSection label={t('tools.sections.supplemental')} divided>
+        {supplementalTools.map(([candidate, Icon]) => (
+          <ToolbarButton
+            key={candidate}
+            Icon={Icon}
+            label={t(`tools.${candidate}`)}
+            shortcut={shortcuts[candidate]}
+            active={tool === candidate}
+            disabled={!page}
+            onClick={() => setTool(candidate)}
+          />
+        ))}
+      </ToolbarSection>
     </aside>
   )
 }
 
-const censorSelectionTools = [
-  ['brush', Brush],
-  ['circle', Circle],
-  ['rectangle', Square],
-] as const satisfies ReadonlyArray<readonly [CensorSelectionTool, typeof Brush]>
-
-function CensorSelectionTools({
-  value,
-  onChange,
+function ToolbarSection({
+  label,
+  divided = false,
+  children,
 }: {
-  value: CensorSelectionTool
-  onChange: (value: CensorSelectionTool) => void
+  label: string
+  divided?: boolean
+  children: ReactNode
 }) {
-  const { t } = useTranslation()
-  return censorSelectionTools.map(([tool, Icon]) => (
-    <Tooltip key={tool}>
-      <TooltipTrigger
-        render={
-          <Button
-            type='button'
-            variant='ghost'
-            size='icon'
-            aria-label={t(`tools.censorSelection.${tool}`)}
-            data-active={value === tool}
-            className='size-8 rounded-xl text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
-            onClick={() => onChange(tool)}
-          />
-        }
-      >
-        <Icon className='size-4' />
-      </TooltipTrigger>
-      <TooltipContent side='right'>{t(`tools.censorSelection.${tool}`)}</TooltipContent>
-    </Tooltip>
-  ))
+  return (
+    <div
+      role='group'
+      aria-label={label}
+      className={`flex flex-col items-center gap-0.5 py-1 ${divided ? 'border-t border-border/80' : ''}`}
+    >
+      {children}
+    </div>
+  )
 }
 
-const removeSelectionTools = [
-  ['pen', Brush],
-  ['circle', Circle],
-  ['square', Square],
-] as const satisfies ReadonlyArray<readonly [RemoveSelectionTool, typeof Brush]>
-
-function RemoveSelectionTools({
-  value,
-  onChange,
+function ToolbarButton({
+  Icon,
+  label,
+  shortcut,
+  active,
+  disabled,
+  onClick,
 }: {
-  value: RemoveSelectionTool
-  onChange: (value: RemoveSelectionTool) => void
+  Icon: typeof Brush
+  label: string
+  shortcut: string
+  active: boolean
+  disabled: boolean
+  onClick: () => void
 }) {
-  const { t } = useTranslation()
-  return removeSelectionTools.map(([tool, Icon]) => (
-    <Tooltip key={tool}>
+  return (
+    <Tooltip>
       <TooltipTrigger
         render={
           <Button
             type='button'
             variant='ghost'
             size='icon'
-            aria-label={t(`tools.removeSelection.${tool}`)}
-            data-active={value === tool}
-            className='size-8 rounded-xl text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
-            onClick={() => onChange(tool)}
+            disabled={disabled}
+            aria-label={label}
+            data-active={active}
+            className='relative size-8 rounded-xl text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+            onClick={onClick}
           />
         }
       >
         <Icon className='size-4' />
       </TooltipTrigger>
-      <TooltipContent side='right'>{t(`tools.removeSelection.${tool}`)}</TooltipContent>
+      <TooltipContent side='right'>
+        {label}
+        <span className='ml-2 opacity-60'>{shortcut.toUpperCase()}</span>
+      </TooltipContent>
     </Tooltip>
-  ))
+  )
 }
 
 function BrushSize({ value, onChange }: { value: number; onChange: (value: number) => void }) {

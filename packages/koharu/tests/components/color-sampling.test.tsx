@@ -7,7 +7,7 @@ import { ColorWell } from '@/components/controls/ColorWell'
 import { useKoharuStore } from '@/lib/store'
 
 describe('canvas color sampling', () => {
-  beforeEach(() => useKoharuStore.setState({ tool: 'text' }))
+  beforeEach(() => useKoharuStore.setState({ toolMode: 'decensor', tool: 'text' }))
 
   it('applies a canvas sample to the requesting color well and restores the previous tool', async () => {
     const user = userEvent.setup()
@@ -22,11 +22,11 @@ describe('canvas color sampling', () => {
 
     await user.click(screen.getByRole('button', { name: 'Brush color' }))
     await user.click(screen.getByRole('button', { name: 'Pick color from canvas' }))
-    expect(useKoharuStore.getState().tool).toBe('color_picker')
+    expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'paint', tool: 'eyedropper' })
 
     await user.click(screen.getByRole('button', { name: 'Complete sample' }))
     expect(onChange).toHaveBeenCalledWith('#123456')
-    expect(useKoharuStore.getState().tool).toBe('text')
+    expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'paint', tool: 'text' })
   })
 
   it('commits shorthand white as a full RGB color', async () => {

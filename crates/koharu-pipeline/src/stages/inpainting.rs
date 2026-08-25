@@ -27,10 +27,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::{StageInput, StageProcessor, above_artwork, finish, generation};
-use crate::{InpaintingModel, ModelCell};
+use crate::{INPAINTING_MASK_INPUTS_ATTRIBUTE, InpaintingModel, ModelCell};
 
 const PRODUCER: &str = "dev.koharu.pipeline.inpainting";
-const MASK_INPUTS_ATTRIBUTE: &str = "dev.koharu.inpainting.mask-inputs";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 #[serde(default)]
@@ -123,7 +122,11 @@ impl StageProcessor for Processor {
         }
         Ok(cleanup.is_some_and(|asset| {
             mask_inputs.as_ref().is_none_or(|fingerprint| {
-                asset.metadata.attributes.get(MASK_INPUTS_ATTRIBUTE) == Some(fingerprint)
+                asset
+                    .metadata
+                    .attributes
+                    .get(INPAINTING_MASK_INPUTS_ATTRIBUTE)
+                    == Some(fingerprint)
             })
         }))
     }
@@ -338,7 +341,7 @@ impl Model {
         DynamicImage::ImageRgba8(overlay).write_to(&mut bytes, ImageFormat::Png)?;
         let mut attributes = prepared.cleanup_attributes;
         if let Some(mask_inputs) = prepared.mask_inputs {
-            attributes.insert(MASK_INPUTS_ATTRIBUTE.to_owned(), mask_inputs);
+            attributes.insert(INPAINTING_MASK_INPUTS_ATTRIBUTE.to_owned(), mask_inputs);
         }
         let cleanup_entity = if let Some(entity) = cleanup_entity {
             if manual {
@@ -1282,7 +1285,7 @@ mod tests {
                             width: Some(8),
                             height: Some(8),
                             attributes: BTreeMap::from([(
-                                MASK_INPUTS_ATTRIBUTE.to_owned(),
+                                INPAINTING_MASK_INPUTS_ATTRIBUTE.to_owned(),
                                 fingerprint,
                             )]),
                         },

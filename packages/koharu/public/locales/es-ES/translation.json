@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "Selecciona una página para empezar.",
+    "eraserRequiresLayer": "Selecciona una capa editable para este modo antes de usar el borrador.",
     "fit": "Ajustar a la ventana",
     "fillRequiresImage": "Selecciona una capa de pintura o imagen editable antes de usar Rellenar.",
     "inpaintSelection": "Rellenar selección",
-    "inpaintSelectionCount": "Selecciones: {{count}}",
+    "removalMaskEmpty": "Dibuja una máscara de eliminación para continuar",
+    "removalMaskReady": "Máscara de eliminación lista",
     "surface": "Lienzo de Koharu",
     "unavailable": "El lienzo WebGPU no está disponible"
   },
@@ -260,8 +262,8 @@
       "image": "Imagen",
       "paint": "Pintura",
       "segmentation": "Máscara de segmentación",
-      "censor": "Máscara de censura",
-      "mosaic": "Máscara de mosaico",
+      "censor": "Máscara de censura con barra",
+      "mosaic": "Máscara de censura de mosaico",
       "text": "Texto",
       "mainTextGroup": "Grupo de texto principal",
       "sfxTextGroup": "Grupo de texto SFX"
@@ -564,34 +566,37 @@
     "zoom": "Zoom"
   },
   "tools": {
+    "brush": "Pincel",
     "brushSize": "Tamaño del pincel",
     "brushSizeInput": "Tamaño del pincel",
     "brushSizePixels": "Tamaño del pincel: {{size}} píxeles",
     "brushSizeShort": "{{size}} px",
-    "color_picker": "Selector de color",
     "decreaseBrushSize": "Reducir tamaño del pincel",
     "decreaseFillTolerance": "Reducir tolerancia de relleno",
-    "draw": "Dibujar",
     "eraser": "Borrador",
+    "eyedropper": "Cuentagotas",
     "fill": "Rellenar",
     "fillTolerance": "Tolerancia de relleno",
     "fillToleranceValue": "Tolerancia de relleno: {{value}}",
     "increaseBrushSize": "Aumentar tamaño del pincel",
     "increaseFillTolerance": "Aumentar tolerancia de relleno",
-    "pan": "Desplazar",
-    "remove": "Eliminar",
-    "censorSelection": {
-      "brush": "Pincel de censura con barra",
-      "circle": "Región de mosaico circular",
-      "rectangle": "Región de mosaico rectangular"
+    "modes": {
+      "decensor": "Descensurar",
+      "paint": "Pintura",
+      "removal": "Eliminación"
     },
-    "removeSelection": {
-      "circle": "Selección circular",
-      "pen": "Selección con lápiz",
-      "square": "Selección cuadrada"
+    "oval": "Óvalo",
+    "pan": "Desplazar",
+    "rectangle": "Rectángulo",
+    "sections": {
+      "mode": "Modo de herramienta",
+      "settings": "Ajustes",
+      "supplemental": "Adicional",
+      "tool": "Herramienta"
     },
     "select": "Seleccionar",
-    "text": "Texto"
+    "text": "Añadir capa de texto",
+    "toolbar": "Herramientas del lienzo"
   },
   "updater": {
     "available": {

@@ -32,7 +32,7 @@ export function ColorSamplingProvider({ children }: { children: ReactNode }) {
     (apply: ApplyColor) => {
       if (!pending.current) previousTool.current = useKoharuStore.getState().tool
       pending.current = apply
-      setTool('color_picker')
+      setTool('eyedropper')
     },
     [setTool],
   )
@@ -40,7 +40,7 @@ export function ColorSamplingProvider({ children }: { children: ReactNode }) {
   const cancel = useCallback(() => {
     const active = pending.current !== null
     pending.current = null
-    if (active && useKoharuStore.getState().tool === 'color_picker') {
+    if (active && useKoharuStore.getState().tool === 'eyedropper') {
       setTool(previousTool.current)
     }
   }, [setTool])
@@ -51,14 +51,14 @@ export function ColorSamplingProvider({ children }: { children: ReactNode }) {
       if (!apply) return false
       pending.current = null
       apply(color)
-      if (useKoharuStore.getState().tool === 'color_picker') setTool(previousTool.current)
+      if (useKoharuStore.getState().tool === 'eyedropper') setTool(previousTool.current)
       return true
     },
     [setTool],
   )
 
   useEffect(() => {
-    if (tool !== 'color_picker') cancel()
+    if (tool !== 'eyedropper') cancel()
   }, [cancel, tool])
 
   const value = useMemo(() => ({ request, complete, cancel }), [cancel, complete, request])

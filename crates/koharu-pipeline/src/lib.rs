@@ -30,6 +30,8 @@ pub use scope::{Bounds, Scope};
 pub use stage::Stage;
 pub use stages::{Flux2KleinConfig, KoharuLayoutRFDetrSeg2XLConfig, RoremMixedConfig};
 
+pub const INPAINTING_MASK_INPUTS_ATTRIBUTE: &str = "dev.koharu.inpainting.mask-inputs";
+
 use images::ImageCache;
 use model_cell::ModelCell;
 

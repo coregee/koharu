@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "Select a page to begin.",
+    "eraserRequiresLayer": "Select an editable layer for this mode before using the Eraser.",
     "fit": "Fit Window",
     "fillRequiresImage": "Select an editable paint or image layer before using Fill.",
     "inpaintSelection": "Inpaint Selection",
-    "inpaintSelectionCount": "Selections: {{count}}",
+    "removalMaskEmpty": "Draw a removal mask to continue",
+    "removalMaskReady": "Removal mask ready",
     "surface": "Koharu canvas",
     "unavailable": "WebGPU canvas unavailable"
   },
@@ -266,8 +268,8 @@
       "paint": "Paint",
       "segmentation": "Segmentation mask",
       "bubble": "Speech bubble",
-      "censor": "Censor mask",
-      "mosaic": "Mosaic mask",
+      "censor": "Bar censor mask",
+      "mosaic": "Mosaic censor mask",
       "text": "Text",
       "mainTextGroup": "Main text group",
       "sfxTextGroup": "SFX text group"
@@ -578,35 +580,37 @@
     "zoom": "Zoom"
   },
   "tools": {
-    "censor": "Censor mask",
+    "brush": "Brush",
     "brushSize": "Brush size",
     "brushSizeInput": "Brush size",
     "brushSizePixels": "Brush size: {{size}} pixels",
     "brushSizeShort": "{{size}} px",
-    "color_picker": "Color picker",
     "decreaseBrushSize": "Decrease brush size",
     "decreaseFillTolerance": "Decrease fill tolerance",
-    "draw": "Brush",
     "eraser": "Eraser",
+    "eyedropper": "Eyedropper",
     "fill": "Fill",
     "fillTolerance": "Fill tolerance",
     "fillToleranceValue": "Fill tolerance: {{value}}",
     "increaseBrushSize": "Increase brush size",
     "increaseFillTolerance": "Increase fill tolerance",
-    "pan": "Pan",
-    "remove": "Remove",
-    "censorSelection": {
-      "brush": "Bar censor brush",
-      "circle": "Circular mosaic region",
-      "rectangle": "Rectangular mosaic region"
+    "modes": {
+      "decensor": "Decensor",
+      "paint": "Paint",
+      "removal": "Removal"
     },
-    "removeSelection": {
-      "circle": "Circle selection",
-      "pen": "Pen selection",
-      "square": "Square selection"
+    "oval": "Oval",
+    "pan": "Pan",
+    "rectangle": "Rectangle",
+    "sections": {
+      "mode": "Tool mode",
+      "settings": "Settings",
+      "supplemental": "Supplemental",
+      "tool": "Tool"
     },
     "select": "Select",
-    "text": "Text"
+    "text": "Add text layer",
+    "toolbar": "Canvas tools"
   },
   "updater": {
     "available": {

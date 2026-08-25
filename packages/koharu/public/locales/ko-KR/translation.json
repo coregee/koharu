@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "시작할 페이지를 선택하세요.",
+    "eraserRequiresLayer": "지우개를 사용하기 전에 이 모드에서 편집 가능한 레이어를 선택하세요.",
     "fit": "창에 맞춤",
     "fillRequiresImage": "채우기를 사용하기 전에 편집 가능한 페인트 또는 이미지 레이어를 선택하세요.",
     "inpaintSelection": "선택 영역 인페인트",
-    "inpaintSelectionCount": "선택 영역: {{count}}",
+    "removalMaskEmpty": "계속하려면 제거 마스크를 그리세요",
+    "removalMaskReady": "제거 마스크 준비됨",
     "surface": "Koharu 캔버스",
     "unavailable": "WebGPU 캔버스를 사용할 수 없습니다"
   },
@@ -260,8 +262,8 @@
       "image": "이미지",
       "paint": "페인트",
       "segmentation": "세그멘테이션 마스크",
-      "censor": "검열 마스크",
-      "mosaic": "모자이크 마스크",
+      "censor": "막대 검열 마스크",
+      "mosaic": "모자이크 검열 마스크",
       "text": "텍스트",
       "mainTextGroup": "메인 텍스트 그룹",
       "sfxTextGroup": "효과음 텍스트 그룹"
@@ -564,34 +566,37 @@
     "zoom": "확대/축소"
   },
   "tools": {
+    "brush": "브러시",
     "brushSize": "브러시 크기",
     "brushSizeInput": "브러시 크기",
     "brushSizePixels": "브러시 크기: {{size}}픽셀",
     "brushSizeShort": "{{size}} px",
-    "color_picker": "색상 선택기",
     "decreaseBrushSize": "브러시 크기 줄이기",
     "decreaseFillTolerance": "채우기 허용 오차 줄이기",
-    "draw": "그리기",
     "eraser": "지우개",
+    "eyedropper": "스포이드",
     "fill": "채우기",
     "fillTolerance": "채우기 허용 오차",
     "fillToleranceValue": "채우기 허용 오차: {{value}}",
     "increaseBrushSize": "브러시 크기 늘리기",
     "increaseFillTolerance": "채우기 허용 오차 늘리기",
-    "pan": "이동",
-    "remove": "제거",
-    "censorSelection": {
-      "brush": "막대 검열 브러시",
-      "circle": "원형 모자이크 영역",
-      "rectangle": "직사각형 모자이크 영역"
+    "modes": {
+      "decensor": "검열 해제",
+      "paint": "페인트",
+      "removal": "제거"
     },
-    "removeSelection": {
-      "circle": "원 선택",
-      "pen": "펜 선택",
-      "square": "정사각형 선택"
+    "oval": "타원",
+    "pan": "이동",
+    "rectangle": "직사각형",
+    "sections": {
+      "mode": "도구 모드",
+      "settings": "설정",
+      "supplemental": "보조",
+      "tool": "도구"
     },
     "select": "선택",
-    "text": "텍스트"
+    "text": "텍스트 레이어 추가",
+    "toolbar": "캔버스 도구"
   },
   "updater": {
     "available": {

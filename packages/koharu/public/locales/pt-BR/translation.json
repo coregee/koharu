@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "Selecione uma página para começar.",
+    "eraserRequiresLayer": "Selecione uma camada editável para este modo antes de usar a borracha.",
     "fit": "Ajustar à janela",
     "fillRequiresImage": "Selecione uma camada de pintura ou imagem editável antes de usar Preencher.",
     "inpaintSelection": "Preencher seleção",
-    "inpaintSelectionCount": "Seleções: {{count}}",
+    "removalMaskEmpty": "Desenhe uma máscara de remoção para continuar",
+    "removalMaskReady": "Máscara de remoção pronta",
     "surface": "Tela do Koharu",
     "unavailable": "A tela WebGPU não está disponível"
   },
@@ -260,8 +262,8 @@
       "image": "Imagem",
       "paint": "Pintura",
       "segmentation": "Máscara de segmentação",
-      "censor": "Máscara de censura",
-      "mosaic": "Máscara de mosaico",
+      "censor": "Máscara de censura em barra",
+      "mosaic": "Máscara de censura em mosaico",
       "text": "Texto",
       "mainTextGroup": "Grupo de texto principal",
       "sfxTextGroup": "Grupo de texto de efeitos sonoros"
@@ -564,34 +566,37 @@
     "zoom": "Zoom"
   },
   "tools": {
+    "brush": "Pincel",
     "brushSize": "Tamanho do pincel",
     "brushSizeInput": "Tamanho do pincel",
     "brushSizePixels": "Tamanho do pincel: {{size}} pixels",
     "brushSizeShort": "{{size}} px",
-    "color_picker": "Seletor de cores",
     "decreaseBrushSize": "Diminuir tamanho do pincel",
     "decreaseFillTolerance": "Diminuir tolerância do preenchimento",
-    "draw": "Desenhar",
     "eraser": "Borracha",
+    "eyedropper": "Conta-gotas",
     "fill": "Preencher",
     "fillTolerance": "Tolerância do preenchimento",
     "fillToleranceValue": "Tolerância do preenchimento: {{value}}",
     "increaseBrushSize": "Aumentar tamanho do pincel",
     "increaseFillTolerance": "Aumentar tolerância do preenchimento",
-    "pan": "Mover",
-    "remove": "Remover",
-    "censorSelection": {
-      "brush": "Pincel de censura em barra",
-      "circle": "Região de mosaico circular",
-      "rectangle": "Região de mosaico retangular"
+    "modes": {
+      "decensor": "Remover censura",
+      "paint": "Pintura",
+      "removal": "Remoção"
     },
-    "removeSelection": {
-      "circle": "Seleção circular",
-      "pen": "Seleção com caneta",
-      "square": "Seleção quadrada"
+    "oval": "Oval",
+    "pan": "Mover",
+    "rectangle": "Retângulo",
+    "sections": {
+      "mode": "Modo da ferramenta",
+      "settings": "Configurações",
+      "supplemental": "Suplementar",
+      "tool": "Ferramenta"
     },
     "select": "Selecionar",
-    "text": "Texto"
+    "text": "Adicionar camada de texto",
+    "toolbar": "Ferramentas da tela"
   },
   "updater": {
     "available": {

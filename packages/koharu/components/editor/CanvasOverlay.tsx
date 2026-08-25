@@ -15,10 +15,9 @@ import type {
   EntityId,
   Frame,
   Geometry,
-  InpaintSelection,
-  MosaicRegion,
   Page,
   Point,
+  RasterShape,
   TransformFrame,
 } from '@koharu/bridge/protocol'
 
@@ -34,15 +33,17 @@ interface CanvasOverlayProps {
   cursor: Point | null
   brushSize: number
   showBrushCursor: boolean
-  inpaintSelections: readonly InpaintSelection[]
-  inpaintDraft: InpaintSelection | null
-  mosaicDraft: MosaicRegion | null
+  shapeDraft: RasterShape | null
+  shapeColor: readonly [number, number, number, number]
   onTransformStart: (elements: TransformFrame[]) => void
   onTransformFrame: (elements: TransformFrame[]) => void
   onTransformEnd: () => void
   onRegionTransformStart: (elements: TransformFrame[]) => void
   onRegionTransformFrame: (elements: TransformFrame[]) => void
   onRegionTransformEnd: () => void
+  onShapeTransformStart: (elements: TransformFrame[]) => void
+  onShapeTransformFrame: (elements: TransformFrame[]) => void
+  onShapeTransformEnd: () => void
 }
 
 export function CanvasOverlay({
@@ -57,15 +58,17 @@ export function CanvasOverlay({
   cursor,
   brushSize,
   showBrushCursor,
-  inpaintSelections,
-  inpaintDraft,
-  mosaicDraft,
+  shapeDraft,
+  shapeColor,
   onTransformStart,
   onTransformFrame,
   onTransformEnd,
   onRegionTransformStart,
   onRegionTransformFrame,
   onRegionTransformEnd,
+  onShapeTransformStart,
+  onShapeTransformFrame,
+  onShapeTransformEnd,
 }: CanvasOverlayProps) {
   const root = useRef<HTMLDivElement>(null)
   const expandedSelection = useMemo(
@@ -161,14 +164,9 @@ export function CanvasOverlay({
       })}
 
       {draft && <DraftOverlay frame={draft} camera={camera} />}
-      {(inpaintSelections.length > 0 || inpaintDraft) && (
-        <InpaintSelectionOverlay
-          page={page}
-          camera={camera}
-          selections={inpaintDraft ? [...inpaintSelections, inpaintDraft] : inpaintSelections}
-        />
+      {shapeDraft && (
+        <RasterShapeOverlay page={page} camera={camera} shape={shapeDraft} color={shapeColor} />
       )}
-      {mosaicDraft && <MosaicRegionOverlay page={page} camera={camera} region={mosaicDraft} />}
       {showBrushCursor && cursor && (
         <div
           className='absolute rounded-full border border-white/95 shadow-[0_0_0_1px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.45)]'
@@ -181,7 +179,19 @@ export function CanvasOverlay({
         />
       )}
 
-      {sourceRegion && regionControlFrame ? (
+      {shapeDraft ? (
+        <SelectionControls
+          container={root}
+          element='pending-raster-shape'
+          frame={shapeDraft.frame}
+          camera={camera}
+          edgesOnly={false}
+          draggable
+          onTransformStart={onShapeTransformStart}
+          onTransformFrame={onShapeTransformFrame}
+          onTransformEnd={onShapeTransformEnd}
+        />
+      ) : sourceRegion && regionControlFrame ? (
         <SelectionControls
           container={root}
           element={sourceRegion.id}
@@ -208,170 +218,70 @@ export function CanvasOverlay({
   )
 }
 
-function MosaicRegionOverlay({
+function RasterShapeOverlay({
   page,
   camera,
-  region,
+  shape,
+  color,
 }: {
   page: Page
   camera: Camera
-  region: MosaicRegion
+  shape: RasterShape
+  color: readonly [number, number, number, number]
 }) {
   const clipId = useId().replaceAll(':', '')
   const dpr = window.devicePixelRatio
   const scale = camera.zoom / dpr
-  const screenPoint = (point: Point) => ({
-    x: (point.x * camera.zoom + camera.translation[0]) / dpr,
-    y: (point.y * camera.zoom + camera.translation[1]) / dpr,
-  })
-  const pageOrigin = screenPoint({ x: 0, y: 0 })
-  const bounds =
-    region.type === 'circle'
-      ? constrainedSelectionBounds(region.start, region.end)
-      : rectangleSelectionBounds(region.start, region.end)
-  const topLeft = screenPoint({ x: bounds.left, y: bounds.top })
-  const width = bounds.width * scale
-  const height = bounds.height * scale
+  const position = cssFrame(shape.frame, camera)
+  const pagePosition = cssFrame(
+    {
+      x: 0,
+      y: 0,
+      width: page.size.width,
+      height: page.size.height,
+      angle_degrees: 0,
+    },
+    camera,
+  )
+  const centerX = position.left + position.width / 2
+  const centerY = position.top + position.height / 2
+  const alpha = color[3] / 255
+  const fill = `rgb(${color[0]} ${color[1]} ${color[2]} / ${alpha * 0.3})`
+  const stroke = `rgb(${color[0]} ${color[1]} ${color[2]} / ${Math.max(alpha, 0.85)})`
 
   return (
-    <svg data-testid='mosaic-region-overlay' className='absolute inset-0 size-full overflow-hidden'>
+    <svg data-testid='raster-shape-overlay' className='absolute inset-0 size-full overflow-hidden'>
       <defs>
         <clipPath id={clipId}>
           <rect
-            x={pageOrigin.x}
-            y={pageOrigin.y}
+            x={pagePosition.left}
+            y={pagePosition.top}
             width={page.size.width * scale}
             height={page.size.height * scale}
           />
         </clipPath>
       </defs>
-      <g
-        clipPath={`url(#${clipId})`}
-        fill='rgb(34 197 94 / 0.3)'
-        stroke='rgb(134 239 172 / 0.95)'
-        strokeWidth={1.5}
-      >
-        {region.type === 'circle' ? (
-          <circle cx={topLeft.x + width / 2} cy={topLeft.y + height / 2} r={width / 2} />
+      <g clipPath={`url(#${clipId})`} fill={fill} stroke={stroke} strokeWidth={1.5}>
+        {shape.type === 'oval' ? (
+          <ellipse
+            cx={centerX}
+            cy={centerY}
+            rx={position.width / 2}
+            ry={position.height / 2}
+            transform={`rotate(${position.angle} ${centerX} ${centerY})`}
+          />
         ) : (
-          <rect x={topLeft.x} y={topLeft.y} width={width} height={height} />
+          <rect
+            x={position.left}
+            y={position.top}
+            width={position.width}
+            height={position.height}
+            transform={`rotate(${position.angle} ${centerX} ${centerY})`}
+          />
         )}
       </g>
     </svg>
   )
-}
-
-function InpaintSelectionOverlay({
-  page,
-  camera,
-  selections,
-}: {
-  page: Page
-  camera: Camera
-  selections: readonly InpaintSelection[]
-}) {
-  const clipId = useId().replaceAll(':', '')
-  const dpr = window.devicePixelRatio
-  const scale = camera.zoom / dpr
-  const screenPoint = (point: Point) => ({
-    x: (point.x * camera.zoom + camera.translation[0]) / dpr,
-    y: (point.y * camera.zoom + camera.translation[1]) / dpr,
-  })
-  const pageOrigin = screenPoint({ x: 0, y: 0 })
-
-  return (
-    <svg
-      data-testid='inpaint-selection-overlay'
-      className='absolute inset-0 size-full overflow-hidden'
-    >
-      <defs>
-        <clipPath id={clipId}>
-          <rect
-            x={pageOrigin.x}
-            y={pageOrigin.y}
-            width={page.size.width * scale}
-            height={page.size.height * scale}
-          />
-        </clipPath>
-      </defs>
-      <g clipPath={`url(#${clipId})`} fill='rgb(168 85 247 / 0.3)' stroke='rgb(216 180 254 / 0.95)'>
-        {selections.map((selection, index) => {
-          if (selection.type === 'pen') {
-            const points = selection.points.map(screenPoint)
-            const path = points
-              .map((point, pointIndex) => `${pointIndex === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
-              .join(' ')
-            return points.length === 1 ? (
-              <circle
-                key={index}
-                cx={points[0].x}
-                cy={points[0].y}
-                r={(selection.diameter * scale) / 2}
-                stroke='none'
-              />
-            ) : (
-              <path
-                key={index}
-                d={path}
-                fill='none'
-                stroke='rgb(168 85 247 / 0.55)'
-                strokeWidth={selection.diameter * scale}
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              />
-            )
-          }
-          const bounds = constrainedSelectionBounds(selection.start, selection.end)
-          const topLeft = screenPoint({ x: bounds.left, y: bounds.top })
-          const size = bounds.size * scale
-          return selection.type === 'circle' ? (
-            <circle
-              key={index}
-              cx={topLeft.x + size / 2}
-              cy={topLeft.y + size / 2}
-              r={size / 2}
-              strokeWidth={1.5}
-            />
-          ) : (
-            <rect
-              key={index}
-              x={topLeft.x}
-              y={topLeft.y}
-              width={size}
-              height={size}
-              strokeWidth={1.5}
-            />
-          )
-        })}
-      </g>
-    </svg>
-  )
-}
-
-export function constrainedSelectionBounds(start: Point, end: Point) {
-  const deltaX = end.x - start.x
-  const deltaY = end.y - start.y
-  const size = Math.max(Math.abs(deltaX), Math.abs(deltaY), 1)
-  const endX = start.x + size * (deltaX < 0 ? -1 : 1)
-  const endY = start.y + size * (deltaY < 0 ? -1 : 1)
-  return {
-    left: Math.min(start.x, endX),
-    top: Math.min(start.y, endY),
-    width: size,
-    height: size,
-    size,
-  }
-}
-
-function rectangleSelectionBounds(start: Point, end: Point) {
-  const endX = Math.abs(end.x - start.x) < 1 ? start.x + (end.x < start.x ? -1 : 1) : end.x
-  const endY = Math.abs(end.y - start.y) < 1 ? start.y + (end.y < start.y ? -1 : 1) : end.y
-  return {
-    left: Math.min(start.x, endX),
-    top: Math.min(start.y, endY),
-    width: Math.abs(endX - start.x),
-    height: Math.abs(endY - start.y),
-  }
 }
 
 function TextRegionOverlay({

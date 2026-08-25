@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "ページを選択して開始します。",
+    "eraserRequiresLayer": "消しゴムを使う前に、このモードで編集可能なレイヤーを選択してください。",
     "fit": "ウィンドウに合わせる",
     "fillRequiresImage": "塗りつぶしを使用する前に、編集可能なペイントまたは画像レイヤーを選択してください。",
     "inpaintSelection": "選択範囲をインペイント",
-    "inpaintSelectionCount": "選択範囲: {{count}}",
+    "removalMaskEmpty": "続行するには除去マスクを描画してください",
+    "removalMaskReady": "除去マスクの準備完了",
     "surface": "Koharu キャンバス",
     "unavailable": "WebGPU キャンバスを利用できません"
   },
@@ -260,8 +262,8 @@
       "image": "画像",
       "paint": "ペイント",
       "segmentation": "セグメンテーションマスク",
-      "censor": "検閲マスク",
-      "mosaic": "モザイクマスク",
+      "censor": "黒塗り検閲マスク",
+      "mosaic": "モザイク検閲マスク",
       "text": "テキスト",
       "mainTextGroup": "メインテキストグループ",
       "sfxTextGroup": "効果音テキストグループ"
@@ -564,34 +566,37 @@
     "zoom": "ズーム"
   },
   "tools": {
+    "brush": "ブラシ",
     "brushSize": "ブラシサイズ",
     "brushSizeInput": "ブラシサイズ",
     "brushSizePixels": "ブラシサイズ: {{size}}ピクセル",
     "brushSizeShort": "{{size}} px",
-    "color_picker": "カラーピッカー",
     "decreaseBrushSize": "ブラシサイズを縮小",
     "decreaseFillTolerance": "塗りつぶし許容値を下げる",
-    "draw": "描画",
     "eraser": "消しゴム",
+    "eyedropper": "スポイト",
     "fill": "塗りつぶし",
     "fillTolerance": "塗りつぶし許容値",
     "fillToleranceValue": "塗りつぶし許容値: {{value}}",
     "increaseBrushSize": "ブラシサイズを拡大",
     "increaseFillTolerance": "塗りつぶし許容値を上げる",
-    "pan": "移動",
-    "remove": "削除",
-    "censorSelection": {
-      "brush": "黒塗り検閲ブラシ",
-      "circle": "円形モザイク領域",
-      "rectangle": "長方形モザイク領域"
+    "modes": {
+      "decensor": "検閲解除",
+      "paint": "ペイント",
+      "removal": "除去"
     },
-    "removeSelection": {
-      "circle": "円形選択",
-      "pen": "ペン選択",
-      "square": "正方形選択"
+    "oval": "楕円",
+    "pan": "移動",
+    "rectangle": "長方形",
+    "sections": {
+      "mode": "ツールモード",
+      "settings": "設定",
+      "supplemental": "補助",
+      "tool": "ツール"
     },
     "select": "選択",
-    "text": "テキスト"
+    "text": "テキストレイヤーを追加",
+    "toolbar": "キャンバスツール"
   },
   "updater": {
     "available": {

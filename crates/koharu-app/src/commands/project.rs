@@ -241,6 +241,7 @@ pub enum Layer {
         image: Option<String>,
         name: String,
         kind: RasterLayerKind,
+        consumed: bool,
     },
     Image {
         id: EntityId,
@@ -1498,6 +1499,33 @@ impl Project {
         self.commit(patch).await
     }
 
+    pub(crate) async fn reset_removal_mask(
+        &mut self,
+        page: EntityId,
+        layer: EntityId,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        if Self::containing_page(&snapshot, layer)? != page {
+            bail!("the removal mask must belong to the active page");
+        }
+        if !snapshot
+            .component::<SceneRasterLayer>(layer)?
+            .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
+        {
+            bail!("only a segmentation layer can be reset as a removal mask");
+        }
+        if Self::consumed_raster_layers(&snapshot, page)?.contains(&layer) {
+            bail!("a consumed removal mask cannot be reset");
+        }
+        if Self::is_effectively_locked(&snapshot, layer)? {
+            bail!("a locked removal mask cannot be reset");
+        }
+        let generation = Self::segmentation_generation(&snapshot, layer)?;
+        let mut edit = generation.map_or_else(|| snapshot.edit(), |owner| snapshot.edit_as(owner));
+        edit.remove_entity(layer, RemovePolicy::Cascade)?;
+        self.commit(edit.finish()?).await
+    }
+
     #[tracing::instrument(level = "info", skip_all, fields(layer = %layer, parent = %parent))]
     pub(crate) async fn move_layer(
         &mut self,
@@ -1644,11 +1672,17 @@ impl Project {
             } else if snapshot.parent(layer)? != Some(page) {
                 bail!("the raster target must be a layer on the active page");
             } else if let Some(target) = snapshot.component::<SceneRasterLayer>(layer)? {
-                if mode == RasterStrokeMode::Paint
-                    && target.kind != new_layer_kind
-                    && !(new_layer_kind == RasterLayerKind::Paint
-                        && target.kind == RasterLayerKind::Artwork)
-                {
+                let compatible = if new_layer_kind == RasterLayerKind::Paint {
+                    matches!(
+                        target.kind,
+                        RasterLayerKind::Artwork
+                            | RasterLayerKind::Cleanup
+                            | RasterLayerKind::Paint
+                    )
+                } else {
+                    target.kind == new_layer_kind
+                };
+                if !compatible {
                     bail!("the raster target kind does not match the selected brush");
                 }
                 if target.kind == RasterLayerKind::Segmentation {
@@ -1668,7 +1702,7 @@ impl Project {
                     None => RgbaImage::new(width, height),
                 }
             } else {
-                if mode != RasterStrokeMode::Erase
+                if new_layer_kind != RasterLayerKind::Paint
                     || snapshot.component::<SceneTextLayout>(layer)?.is_some()
                     || snapshot.component::<SceneRegion>(layer)?.is_some()
                     || snapshot.component::<SceneGroup>(layer)?.is_some()
@@ -1711,8 +1745,8 @@ impl Project {
         };
         let layer_label = match created_layer_kind {
             RasterLayerKind::Artwork => "Artwork",
-            RasterLayerKind::Censor => "Censor",
-            RasterLayerKind::Mosaic => "Mosaic",
+            RasterLayerKind::Censor => "Bar Censor",
+            RasterLayerKind::Mosaic => "Mosaic Censor",
             RasterLayerKind::Paint => "Paint",
             RasterLayerKind::Cleanup => "Cleanup",
             RasterLayerKind::Segmentation => "Segmentation",
@@ -1762,6 +1796,16 @@ impl Project {
                         kind: created_layer_kind,
                     },
                 )?;
+                if created_layer_kind == RasterLayerKind::Segmentation {
+                    edit.set(
+                        layer,
+                        &SceneVisibility {
+                            origin: Origin::User,
+                            visible: true,
+                            opacity: 0.45,
+                        },
+                    )?;
+                }
                 committed_layer = Some(layer);
                 layer
             };
@@ -1839,9 +1883,9 @@ impl Project {
             if let Some(target) = snapshot.component::<SceneRasterLayer>(layer)? {
                 if !matches!(
                     target.kind,
-                    RasterLayerKind::Artwork | RasterLayerKind::Paint
+                    RasterLayerKind::Artwork | RasterLayerKind::Cleanup | RasterLayerKind::Paint
                 ) {
-                    bail!("only artwork and paint raster layers accept color fills");
+                    bail!("only artwork, cleanup, and paint raster layers accept color fills");
                 }
                 promote_layer = target.origin != Origin::User
                     || snapshot
@@ -2033,8 +2077,9 @@ impl Project {
     pub(crate) fn page(snapshot: &Snapshot, page: EntityId) -> Result<Page> {
         let value = snapshot.page(page)?.page()?;
         let source = Self::asset_id(snapshot, page, "source")?;
+        let consumed_rasters = Self::consumed_raster_layers(snapshot, page)?;
         let mut layers = Vec::new();
-        Self::collect_layer_views(snapshot, page, &mut layers)?;
+        Self::collect_layer_views(snapshot, page, &consumed_rasters, &mut layers)?;
         if let Some(image) = source.clone() {
             layers.insert(
                 0,
@@ -2092,7 +2137,7 @@ impl Project {
         })
     }
 
-    fn layer_view(snapshot: &Snapshot, layer: EntityId) -> Result<Layer> {
+    fn layer_view(snapshot: &Snapshot, layer: EntityId, consumed: bool) -> Result<Layer> {
         let parent = snapshot.parent(layer)?;
         let locked = Self::layer_locked(snapshot, layer)?;
         let visibility = Self::layer_visibility(snapshot, layer)?;
@@ -2159,6 +2204,7 @@ impl Project {
                 image: Self::asset_id(snapshot, layer, "source")?,
                 name: raster.name,
                 kind: raster.kind,
+                consumed,
             });
         }
         if let Some(style) = snapshot.component::<SceneBubbleStyle>(layer)? {
@@ -2351,6 +2397,7 @@ impl Project {
     fn collect_layer_views(
         snapshot: &Snapshot,
         parent: EntityId,
+        consumed_rasters: &HashSet<EntityId>,
         layers: &mut Vec<Layer>,
     ) -> Result<()> {
         for child in snapshot.children(parent)? {
@@ -2358,12 +2405,61 @@ impl Project {
                 continue;
             }
             let group = snapshot.component::<SceneGroup>(child)?.is_some();
-            layers.push(Self::layer_view(snapshot, child)?);
+            layers.push(Self::layer_view(
+                snapshot,
+                child,
+                consumed_rasters.contains(&child),
+            )?);
             if group {
-                Self::collect_layer_views(snapshot, child, layers)?;
+                Self::collect_layer_views(snapshot, child, consumed_rasters, layers)?;
             }
         }
         Ok(())
+    }
+
+    fn consumed_raster_layers(snapshot: &Snapshot, page: EntityId) -> Result<HashSet<EntityId>> {
+        let source = AssetRole::new("source")?;
+        let mut inpainted_blobs = HashSet::new();
+        for entity in snapshot.children(page)? {
+            if !snapshot
+                .component::<SceneRasterLayer>(entity)?
+                .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
+            {
+                continue;
+            }
+            let Some(asset) = snapshot.asset(entity, &source)? else {
+                continue;
+            };
+            if let Some(inputs) = asset
+                .metadata
+                .attributes
+                .get(koharu_pipeline::INPAINTING_MASK_INPUTS_ATTRIBUTE)
+            {
+                inpainted_blobs.extend(inputs.split(',').map(str::to_owned));
+            }
+        }
+
+        let mut consumed = HashSet::new();
+        for entity in snapshot.children(page)? {
+            let Some(layer) = snapshot.component::<SceneRasterLayer>(entity)? else {
+                continue;
+            };
+            let is_consumed = match layer.kind {
+                RasterLayerKind::Segmentation => snapshot
+                    .asset(entity, &source)?
+                    .is_some_and(|asset| inpainted_blobs.contains(&asset.blob.to_string())),
+                RasterLayerKind::Censor | RasterLayerKind::Mosaic => {
+                    !Self::layer_visibility(snapshot, entity)?.visible
+                }
+                RasterLayerKind::Artwork | RasterLayerKind::Cleanup | RasterLayerKind::Paint => {
+                    false
+                }
+            };
+            if is_consumed {
+                consumed.insert(entity);
+            }
+        }
+        Ok(consumed)
     }
 
     fn text_content(snapshot: &Snapshot, layer: EntityId) -> Result<EntityId> {
@@ -3482,7 +3578,7 @@ mod tests {
                 page,
                 Some(segmentation),
                 RasterStrokeMode::Erase,
-                RasterLayerKind::Paint,
+                RasterLayerKind::Segmentation,
                 [0; 4],
                 4.0,
                 vec![ScenePoint { x: 5.0, y: 5.0 }],
@@ -3522,6 +3618,143 @@ mod tests {
                 .origin,
             Origin::Generated(detector)
         );
+
+        let reset = project
+            .reset_removal_mask(page, segmentation)
+            .await
+            .unwrap();
+        project.record_commit(&reset);
+        assert!(project.snapshot().entity(segmentation).is_err());
+        project.undo().await.unwrap();
+        assert!(project.snapshot().entity(segmentation).is_ok());
+    }
+
+    #[tokio::test]
+    async fn page_views_distinguish_consumed_masks_from_editable_masks() {
+        let mut session = Session::memory().await.unwrap();
+        let source = AssetRole::new("source").unwrap();
+        let mut page = None;
+        let mut segmentation = None;
+        let create = session
+            .snapshot()
+            .patch(|edit| {
+                let id = edit.add_page(PageDraft::new("page", 10.0, 10.0), At::End)?;
+                let mask = edit.add_entity(id, At::End)?;
+                edit.set(
+                    mask,
+                    &SceneRasterLayer {
+                        origin: Origin::User,
+                        name: "Text Segmentation".to_owned(),
+                        kind: RasterLayerKind::Segmentation,
+                    },
+                )?;
+                edit.set_asset(
+                    mask,
+                    &source,
+                    AssetInput::new(
+                        vec![1_u8],
+                        "application/octet-stream",
+                        AssetMetadata {
+                            width: None,
+                            height: None,
+                            attributes: Default::default(),
+                        },
+                    ),
+                )?;
+                page = Some(id);
+                segmentation = Some(mask);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(create).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let segmentation = segmentation.unwrap();
+        let segmentation_blob = snapshot.asset(segmentation, &source).unwrap().unwrap().blob;
+        let mut cleanup = None;
+        let mut bar = None;
+        let add_results = snapshot
+            .patch(|edit| {
+                let cleanup_layer = edit.add_entity(page, At::End)?;
+                edit.set(
+                    cleanup_layer,
+                    &SceneRasterLayer {
+                        origin: Origin::User,
+                        name: "Cleanup".to_owned(),
+                        kind: RasterLayerKind::Cleanup,
+                    },
+                )?;
+                let mut metadata = AssetMetadata {
+                    width: None,
+                    height: None,
+                    attributes: Default::default(),
+                };
+                metadata.attributes.insert(
+                    koharu_pipeline::INPAINTING_MASK_INPUTS_ATTRIBUTE.to_owned(),
+                    segmentation_blob.to_string(),
+                );
+                edit.set_asset(
+                    cleanup_layer,
+                    &source,
+                    AssetInput::new(vec![2_u8], "application/octet-stream", metadata),
+                )?;
+
+                let bar_layer = edit.add_entity(page, At::End)?;
+                edit.set(
+                    bar_layer,
+                    &SceneRasterLayer {
+                        origin: Origin::User,
+                        name: "Bar Censor".to_owned(),
+                        kind: RasterLayerKind::Censor,
+                    },
+                )?;
+                edit.set(
+                    bar_layer,
+                    &SceneVisibility {
+                        origin: Origin::User,
+                        visible: false,
+                        opacity: 1.0,
+                    },
+                )?;
+                cleanup = Some(cleanup_layer);
+                bar = Some(bar_layer);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(add_results).await.unwrap();
+
+        let view = Project::page(&session.snapshot(), page).unwrap();
+        let consumed = |id| {
+            view.layers.iter().any(|layer| {
+                matches!(layer, Layer::Raster { id: candidate, consumed: true, .. } if *candidate == id)
+            })
+        };
+        assert!(consumed(segmentation));
+        assert!(!consumed(cleanup.unwrap()));
+        assert!(consumed(bar.unwrap()));
+
+        let replace_mask = session
+            .snapshot()
+            .patch(|edit| {
+                edit.set_asset(
+                    segmentation,
+                    &source,
+                    AssetInput::new(
+                        vec![3_u8],
+                        "application/octet-stream",
+                        AssetMetadata {
+                            width: None,
+                            height: None,
+                            attributes: Default::default(),
+                        },
+                    ),
+                )
+            })
+            .unwrap();
+        session.commit(replace_mask).await.unwrap();
+        let view = Project::page(&session.snapshot(), page).unwrap();
+        assert!(view.layers.iter().any(|layer| {
+            matches!(layer, Layer::Raster { id, consumed: false, .. } if *id == segmentation)
+        }));
     }
 
     #[tokio::test]

@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "Выберите страницу, чтобы начать.",
+    "eraserRequiresLayer": "Перед использованием ластика выберите редактируемый слой для этого режима.",
     "fit": "Вписать в окно",
     "fillRequiresImage": "Перед заливкой выберите редактируемый слой рисования или изображения.",
     "inpaintSelection": "Восстановить выделение",
-    "inpaintSelectionCount": "Выделений: {{count}}",
+    "removalMaskEmpty": "Нарисуйте маску удаления, чтобы продолжить",
+    "removalMaskReady": "Маска удаления готова",
     "surface": "Холст Koharu",
     "unavailable": "Холст WebGPU недоступен"
   },
@@ -260,8 +262,8 @@
       "image": "Изображение",
       "paint": "Рисование",
       "segmentation": "Маска сегментации",
-      "censor": "Маска цензуры",
-      "mosaic": "Маска мозаики",
+      "censor": "Маска полосы цензуры",
+      "mosaic": "Маска мозаичной цензуры",
       "text": "Текст",
       "mainTextGroup": "Группа основного текста",
       "sfxTextGroup": "Группа текста звуковых эффектов"
@@ -564,34 +566,37 @@
     "zoom": "Масштаб"
   },
   "tools": {
+    "brush": "Кисть",
     "brushSize": "Размер кисти",
     "brushSizeInput": "Размер кисти",
     "brushSizePixels": "Размер кисти: {{size}} пикс.",
     "brushSizeShort": "{{size}} пкс",
-    "color_picker": "Пипетка",
     "decreaseBrushSize": "Уменьшить размер кисти",
     "decreaseFillTolerance": "Уменьшить допуск заливки",
-    "draw": "Рисование",
     "eraser": "Ластик",
+    "eyedropper": "Пипетка",
     "fill": "Заливка",
     "fillTolerance": "Допуск заливки",
     "fillToleranceValue": "Допуск заливки: {{value}}",
     "increaseBrushSize": "Увеличить размер кисти",
     "increaseFillTolerance": "Увеличить допуск заливки",
-    "pan": "Перемещение",
-    "remove": "Удаление",
-    "censorSelection": {
-      "brush": "Кисть полосы цензуры",
-      "circle": "Круглая область мозаики",
-      "rectangle": "Прямоугольная область мозаики"
+    "modes": {
+      "decensor": "Удаление цензуры",
+      "paint": "Рисование",
+      "removal": "Удаление"
     },
-    "removeSelection": {
-      "circle": "Круглое выделение",
-      "pen": "Выделение пером",
-      "square": "Квадратное выделение"
+    "oval": "Овал",
+    "pan": "Перемещение",
+    "rectangle": "Прямоугольник",
+    "sections": {
+      "mode": "Режим инструмента",
+      "settings": "Настройки",
+      "supplemental": "Дополнительно",
+      "tool": "Инструмент"
     },
     "select": "Выбор",
-    "text": "Текст"
+    "text": "Добавить текстовый слой",
+    "toolbar": "Инструменты холста"
   },
   "updater": {
     "available": {

@@ -19,22 +19,24 @@ import { toast } from '@koharu/ui/components/toast'
 export type CanvasTool =
   | 'select'
   | 'text'
-  | 'draw'
+  | 'brush'
   | 'fill'
   | 'eraser'
-  | 'color_picker'
-  | 'remove'
-  | 'censor'
+  | 'oval'
+  | 'rectangle'
+  | 'eyedropper'
   | 'pan'
+export type ToolMode = 'removal' | 'decensor' | 'paint'
 export const MIN_BRUSH_DIAMETER = 1
 export const MAX_BRUSH_DIAMETER = 128
 export const MIN_FILL_TOLERANCE = 0
 export const MAX_FILL_TOLERANCE = 255
-export type RemoveSelectionTool = 'pen' | 'circle' | 'square'
-export type CensorSelectionTool = 'brush' | 'circle' | 'rectangle'
-
 export function isBrushTool(tool: CanvasTool): boolean {
-  return tool === 'draw' || tool === 'eraser' || tool === 'censor'
+  return tool === 'brush' || tool === 'eraser'
+}
+
+export function isContextualTool(tool: CanvasTool): boolean {
+  return tool === 'brush' || tool === 'eraser' || tool === 'oval' || tool === 'rectangle'
 }
 
 export interface CanvasBrush {
@@ -42,7 +44,7 @@ export interface CanvasBrush {
   color: string
 }
 export type InspectorSection = 'copy' | 'type' | 'layers'
-export type ShortcutAction = CanvasTool | 'fit'
+export type ShortcutAction = CanvasTool | ToolMode | 'fit'
 export type Shortcuts = Record<ShortcutAction, string>
 export type PipelineScope = 'page' | 'selected-pages' | 'project'
 export interface TextSelection {
@@ -76,11 +78,10 @@ interface KoharuStore {
   selectedLayers: EntityId[]
   selectedPages: EntityId[]
   textSelection: TextSelection | null
+  toolMode: ToolMode
   tool: CanvasTool
   brush: CanvasBrush
   fillTolerance: number
-  removeSelectionTool: RemoveSelectionTool
-  censorSelectionTool: CensorSelectionTool
   inspector: InspectorSection
   processingScope: PipelineScope
   processingStages: Stage[]
@@ -93,11 +94,10 @@ interface KoharuStore {
   setSettingsOpen: (open: boolean) => void
   selectLayers: (layers: EntityId[]) => void
   setTextSelection: (selection: TextSelection | null) => void
+  setToolMode: (mode: ToolMode) => void
   setTool: (tool: CanvasTool) => void
   setBrush: (brush: CanvasBrush) => void
   setFillTolerance: (tolerance: number) => void
-  setRemoveSelectionTool: (tool: RemoveSelectionTool) => void
-  setCensorSelectionTool: (tool: CensorSelectionTool) => void
   setShortcut: (action: ShortcutAction, key: string) => void
   requestCanvasFit: () => void
   dismissJob: (id: string) => void
@@ -107,13 +107,16 @@ interface KoharuStore {
 export const defaultShortcuts: Shortcuts = {
   select: 'v',
   text: 't',
-  draw: 'b',
+  brush: 'b',
   fill: 'g',
   eraser: 'e',
-  color_picker: 'i',
-  remove: 'j',
-  censor: 'c',
+  oval: 'o',
+  rectangle: 'r',
+  eyedropper: 'i',
   pan: 'h',
+  removal: 'j',
+  decensor: 'c',
+  paint: 'p',
   fit: '0',
 }
 
@@ -134,11 +137,10 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   selectedLayers: [],
   selectedPages: [],
   textSelection: null,
+  toolMode: 'paint',
   tool: 'select',
   brush: { diameter: 48, color: '#111111' },
   fillTolerance: 32,
-  removeSelectionTool: 'pen',
-  censorSelectionTool: 'brush',
   inspector: 'copy',
   processingScope: 'page',
   processingStages: [...pipelineStages],
@@ -152,11 +154,18 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   selectLayers: (selectedLayers) =>
     set({ selectedLayers: [...new Set(selectedLayers)], textSelection: null }),
   setTextSelection: (textSelection) => set({ textSelection }),
-  setTool: (tool) => set({ tool }),
+  setToolMode: (toolMode) =>
+    set((state) => ({
+      toolMode,
+      tool: isContextualTool(state.tool) ? state.tool : 'brush',
+    })),
+  setTool: (tool) =>
+    set({
+      tool,
+      ...(tool === 'eyedropper' || tool === 'fill' ? { toolMode: 'paint' as const } : {}),
+    }),
   setBrush: (brush) => set({ brush }),
   setFillTolerance: (fillTolerance) => set({ fillTolerance }),
-  setRemoveSelectionTool: (removeSelectionTool) => set({ removeSelectionTool }),
-  setCensorSelectionTool: (censorSelectionTool) => set({ censorSelectionTool }),
   setShortcut: (action, key) =>
     set((state) => ({
       shortcuts: { ...state.shortcuts, [action]: key.toLowerCase().slice(0, 1) },

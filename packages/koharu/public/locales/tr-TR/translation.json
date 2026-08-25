@@ -55,10 +55,12 @@
   },
   "canvas": {
     "empty": "Başlamak için bir sayfa seçin.",
+    "eraserRequiresLayer": "Silgiyi kullanmadan önce bu mod için düzenlenebilir bir katman seçin.",
     "fit": "Pencereye Sığdır",
     "fillRequiresImage": "Dolgu'yu kullanmadan önce düzenlenebilir bir boya veya görüntü katmanı seçin.",
     "inpaintSelection": "Seçimi Onar",
-    "inpaintSelectionCount": "Seçimler: {{count}}",
+    "removalMaskEmpty": "Devam etmek için bir kaldırma maskesi çizin",
+    "removalMaskReady": "Kaldırma maskesi hazır",
     "surface": "Koharu tuvali",
     "unavailable": "WebGPU tuvali kullanılamıyor"
   },
@@ -260,8 +262,8 @@
       "image": "Görüntü",
       "paint": "Boyama",
       "segmentation": "Segmentasyon maskesi",
-      "censor": "Sansür maskesi",
-      "mosaic": "Mozaik maskesi",
+      "censor": "Çubuk sansür maskesi",
+      "mosaic": "Mozaik sansür maskesi",
       "text": "Metin",
       "mainTextGroup": "Ana metin grubu",
       "sfxTextGroup": "SFX metin grubu"
@@ -564,34 +566,37 @@
     "zoom": "Yakınlaştırma"
   },
   "tools": {
+    "brush": "Fırça",
     "brushSize": "Fırça boyutu",
     "brushSizeInput": "Fırça boyutu",
     "brushSizePixels": "Fırça boyutu: {{size}} piksel",
     "brushSizeShort": "{{size}} px",
-    "color_picker": "Renk seçici",
     "decreaseBrushSize": "Fırça boyutunu azalt",
     "decreaseFillTolerance": "Dolgu toleransını azalt",
-    "draw": "Çizim",
     "eraser": "Silgi",
+    "eyedropper": "Damlalık",
     "fill": "Dolgu",
     "fillTolerance": "Dolgu toleransı",
     "fillToleranceValue": "Dolgu toleransı: {{value}}",
     "increaseBrushSize": "Fırça boyutunu artır",
     "increaseFillTolerance": "Dolgu toleransını artır",
-    "pan": "Kaydır",
-    "remove": "Kaldır",
-    "censorSelection": {
-      "brush": "Çubuk sansür fırçası",
-      "circle": "Dairesel mozaik bölgesi",
-      "rectangle": "Dikdörtgen mozaik bölgesi"
+    "modes": {
+      "decensor": "Sansürü kaldır",
+      "paint": "Boya",
+      "removal": "Kaldırma"
     },
-    "removeSelection": {
-      "circle": "Daire seçimi",
-      "pen": "Kalem seçimi",
-      "square": "Kare seçimi"
+    "oval": "Oval",
+    "pan": "Kaydır",
+    "rectangle": "Dikdörtgen",
+    "sections": {
+      "mode": "Araç modu",
+      "settings": "Ayarlar",
+      "supplemental": "Ek",
+      "tool": "Araç"
     },
     "select": "Seç",
-    "text": "Metin"
+    "text": "Metin katmanı ekle",
+    "toolbar": "Tuval araçları"
   },
   "updater": {
     "available": {

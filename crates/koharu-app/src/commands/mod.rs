@@ -113,12 +113,12 @@ pub fn bindings() -> tauri_specta::Builder<tauri::Cef> {
             canvas::get_canvas_page_manifest,
             canvas::get_canvas_page_resource,
             canvas::add_text_box,
-            canvas::commit_paint,
+            canvas::commit_raster_brush,
+            canvas::commit_raster_shape,
+            canvas::commit_raster_erase,
             canvas::commit_fill,
-            canvas::commit_censor,
-            canvas::commit_mosaic,
-            canvas::commit_erase,
             canvas::commit_transform,
+            canvas::reset_removal_mask,
             canvas::commit_inpaint,
         ])
         .disable_serde_phases()

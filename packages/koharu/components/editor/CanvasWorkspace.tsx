@@ -49,11 +49,11 @@ import {
 import { prefetchCanvasPages, workspaceColor, type CanvasColor } from '@koharu/bridge/canvas'
 import {
   commands,
+  type CanvasRasterMode,
   type Frame,
-  type InpaintSelection,
-  type MosaicRegion,
   type Page,
   type Point,
+  type RasterShape,
   type TransformFrame,
 } from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
@@ -63,12 +63,12 @@ const BRUSH_DIAMETER_STEP = 4
 const canvasCursors = {
   select: undefined,
   text: 'text',
-  draw: 'none',
+  brush: 'none',
   fill: 'crosshair',
   eraser: 'none',
-  color_picker: 'crosshair',
-  remove: 'none',
-  censor: 'none',
+  oval: 'crosshair',
+  rectangle: 'crosshair',
+  eyedropper: 'crosshair',
   pan: 'grab',
 } as const satisfies Record<CanvasTool, string | undefined>
 
@@ -77,21 +77,15 @@ type Gesture =
   | { kind: 'move'; pointer: number; start: Point; originals: TransformFrame[] }
   | { kind: 'region-move'; pointer: number; start: Point; original: TransformFrame }
   | { kind: 'text'; pointer: number; start: Point; frame: Frame }
-  | { kind: 'inpaint-selection'; pointer: number; selection: InpaintSelection }
-  | {
-      kind: 'mosaic-region'
-      pointer: number
-      revision: number
-      layer: string | null
-      region: MosaicRegion
-    }
+  | { kind: 'shape'; pointer: number; start: Point }
   | StrokeGesture
 
 interface StrokeGesture {
-  kind: 'paint' | 'erase' | 'censor'
+  kind: 'brush' | 'erase'
   pointer: number
   revision: number
   layer: string | null
+  mode: CanvasRasterMode
   points: Point[]
   diameter: number
   color?: CanvasColor
@@ -103,8 +97,16 @@ interface CanvasView {
 }
 
 interface StrokeUpdate {
-  kind: 'paint' | 'erase' | 'censor'
+  kind: 'brush' | 'erase'
   points: Point[]
+}
+
+interface PendingRasterShape {
+  revision: number
+  layer: string | null
+  mode: CanvasRasterMode
+  shape: RasterShape
+  color: CanvasColor
 }
 
 export function CanvasWorkspace() {
@@ -124,9 +126,8 @@ export function CanvasWorkspace() {
   const [previews, setPreviews] = useState<Record<string, Frame>>({})
   const [regionPreviews, setRegionPreviews] = useState<Record<string, Frame>>({})
   const [draft, setDraft] = useState<Frame | null>(null)
-  const [inpaintSelections, setInpaintSelections] = useState<InpaintSelection[]>([])
-  const [inpaintDraft, setInpaintDraft] = useState<InpaintSelection | null>(null)
-  const [mosaicDraft, setMosaicDraft] = useState<MosaicRegion | null>(null)
+  const pendingShapeRef = useRef<PendingRasterShape | null>(null)
+  const [pendingShape, setPendingShapeState] = useState<PendingRasterShape | null>(null)
   const [inpaintPending, setInpaintPending] = useState(false)
   const [hovered, setHovered] = useState<string | null>(null)
   const [cursor, setCursor] = useState<Point | null>(null)
@@ -142,16 +143,16 @@ export function CanvasWorkspace() {
   const canvasSize = useKoharuStore((state) => state.canvasSize)
   const fitCanvasRequest = useKoharuStore((state) => state.fitCanvasRequest)
   const layerFrames = useKoharuStore((state) => state.layerFrames)
+  const toolMode = useKoharuStore((state) => state.toolMode)
   const tool = useKoharuStore((state) => state.tool)
   const brush = useKoharuStore((state) => state.brush)
   const fillTolerance = useKoharuStore((state) => state.fillTolerance)
-  const removeSelectionTool = useKoharuStore((state) => state.removeSelectionTool)
-  const censorSelectionTool = useKoharuStore((state) => state.censorSelectionTool)
   const processing = useKoharuStore((state) =>
     Object.values(state.jobs).some((job) => job.state === 'running'),
   )
   const selected = useKoharuStore((state) => state.selectedLayers)
   const selectLayers = useKoharuStore((state) => state.selectLayers)
+  const setToolMode = useKoharuStore((state) => state.setToolMode)
   const setTool = useKoharuStore((state) => state.setTool)
   const setBrush = useKoharuStore((state) => state.setBrush)
   const requestCanvasFit = useKoharuStore((state) => state.requestCanvasFit)
@@ -160,59 +161,103 @@ export function CanvasWorkspace() {
   const pageId = page?.id
   const pageWidth = canvasSize[0] || page?.size.width
   const pageHeight = canvasSize[1] || page?.size.height
-  const activeRaster =
-    selected.length === 1
-      ? page?.layers.find(
-          (layer): layer is Extract<Page['layers'][number], { type: 'raster' }> =>
-            layer.id === selected[0] &&
+  const rasterLayers =
+    page?.layers.filter((layer): layer is Extract<Page['layers'][number], { type: 'raster' }> => {
+      if (layer.type !== 'raster') return false
+      const visibility = effectiveLayerVisibility(page.layers, layer)
+      return (
+        !layer.consumed &&
+        !effectiveLayerLocked(page.layers, layer) &&
+        visibility.visible &&
+        visibility.opacity > 0
+      )
+    }) ?? []
+  const selectedRaster =
+    selected.length === 1 ? rasterLayers.find((layer) => layer.id === selected[0]) : undefined
+  const contextualRaster = (kinds: ReadonlySet<string>) =>
+    (selectedRaster && kinds.has(selectedRaster.kind) ? selectedRaster : undefined) ??
+    [...rasterLayers].reverse().find((layer) => kinds.has(layer.kind))
+  const activeRemovalRaster = contextualRaster(new Set(['segmentation']))
+  const activeBarCensorRaster = contextualRaster(new Set(['censor']))
+  const activeMosaicCensorRaster = contextualRaster(new Set(['mosaic']))
+  const activeDecensorEraseRaster = contextualRaster(new Set(['censor', 'mosaic']))
+  const imageLayers =
+    page?.layers.filter(
+      (
+        layer,
+      ): layer is Extract<
+        Page['layers'][number],
+        { type: 'raster' } | { type: 'image' } | { type: 'artwork' }
+      > => {
+        if (
+          layer.type !== 'image' &&
+          layer.type !== 'artwork' &&
+          !(
             layer.type === 'raster' &&
-            !effectiveLayerLocked(page.layers, layer),
+            (layer.kind === 'artwork' || layer.kind === 'cleanup' || layer.kind === 'paint')
+          )
+        ) {
+          return false
+        }
+        const visibility = effectiveLayerVisibility(page.layers, layer)
+        return (
+          visibility.visible &&
+          visibility.opacity > 0 &&
+          (layer.type === 'artwork' || !effectiveLayerLocked(page.layers, layer))
         )
-      : undefined
-  const originalArtwork = page?.layers.find((layer) => layer.type === 'artwork')
-  const editableArtwork = page?.layers.find(
+      },
+    ) ?? []
+  const editableArtwork = imageLayers.find(
     (layer): layer is Extract<Page['layers'][number], { type: 'raster' }> =>
       layer.type === 'raster' && layer.kind === 'artwork',
   )
-  const editableArtworkTarget =
-    editableArtwork && page && !effectiveLayerLocked(page.layers, editableArtwork)
-      ? editableArtwork
-      : undefined
-  const selectedEraseTarget =
-    selected.length === 1
-      ? page?.layers.find(
-          (
-            layer,
-          ): layer is Extract<
-            Page['layers'][number],
-            { type: 'raster' } | { type: 'image' } | { type: 'artwork' }
-          > =>
-            layer.id === selected[0] &&
-            (layer.type === 'raster' || layer.type === 'image' || layer.type === 'artwork') &&
-            (layer.type === 'artwork' || !effectiveLayerLocked(page.layers, layer)),
-        )
-      : undefined
-  const activeEraseTarget =
-    selectedEraseTarget?.type === 'artwork'
-      ? editableArtwork
-        ? editableArtworkTarget
-        : selectedEraseTarget
-      : selectedEraseTarget
-  const activePaintRaster = activeRaster?.kind === 'paint' ? activeRaster : undefined
-  const activeArtworkRaster = activeRaster?.kind === 'artwork' ? activeRaster : undefined
+  const selectedImage =
+    selected.length === 1 ? imageLayers.find((layer) => layer.id === selected[0]) : undefined
+  const resolveArtwork = (layer: (typeof imageLayers)[number] | undefined) =>
+    layer?.type === 'artwork' && editableArtwork ? editableArtwork : layer
   const activePaintTarget =
-    activePaintRaster ??
-    activeArtworkRaster ??
-    editableArtworkTarget ??
-    (editableArtwork ? undefined : originalArtwork)
-  const activeCensorRaster = activeRaster?.kind === 'censor' ? activeRaster : undefined
-  const activeMosaicRaster = activeRaster?.kind === 'mosaic' ? activeRaster : undefined
-  const activeFillTarget =
-    activeEraseTarget?.type === 'raster' &&
-    activeEraseTarget.kind !== 'paint' &&
-    activeEraseTarget.kind !== 'artwork'
-      ? undefined
-      : activeEraseTarget
+    resolveArtwork(selectedImage) ?? resolveArtwork([...imageLayers].reverse().at(0))
+  const brushMode: CanvasRasterMode =
+    toolMode === 'removal' ? 'removal' : toolMode === 'decensor' ? 'bar_censor' : 'paint'
+  const brushTarget =
+    toolMode === 'removal'
+      ? activeRemovalRaster
+      : toolMode === 'decensor'
+        ? activeBarCensorRaster
+        : activePaintTarget
+  const eraseTarget =
+    toolMode === 'removal'
+      ? activeRemovalRaster
+      : toolMode === 'decensor'
+        ? activeDecensorEraseRaster
+        : activePaintTarget
+  const eraseMode: CanvasRasterMode =
+    toolMode === 'removal'
+      ? 'removal'
+      : toolMode === 'decensor'
+        ? eraseTarget?.type === 'raster' && eraseTarget.kind === 'mosaic'
+          ? 'mosaic_censor'
+          : 'bar_censor'
+        : 'paint'
+  const shapeMode: CanvasRasterMode =
+    toolMode === 'removal' ? 'removal' : toolMode === 'decensor' ? 'mosaic_censor' : 'paint'
+  const shapeTarget =
+    toolMode === 'removal'
+      ? activeRemovalRaster
+      : toolMode === 'decensor'
+        ? activeMosaicCensorRaster
+        : activePaintTarget
+  const contextualColor: [number, number, number, number] =
+    toolMode === 'removal'
+      ? [168, 85, 247, 255]
+      : toolMode === 'decensor'
+        ? [0, 255, 0, 180]
+        : hexToRgba(brush.color)
+
+  const setPendingShape = useCallback((value: PendingRasterShape | null) => {
+    pendingShapeRef.current = value
+    setPendingShapeState(value)
+  }, [])
 
   const enqueue = useCallback(<Result,>(operation: () => Promise<Result>): Promise<Result> => {
     const pending = commandQueue.current.then(operation)
@@ -223,30 +268,64 @@ export function CanvasWorkspace() {
     return pending
   }, [])
 
-  const resetInpaintSelection = useCallback(() => {
-    setInpaintSelections([])
-    setInpaintDraft(null)
-  }, [])
+  const rasterizePendingShape = useCallback(() => {
+    const pending = pendingShapeRef.current
+    if (!pending || commitPending.current) return
+    setPendingShape(null)
+    commitPending.current = true
+    void enqueue(() =>
+      call(
+        commands.commitRasterShape,
+        pending.revision,
+        pending.layer,
+        pending.mode,
+        pending.shape,
+        pending.color,
+      ),
+    )
+      .then((result) => {
+        selectLayers([result.layer])
+        return refresh(projectKey, pagesKey, pageKey)
+      })
+      .catch(() => undefined)
+      .finally(() => (commitPending.current = false))
+  }, [enqueue, selectLayers, setPendingShape])
 
-  const submitInpaintSelection = useCallback(() => {
-    if (canvasRevision === null || !inpaintSelections.length || inpaintPending || processing) return
+  const beginShapeTransform = useCallback((_elements: TransformFrame[]) => undefined, [])
+  const updateShapeTransform = useCallback(
+    (elements: TransformFrame[]) => {
+      const current = pendingShapeRef.current
+      const frame = elements[0]?.frame
+      if (!current || !frame) return
+      setPendingShape({ ...current, shape: { ...current.shape, frame } })
+    },
+    [setPendingShape],
+  )
+  const finishShapeTransform = useCallback(() => undefined, [])
+
+  const submitInpaint = useCallback(() => {
+    if (canvasRevision === null || !activeRemovalRaster || inpaintPending || processing) return
     commitPending.current = true
     setInpaintPending(true)
-    void enqueue(() => call(commands.commitInpaint, canvasRevision, inpaintSelections))
-      .then(() => resetInpaintSelection())
+    void enqueue(() => call(commands.commitInpaint, canvasRevision))
       .catch(() => undefined)
       .finally(() => {
         commitPending.current = false
         setInpaintPending(false)
       })
-  }, [
-    canvasRevision,
-    enqueue,
-    inpaintPending,
-    inpaintSelections,
-    processing,
-    resetInpaintSelection,
-  ])
+  }, [canvasRevision, activeRemovalRaster, enqueue, inpaintPending, processing])
+
+  const resetRemovalMask = useCallback(() => {
+    if (canvasRevision === null || !activeRemovalRaster || commitPending.current) return
+    commitPending.current = true
+    void enqueue(() => call(commands.resetRemovalMask, canvasRevision, activeRemovalRaster.id))
+      .then(() => {
+        selectLayers([])
+        return refresh(projectKey, pagesKey, pageKey)
+      })
+      .catch(() => undefined)
+      .finally(() => (commitPending.current = false))
+  }, [activeRemovalRaster, canvasRevision, enqueue, selectLayers])
 
   const transformUpdates = useFrameCommand((elements: TransformFrame[]) =>
     canvas?.updateTransform(elements),
@@ -358,12 +437,11 @@ export function CanvasWorkspace() {
   const cancelGesture = useCallback(() => {
     const current = gesture.current
     gesture.current = null
-    if (current?.kind === 'paint' || current?.kind === 'erase' || current?.kind === 'censor') {
+    if (current?.kind === 'brush' || current?.kind === 'erase') {
       strokeUpdates.clear()
       canvas?.cancelStroke()
     }
-    if (current?.kind === 'inpaint-selection') setInpaintDraft(null)
-    if (current?.kind === 'mosaic-region') setMosaicDraft(null)
+    if (current?.kind === 'shape') setPendingShape(null)
     if (transformActive.current) {
       transformUpdates.clear()
       transformActive.current = false
@@ -377,7 +455,7 @@ export function CanvasWorkspace() {
     setDraft(null)
     setPreviews({})
     setRegionPreviews({})
-  }, [canvas, strokeUpdates, transformUpdates])
+  }, [canvas, setPendingShape, strokeUpdates, transformUpdates])
 
   const fitCanvas = useCallback(() => {
     const element = surface.current
@@ -466,15 +544,30 @@ export function CanvasWorkspace() {
     fitCanvas()
   }, [fitCanvas, fitCanvasRequest])
 
-  useEffect(() => cancelGesture, [cancelGesture, canvasGeneration, canvasRevision, page?.id, tool])
+  useEffect(
+    () => cancelGesture,
+    [cancelGesture, canvasGeneration, canvasRevision, page?.id, tool, toolMode],
+  )
+
+  useEffect(() => setPendingShape(null), [pageId, setPendingShape])
 
   useEffect(() => {
-    resetInpaintSelection()
-  }, [pageId, resetInpaintSelection])
-
-  useEffect(() => cancelGesture, [cancelGesture, removeSelectionTool])
-
-  useEffect(() => cancelGesture, [cancelGesture, censorSelectionTool])
+    if (!pendingShape) return
+    const rasterizeOnClickAway = (event: PointerEvent) => {
+      const target = event.target
+      if (
+        target instanceof Element &&
+        target.closest('[data-transform-body], [data-resize-handle], [data-rotate-handle]')
+      ) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      rasterizePendingShape()
+    }
+    document.addEventListener('pointerdown', rasterizeOnClickAway, true)
+    return () => document.removeEventListener('pointerdown', rasterizeOnClickAway, true)
+  }, [pendingShape, rasterizePendingShape])
 
   useEffect(() => {
     const editable = (target: EventTarget | null) =>
@@ -497,6 +590,10 @@ export function CanvasWorkspace() {
       const command = event.ctrlKey || event.metaKey
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault()
+        if (pendingShapeRef.current) {
+          setPendingShape(null)
+          return
+        }
         void call(event.shiftKey ? commands.redo : commands.undo)
           .then(() => refresh(projectKey, pagesKey, pageKey))
           .catch(() => undefined)
@@ -550,14 +647,36 @@ export function CanvasWorkspace() {
       }
       if (event.key === 'Escape') {
         cancelGesture()
+        setPendingShape(null)
         colorSampling?.cancel()
         selectLayers([])
         return
       }
-      const next = (
-        ['select', 'text', 'draw', 'fill', 'eraser', 'color_picker', 'remove', 'pan'] as const
-      ).find((action) => state.shortcuts[action] === event.key.toLowerCase())
-      if (next) setTool(next)
+      const key = event.key.toLowerCase()
+      const nextTool = (
+        [
+          'select',
+          'text',
+          'brush',
+          'fill',
+          'eraser',
+          'oval',
+          'rectangle',
+          'eyedropper',
+          'pan',
+        ] as const
+      ).find((action) => state.shortcuts[action] === key)
+      const nextMode = (['removal', 'decensor', 'paint'] as const).find(
+        (action) => state.shortcuts[action] === key,
+      )
+      if (nextTool || nextMode) {
+        if (pendingShapeRef.current) {
+          rasterizePendingShape()
+          return
+        }
+        if (nextTool) setTool(nextTool)
+        else if (nextMode) setToolMode(nextMode)
+      }
     }
 
     const up = (event: KeyboardEvent) => {
@@ -566,7 +685,8 @@ export function CanvasWorkspace() {
     }
     const blur = () => {
       spaceHeld.current = false
-      cancelGesture()
+      if (pendingShapeRef.current) rasterizePendingShape()
+      else cancelGesture()
     }
 
     window.addEventListener('keydown', down)
@@ -583,8 +703,11 @@ export function CanvasWorkspace() {
     page,
     project?.can_paste,
     requestCanvasFit,
+    rasterizePendingShape,
     selectLayers,
+    setPendingShape,
     setTool,
+    setToolMode,
   ])
 
   const clientPagePoint = (clientX: number, clientY: number) =>
@@ -610,7 +733,12 @@ export function CanvasWorkspace() {
 
   const moveGesture = (
     pointer: number,
-    samples: ReadonlyArray<{ clientX: number; clientY: number }>,
+    samples: ReadonlyArray<{
+      clientX: number
+      clientY: number
+      ctrlKey?: boolean
+      shiftKey?: boolean
+    }>,
   ) => {
     const current = gesture.current
     const sample = samples.at(-1)
@@ -672,16 +800,18 @@ export function CanvasWorkspace() {
     } else if (current.kind === 'text') {
       current.frame = draftFrame(current.start, point)
       setDraft(current.frame)
-    } else if (current.kind === 'paint' || current.kind === 'erase' || current.kind === 'censor') {
+    } else if (current.kind === 'brush' || current.kind === 'erase') {
       current.points.push(...points)
       strokeUpdates.schedule({ kind: current.kind, points })
-    } else if (current.kind === 'inpaint-selection') {
-      if (current.selection.type === 'pen') current.selection.points.push(...points)
-      else current.selection.end = point
-      setInpaintDraft({ ...current.selection })
-    } else if (current.kind === 'mosaic-region') {
-      current.region.end = point
-      setMosaicDraft({ ...current.region })
+    } else if (current.kind === 'shape') {
+      const pending = pendingShapeRef.current
+      if (!pending) return
+      const end =
+        sample.ctrlKey || sample.shiftKey ? constrainedShapeEnd(current.start, point) : point
+      setPendingShape({
+        ...pending,
+        shape: { ...pending.shape, frame: draftFrame(current.start, end) },
+      })
     }
   }
 
@@ -721,22 +851,9 @@ export function CanvasWorkspace() {
           return refresh(projectKey, pagesKey, pageKey)
         })
         .catch(() => undefined)
-    } else if (current.kind === 'inpaint-selection') {
-      setInpaintSelections((selections) => [...selections, current.selection])
-      setInpaintDraft(null)
-    } else if (current.kind === 'mosaic-region') {
-      setMosaicDraft(null)
-      commitPending.current = true
-      void enqueue(() =>
-        call(commands.commitMosaic, current.revision, current.layer, current.region),
-      )
-        .then((result) => {
-          selectLayers([result.layer])
-          return refresh(projectKey, pagesKey, pageKey)
-        })
-        .catch(() => undefined)
-        .finally(() => (commitPending.current = false))
-    } else if (current.kind === 'paint' || current.kind === 'erase' || current.kind === 'censor') {
+    } else if (current.kind === 'shape') {
+      return
+    } else if (current.kind === 'brush' || current.kind === 'erase') {
       strokeUpdates.commit()
       try {
         canvas?.finishStroke()
@@ -745,41 +862,36 @@ export function CanvasWorkspace() {
         return
       }
       const operation =
-        current.kind === 'paint'
+        current.kind === 'brush'
           ? enqueue(() =>
-              call(commands.commitPaint, current.revision, current.layer, current.points, {
-                diameter: current.diameter,
-                color: current.color!,
-              }),
+              call(
+                commands.commitRasterBrush,
+                current.revision,
+                current.layer,
+                current.mode,
+                current.points,
+                {
+                  diameter: current.diameter,
+                  color: current.color!,
+                },
+              ),
             ).then((result) => {
               selectLayers([result.layer])
               return refresh(projectKey, pagesKey, pageKey)
             })
-          : current.kind === 'censor'
-            ? enqueue(() =>
-                call(
-                  commands.commitCensor,
-                  current.revision,
-                  current.layer,
-                  current.points,
-                  current.diameter,
-                ),
-              ).then((result) => {
-                selectLayers([result.layer])
-                return refresh(projectKey, pagesKey, pageKey)
-              })
-            : enqueue(() =>
-                call(
-                  commands.commitErase,
-                  current.revision,
-                  current.layer!,
-                  current.points,
-                  current.diameter,
-                ),
-              ).then((result) => {
-                selectLayers([result.layer])
-                return refresh(projectKey, pagesKey, pageKey)
-              })
+          : enqueue(() =>
+              call(
+                commands.commitRasterErase,
+                current.revision,
+                current.layer!,
+                current.mode,
+                current.points,
+                current.diameter,
+              ),
+            ).then((result) => {
+              selectLayers([result.layer])
+              return refresh(projectKey, pagesKey, pageKey)
+            })
       commitPending.current = true
       void operation
         .catch(() => canvas?.cancelStroke())
@@ -799,13 +911,7 @@ export function CanvasWorkspace() {
           aria-busy={page ? canvasState.status !== 'ready' : undefined}
           className='relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden bg-[var(--surface-canvas)] outline-none'
           style={{
-            cursor:
-              page && canvasState.status === 'ready'
-                ? (tool === 'remove' && removeSelectionTool !== 'pen') ||
-                  (tool === 'censor' && censorSelectionTool !== 'brush')
-                  ? 'crosshair'
-                  : canvasCursors[tool]
-                : undefined,
+            cursor: page && canvasState.status === 'ready' ? canvasCursors[tool] : undefined,
           }}
           onContextMenu={(event) => event.preventDefault()}
           onPointerDown={(event) => {
@@ -881,32 +987,32 @@ export function CanvasWorkspace() {
               const frame = draftFrame(point, point)
               gesture.current = { kind: 'text', pointer: event.pointerId, start: point, frame }
               setDraft(frame)
-            } else if (tool === 'draw') {
+            } else if (tool === 'brush') {
               strokeUpdates.clear()
-              const color = hexToRgba(brush.color)
               gesture.current = {
-                kind: 'paint',
+                kind: 'brush',
                 pointer: event.pointerId,
                 revision: canvasRevision,
-                layer: activePaintTarget?.id ?? null,
+                layer: brushTarget?.id ?? null,
+                mode: brushMode,
                 points: [point],
                 diameter: brush.diameter,
-                color,
+                color: contextualColor,
               }
               try {
                 canvas.beginStroke({
                   kind: 'paint',
-                  layer: activePaintTarget?.id ?? null,
+                  layer: brushTarget?.id ?? null,
                   point,
                   diameter: brush.diameter,
-                  color,
+                  color: contextualColor,
                 })
               } catch (error) {
                 gesture.current = null
                 receiveError(errorMessage(error))
               }
             } else if (tool === 'fill') {
-              if (!activeFillTarget) {
+              if (!activePaintTarget) {
                 receiveError(t('canvas.fillRequiresImage'))
                 return
               }
@@ -915,7 +1021,7 @@ export function CanvasWorkspace() {
                 call(
                   commands.commitFill,
                   canvasRevision,
-                  activeFillTarget.id,
+                  activePaintTarget.id,
                   point,
                   hexToRgba(brush.color),
                   fillTolerance,
@@ -928,8 +1034,8 @@ export function CanvasWorkspace() {
                 .catch(() => undefined)
                 .finally(() => (commitPending.current = false))
             } else if (tool === 'eraser') {
-              if (!activeEraseTarget) {
-                receiveError('Select an editable image layer before using the Eraser.')
+              if (!eraseTarget) {
+                receiveError(t('canvas.eraserRequiresLayer'))
                 return
               }
               strokeUpdates.clear()
@@ -937,14 +1043,15 @@ export function CanvasWorkspace() {
                 kind: 'erase',
                 pointer: event.pointerId,
                 revision: canvasRevision,
-                layer: activeEraseTarget.id,
+                layer: eraseTarget.id,
+                mode: eraseMode,
                 points: [point],
                 diameter: brush.diameter,
               }
               try {
                 canvas.beginStroke({
                   kind: 'erase',
-                  layer: activeEraseTarget.id,
+                  layer: eraseTarget.id,
                   point,
                   diameter: brush.diameter,
                 })
@@ -952,57 +1059,18 @@ export function CanvasWorkspace() {
                 gesture.current = null
                 receiveError(errorMessage(error))
               }
-            } else if (tool === 'remove') {
-              const selection: InpaintSelection =
-                removeSelectionTool === 'pen'
-                  ? { type: 'pen', points: [point], diameter: brush.diameter }
-                  : { type: removeSelectionTool, start: point, end: point }
-              gesture.current = {
-                kind: 'inpaint-selection',
-                pointer: event.pointerId,
-                selection,
-              }
-              setInpaintDraft(selection)
-            } else if (tool === 'censor') {
-              if (censorSelectionTool !== 'brush') {
-                const region: MosaicRegion = {
-                  type: censorSelectionTool,
-                  start: point,
-                  end: point,
-                }
-                gesture.current = {
-                  kind: 'mosaic-region',
-                  pointer: event.pointerId,
-                  revision: canvasRevision,
-                  layer: activeMosaicRaster?.id ?? null,
-                  region,
-                }
-                setMosaicDraft(region)
-                event.preventDefault()
-                return
-              }
-              strokeUpdates.clear()
-              gesture.current = {
-                kind: 'censor',
-                pointer: event.pointerId,
+            } else if (tool === 'oval' || tool === 'rectangle') {
+              const frame = draftFrame(point, point)
+              setPendingShape({
                 revision: canvasRevision,
-                layer: activeCensorRaster?.id ?? null,
-                points: [point],
-                diameter: brush.diameter,
-              }
-              try {
-                canvas.beginStroke({
-                  kind: 'paint',
-                  layer: activeCensorRaster?.id ?? null,
-                  point,
-                  diameter: brush.diameter,
-                  color: [0, 255, 0, 180],
-                })
-              } catch (error) {
-                gesture.current = null
-                receiveError(errorMessage(error))
-              }
-            } else if (tool === 'color_picker') {
+                layer: shapeTarget?.id ?? null,
+                mode: shapeMode,
+                shape: { type: tool, frame },
+                color: contextualColor,
+              })
+              gesture.current = { kind: 'shape', pointer: event.pointerId, start: point }
+            } else if (tool === 'eyedropper') {
+              if (toolMode !== 'paint') setToolMode('paint')
               void canvas
                 .sampleColor(physical)
                 .then((color) => {
@@ -1035,11 +1103,7 @@ export function CanvasWorkspace() {
           onWheel={(event) => {
             if (!page) return
             event.preventDefault()
-            if (
-              event.altKey &&
-              ((isBrushTool(tool) && (tool !== 'censor' || censorSelectionTool === 'brush')) ||
-                (tool === 'remove' && removeSelectionTool === 'pen'))
-            ) {
+            if (event.altKey && isBrushTool(tool)) {
               if (event.deltaY !== 0) {
                 const currentBrush = useKoharuStore.getState().brush
                 const delta = event.deltaY < 0 ? BRUSH_DIAMETER_STEP : -BRUSH_DIAMETER_STEP
@@ -1108,43 +1172,42 @@ export function CanvasWorkspace() {
               draft={draft}
               cursor={cursor}
               brushSize={brush.diameter}
-              showBrushCursor={
-                (isBrushTool(tool) && (tool !== 'censor' || censorSelectionTool === 'brush')) ||
-                (tool === 'remove' && removeSelectionTool === 'pen')
-              }
-              inpaintSelections={tool === 'remove' ? inpaintSelections : []}
-              inpaintDraft={tool === 'remove' ? inpaintDraft : null}
-              mosaicDraft={tool === 'censor' ? mosaicDraft : null}
+              showBrushCursor={isBrushTool(tool)}
+              shapeDraft={pendingShape?.shape ?? null}
+              shapeColor={pendingShape?.color ?? contextualColor}
               onTransformStart={beginTransform}
               onTransformFrame={updateTransform}
               onTransformEnd={finishTransform}
               onRegionTransformStart={beginRegionTransform}
               onRegionTransformFrame={updateRegionTransform}
               onRegionTransformEnd={finishRegionTransform}
+              onShapeTransformStart={beginShapeTransform}
+              onShapeTransformFrame={updateShapeTransform}
+              onShapeTransformEnd={finishShapeTransform}
             />
           )}
-          {page && canvasState.status === 'ready' && tool === 'remove' && (
+          {page && canvasState.status === 'ready' && toolMode === 'removal' && (
             <div
               data-canvas-control
               className='absolute right-3 bottom-3 z-20 flex items-center gap-3 rounded-xl border border-border bg-[var(--surface-floating)] px-3 py-2 shadow-[var(--shadow-toolrail)]'
             >
               <span className='text-xs text-muted-foreground'>
-                {t('canvas.inpaintSelectionCount', { count: inpaintSelections.length })}
+                {t(activeRemovalRaster ? 'canvas.removalMaskReady' : 'canvas.removalMaskEmpty')}
               </span>
               <Button
                 type='button'
                 variant='ghost'
                 size='sm'
-                disabled={!inpaintSelections.length || inpaintPending}
-                onClick={resetInpaintSelection}
+                disabled={!activeRemovalRaster || inpaintPending}
+                onClick={resetRemovalMask}
               >
                 {t('common.reset')}
               </Button>
               <Button
                 type='button'
                 size='sm'
-                disabled={!inpaintSelections.length || inpaintPending || processing}
-                onClick={submitInpaintSelection}
+                disabled={!activeRemovalRaster || inpaintPending || processing}
+                onClick={submitInpaint}
               >
                 {t('canvas.inpaintSelection')}
               </Button>
@@ -1220,6 +1283,16 @@ function hexToRgba(hex: string): [number, number, number, number] {
     Number.parseInt(value.slice(4, 6), 16),
     255,
   ]
+}
+
+function constrainedShapeEnd(start: Point, end: Point): Point {
+  const deltaX = end.x - start.x
+  const deltaY = end.y - start.y
+  const size = Math.max(Math.abs(deltaX), Math.abs(deltaY), 1)
+  return {
+    x: start.x + size * (deltaX < 0 ? -1 : 1),
+    y: start.y + size * (deltaY < 0 ? -1 : 1),
+  }
 }
 
 function rgbaToHex(color: [number, number, number, number]): string {
