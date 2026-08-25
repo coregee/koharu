@@ -56,7 +56,7 @@ pub enum RasterLayerKind {
     Segmentation,
 }
 
-/// A full-page transparent pixel layer composited above the page source.
+/// A full-page pixel layer composited above the immutable page source.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 pub struct RasterLayer {

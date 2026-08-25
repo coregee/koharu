@@ -251,6 +251,7 @@
     "mainText": "메인 텍스트",
     "sfxText": "효과음 텍스트",
     "kinds": {
+      "artwork": "편집 가능한 아트워크",
       "bubble": "말풍선",
       "cleanup": "정리",
       "dialogue": "대사",
@@ -271,6 +272,7 @@
     "moveUp": "{{name}} 위로 이동",
     "opacityLabel": "{{name}} 불투명도",
     "originalArtwork": "원본 아트워크",
+    "editableArtwork": "아트워크",
     "regionShape": "모양",
     "regionShapeLabel": "{{name}} 영역 모양",
     "regionShapes": {

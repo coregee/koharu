@@ -169,7 +169,16 @@ export function CanvasWorkspace() {
             !effectiveLayerLocked(page.layers, layer),
         )
       : undefined
-  const activeEraseTarget =
+  const originalArtwork = page?.layers.find((layer) => layer.type === 'artwork')
+  const editableArtwork = page?.layers.find(
+    (layer): layer is Extract<Page['layers'][number], { type: 'raster' }> =>
+      layer.type === 'raster' && layer.kind === 'artwork',
+  )
+  const editableArtworkTarget =
+    editableArtwork && page && !effectiveLayerLocked(page.layers, editableArtwork)
+      ? editableArtwork
+      : undefined
+  const selectedEraseTarget =
     selected.length === 1
       ? page?.layers.find(
           (
@@ -183,11 +192,25 @@ export function CanvasWorkspace() {
             (layer.type === 'artwork' || !effectiveLayerLocked(page.layers, layer)),
         )
       : undefined
+  const activeEraseTarget =
+    selectedEraseTarget?.type === 'artwork'
+      ? editableArtwork
+        ? editableArtworkTarget
+        : selectedEraseTarget
+      : selectedEraseTarget
   const activePaintRaster = activeRaster?.kind === 'paint' ? activeRaster : undefined
+  const activeArtworkRaster = activeRaster?.kind === 'artwork' ? activeRaster : undefined
+  const activePaintTarget =
+    activePaintRaster ??
+    activeArtworkRaster ??
+    editableArtworkTarget ??
+    (editableArtwork ? undefined : originalArtwork)
   const activeCensorRaster = activeRaster?.kind === 'censor' ? activeRaster : undefined
   const activeMosaicRaster = activeRaster?.kind === 'mosaic' ? activeRaster : undefined
   const activeFillTarget =
-    activeEraseTarget?.type === 'raster' && activeEraseTarget.kind !== 'paint'
+    activeEraseTarget?.type === 'raster' &&
+    activeEraseTarget.kind !== 'paint' &&
+    activeEraseTarget.kind !== 'artwork'
       ? undefined
       : activeEraseTarget
 
@@ -865,7 +888,7 @@ export function CanvasWorkspace() {
                 kind: 'paint',
                 pointer: event.pointerId,
                 revision: canvasRevision,
-                layer: activePaintRaster?.id ?? null,
+                layer: activePaintTarget?.id ?? null,
                 points: [point],
                 diameter: brush.diameter,
                 color,
@@ -873,7 +896,7 @@ export function CanvasWorkspace() {
               try {
                 canvas.beginStroke({
                   kind: 'paint',
-                  layer: activePaintRaster?.id ?? null,
+                  layer: activePaintTarget?.id ?? null,
                   point,
                   diameter: brush.diameter,
                   color,

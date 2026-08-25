@@ -492,6 +492,56 @@ impl Project {
         self.session.snapshot()
     }
 
+    pub(super) async fn add_imported_pages(
+        &mut self,
+        pages: Vec<super::import::Page>,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let source = AssetRole::new("source")?;
+        let patch = snapshot.patch(|edit| {
+            for imported in pages {
+                let page = edit.add_page(
+                    PageDraft::new(
+                        imported.name,
+                        f64::from(imported.width),
+                        f64::from(imported.height),
+                    ),
+                    At::End,
+                )?;
+                let metadata = AssetMetadata {
+                    width: Some(imported.width),
+                    height: Some(imported.height),
+                    attributes: Default::default(),
+                };
+                edit.set_asset(
+                    page,
+                    &source,
+                    AssetInput::new(
+                        imported.bytes.clone(),
+                        imported.format.to_mime_type(),
+                        metadata.clone(),
+                    ),
+                )?;
+                let artwork = edit.add_entity(page, At::Start)?;
+                edit.set(
+                    artwork,
+                    &SceneRasterLayer {
+                        origin: Origin::User,
+                        name: "Artwork".to_owned(),
+                        kind: RasterLayerKind::Artwork,
+                    },
+                )?;
+                edit.set_asset(
+                    artwork,
+                    &source,
+                    AssetInput::new(imported.bytes, imported.format.to_mime_type(), metadata),
+                )?;
+            }
+            Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
     pub(crate) fn revision(&self) -> Revision {
         self.snapshot().revision()
     }
@@ -1540,7 +1590,28 @@ impl Project {
             bail!("raster stroke points must be finite");
         }
         let snapshot = self.snapshot();
+        let source = AssetRole::new("source")?;
+        let artwork = Self::artwork_layer(&snapshot, page)?;
+        let layer = if layer == Some(page) {
+            artwork.or(Some(page))
+        } else if layer.is_none()
+            && mode == RasterStrokeMode::Paint
+            && new_layer_kind == RasterLayerKind::Paint
+        {
+            artwork.or(if snapshot.asset(page, &source)?.is_some() {
+                Some(page)
+            } else {
+                None
+            })
+        } else {
+            layer
+        };
+        let duplicates_original = layer == Some(page);
+        if duplicates_original && new_layer_kind != RasterLayerKind::Paint {
+            bail!("the original artwork can only be duplicated into an editable artwork layer");
+        }
         if let Some(layer) = layer
+            && layer != page
             && Self::is_effectively_locked(&snapshot, layer)?
         {
             bail!("locked raster layers cannot be edited");
@@ -1554,14 +1625,10 @@ impl Project {
         let mut raster_layer = None;
         let mut promote_layer = false;
         let mut raster_generation = None;
-        let source = AssetRole::new("source")?;
         let mut asset_attributes = Default::default();
         let mut placement = RasterPlacement::IDENTITY;
         let mut image = if let Some(layer) = layer {
             if layer == page {
-                if mode != RasterStrokeMode::Erase {
-                    bail!("the original artwork only accepts erase strokes");
-                }
                 let asset = snapshot
                     .asset(page, &source)?
                     .context("the original artwork has no source asset")?;
@@ -1573,14 +1640,15 @@ impl Project {
                     image.width(),
                     image.height(),
                 )?;
-                promote_layer = snapshot
-                    .component::<EntityOrigin>(page)?
-                    .is_some_and(|origin| origin.origin != Origin::User);
                 image
             } else if snapshot.parent(layer)? != Some(page) {
                 bail!("the raster target must be a layer on the active page");
             } else if let Some(target) = snapshot.component::<SceneRasterLayer>(layer)? {
-                if mode == RasterStrokeMode::Paint && target.kind != new_layer_kind {
+                if mode == RasterStrokeMode::Paint
+                    && target.kind != new_layer_kind
+                    && !(new_layer_kind == RasterLayerKind::Paint
+                        && target.kind == RasterLayerKind::Artwork)
+                {
                     bail!("the raster target kind does not match the selected brush");
                 }
                 if target.kind == RasterLayerKind::Segmentation {
@@ -1636,7 +1704,13 @@ impl Project {
         let (output_width, output_height) = image.dimensions();
         let mut bytes = Cursor::new(Vec::new());
         DynamicImage::ImageRgba8(image).write_to(&mut bytes, ImageFormat::Png)?;
-        let layer_label = match new_layer_kind {
+        let created_layer_kind = if duplicates_original {
+            RasterLayerKind::Artwork
+        } else {
+            new_layer_kind
+        };
+        let layer_label = match created_layer_kind {
+            RasterLayerKind::Artwork => "Artwork",
             RasterLayerKind::Censor => "Censor",
             RasterLayerKind::Mosaic => "Mosaic",
             RasterLayerKind::Paint => "Paint",
@@ -1652,12 +1726,12 @@ impl Project {
                         .component::<SceneRasterLayer>(*entity)
                         .ok()
                         .flatten()
-                        .is_some_and(|layer| layer.kind == new_layer_kind)
+                        .is_some_and(|layer| layer.kind == created_layer_kind)
                 })
                 .count()
                 + 1
         );
-        let mut committed_layer = layer;
+        let mut committed_layer = layer.filter(|layer| *layer != page);
         let mut edit =
             raster_generation.map_or_else(|| snapshot.edit(), |owner| snapshot.edit_as(owner));
         {
@@ -1671,17 +1745,21 @@ impl Project {
                 }
                 layer
             } else {
-                let at = snapshot
-                    .page(page)?
-                    .text_group(SceneTextGroupKind::Main)?
-                    .map_or(At::End, |group| At::Before(group.id()));
+                let at = if created_layer_kind == RasterLayerKind::Artwork {
+                    At::Start
+                } else {
+                    snapshot
+                        .page(page)?
+                        .text_group(SceneTextGroupKind::Main)?
+                        .map_or(At::End, |group| At::Before(group.id()))
+                };
                 let layer = edit.add_entity(page, at)?;
                 edit.set(
                     layer,
                     &SceneRasterLayer {
                         origin: Origin::User,
                         name,
-                        kind: new_layer_kind,
+                        kind: created_layer_kind,
                     },
                 )?;
                 committed_layer = Some(layer);
@@ -1715,12 +1793,18 @@ impl Project {
         point: ScenePoint,
         color: [u8; 4],
         tolerance: u8,
-    ) -> Result<Option<Commit>> {
+    ) -> Result<(Option<Commit>, EntityId)> {
         if !point.x.is_finite() || !point.y.is_finite() {
             bail!("raster fill point must be finite");
         }
         let snapshot = self.snapshot();
-        if Self::is_effectively_locked(&snapshot, layer)? {
+        let layer = if layer == page {
+            Self::artwork_layer(&snapshot, page)?.unwrap_or(page)
+        } else {
+            layer
+        };
+        let duplicates_original = layer == page;
+        if !duplicates_original && Self::is_effectively_locked(&snapshot, layer)? {
             bail!("locked raster layers cannot be edited");
         }
         let page_value = snapshot.page(page)?.page()?;
@@ -1746,17 +1830,18 @@ impl Project {
                 image.width(),
                 image.height(),
             )?;
-            promote_layer = snapshot
-                .component::<EntityOrigin>(page)?
-                .is_some_and(|origin| origin.origin != Origin::User);
+            promote_layer = false;
             (image, placement)
         } else {
             if snapshot.parent(layer)? != Some(page) {
                 bail!("the fill target must be a layer on the active page");
             }
             if let Some(target) = snapshot.component::<SceneRasterLayer>(layer)? {
-                if target.kind != RasterLayerKind::Paint {
-                    bail!("only paint raster layers accept color fills");
+                if !matches!(
+                    target.kind,
+                    RasterLayerKind::Artwork | RasterLayerKind::Paint
+                ) {
+                    bail!("only artwork and paint raster layers accept color fills");
                 }
                 promote_layer = target.origin != Origin::User
                     || snapshot
@@ -1817,13 +1902,30 @@ impl Project {
             color,
             tolerance,
         ) {
-            return Ok(None);
+            return Ok((None, layer));
         }
 
         let (width, height) = image.dimensions();
         let mut bytes = Cursor::new(Vec::new());
         DynamicImage::ImageRgba8(image).write_to(&mut bytes, ImageFormat::Png)?;
-        let patch = snapshot.patch(|edit| {
+        let mut committed_layer = (!duplicates_original).then_some(layer);
+        let mut edit = snapshot.edit();
+        {
+            let layer = if let Some(layer) = committed_layer {
+                layer
+            } else {
+                let layer = edit.add_entity(page, At::Start)?;
+                edit.set(
+                    layer,
+                    &SceneRasterLayer {
+                        origin: Origin::User,
+                        name: "Artwork".to_owned(),
+                        kind: RasterLayerKind::Artwork,
+                    },
+                )?;
+                committed_layer = Some(layer);
+                layer
+            };
             if promote_layer {
                 edit.promote_entity_to_user(layer)?;
                 if let Some(mut raster) = raster_layer {
@@ -1843,9 +1945,23 @@ impl Project {
                         attributes: asset_attributes,
                     },
                 ),
-            )
-        })?;
-        Ok(Some(self.commit(patch).await?))
+            )?;
+        }
+        let patch = edit.finish()?;
+        Ok((
+            Some(self.commit(patch).await?),
+            committed_layer.expect("a fill target was selected or added while building the patch"),
+        ))
+    }
+
+    fn artwork_layer(snapshot: &Snapshot, page: EntityId) -> Result<Option<EntityId>> {
+        Ok(snapshot.children(page)?.find(|entity| {
+            snapshot
+                .component::<SceneRasterLayer>(*entity)
+                .ok()
+                .flatten()
+                .is_some_and(|layer| layer.kind == RasterLayerKind::Artwork)
+        }))
     }
 
     pub(crate) async fn undo(&mut self) -> Result<Commit> {
@@ -3017,7 +3133,104 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn original_and_imported_image_erasing_are_undoable() {
+    async fn imported_pages_keep_an_immutable_source_and_default_artwork_layer() {
+        let session = Session::memory().await.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+        let image = RgbaImage::from_pixel(10, 20, image::Rgba([40, 80, 120, 255]));
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut encoded, ImageFormat::Png)
+            .unwrap();
+
+        let commit = project
+            .add_imported_pages(vec![crate::commands::import::Page {
+                name: "page.png".to_owned(),
+                bytes: Arc::from(encoded.into_inner()),
+                format: ImageFormat::Png,
+                width: 10,
+                height: 20,
+            }])
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+
+        let snapshot = project.snapshot();
+        let page = snapshot.pages().next().unwrap().id();
+        let artwork = snapshot
+            .children(page)
+            .unwrap()
+            .find(|entity| {
+                snapshot
+                    .component::<SceneRasterLayer>(*entity)
+                    .unwrap()
+                    .is_some_and(|layer| layer.kind == RasterLayerKind::Artwork)
+            })
+            .unwrap();
+        let source = AssetRole::new("source").unwrap();
+        assert_eq!(
+            snapshot.asset(page, &source).unwrap().unwrap().blob,
+            snapshot.asset(artwork, &source).unwrap().unwrap().blob
+        );
+        let view = Project::page(&snapshot, page).unwrap();
+        assert!(
+            view.layers
+                .iter()
+                .any(|layer| matches!(layer, Layer::Artwork { locked: true, .. }))
+        );
+        assert!(view.layers.iter().any(|layer| matches!(
+            layer,
+            Layer::Raster {
+                id,
+                kind: RasterLayerKind::Artwork,
+                locked: false,
+                ..
+            } if *id == artwork
+        )));
+
+        let original_blob = snapshot.asset(page, &source).unwrap().unwrap().blob;
+        let original_artwork_blob = snapshot.asset(artwork, &source).unwrap().unwrap().blob;
+        let (commit, painted) = project
+            .apply_raster_stroke(
+                page,
+                None,
+                RasterStrokeMode::Paint,
+                RasterLayerKind::Paint,
+                [255, 255, 255, 255],
+                4.0,
+                vec![ScenePoint { x: 5.0, y: 5.0 }],
+            )
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        assert_eq!(painted, artwork);
+        let painted_snapshot = project.snapshot();
+        assert_eq!(
+            painted_snapshot.asset(page, &source).unwrap().unwrap().blob,
+            original_blob
+        );
+        assert_ne!(
+            painted_snapshot
+                .asset(artwork, &source)
+                .unwrap()
+                .unwrap()
+                .blob,
+            original_artwork_blob
+        );
+        assert_eq!(
+            painted_snapshot
+                .children(page)
+                .unwrap()
+                .filter(|entity| painted_snapshot
+                    .component::<SceneRasterLayer>(*entity)
+                    .unwrap()
+                    .is_some_and(|layer| layer.kind == RasterLayerKind::Artwork))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn original_erasing_creates_an_undoable_artwork_copy() {
         let mut session = Session::memory().await.unwrap();
         let mut page = None;
         let patch = session
@@ -3087,7 +3300,7 @@ mod tests {
             .unwrap()
             .blob;
 
-        let (page_commit, committed_page) = project
+        let (page_commit, artwork) = project
             .apply_raster_stroke(
                 page,
                 Some(page),
@@ -3099,15 +3312,25 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(committed_page, page);
+        assert_ne!(artwork, page);
         project.record_commit(&page_commit);
         let erased_page = project.snapshot();
         let erased_page_asset = erased_page.asset(page, &source).unwrap().unwrap();
-        assert_ne!(erased_page_asset.blob, original_page_blob);
-        let bytes = erased_page.read_blob(erased_page_asset.blob).await.unwrap();
+        assert_eq!(erased_page_asset.blob, original_page_blob);
+        assert_eq!(
+            erased_page
+                .component::<SceneRasterLayer>(artwork)
+                .unwrap()
+                .unwrap()
+                .kind,
+            RasterLayerKind::Artwork
+        );
+        let artwork_asset = erased_page.asset(artwork, &source).unwrap().unwrap();
+        let bytes = erased_page.read_blob(artwork_asset.blob).await.unwrap();
         let image = image::load_from_memory(&bytes).unwrap().to_rgba8();
         assert_eq!(image.get_pixel(5, 10)[3], 0);
         project.undo().await.unwrap();
+        assert!(project.snapshot().entity(artwork).is_err());
         assert_eq!(
             project
                 .snapshot()
@@ -3302,7 +3525,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn color_fill_is_contiguous_tolerant_and_undoable() {
+    async fn original_color_fill_creates_artwork_copy_and_is_undoable() {
         let mut session = Session::memory().await.unwrap();
         let mut page = None;
         let patch = session
@@ -3355,7 +3578,7 @@ mod tests {
             .unwrap()
             .blob;
 
-        let commit = project
+        let (commit, artwork) = project
             .apply_raster_fill(
                 page,
                 page,
@@ -3364,11 +3587,23 @@ mod tests {
                 5,
             )
             .await
-            .unwrap()
             .unwrap();
+        let commit = commit.unwrap();
         project.record_commit(&commit);
         let filled = project.snapshot();
-        let asset = filled.asset(page, &source).unwrap().unwrap();
+        assert_eq!(
+            filled.asset(page, &source).unwrap().unwrap().blob,
+            original_blob
+        );
+        assert_eq!(
+            filled
+                .component::<SceneRasterLayer>(artwork)
+                .unwrap()
+                .unwrap()
+                .kind,
+            RasterLayerKind::Artwork
+        );
+        let asset = filled.asset(artwork, &source).unwrap().unwrap();
         assert_ne!(asset.blob, original_blob);
         let bytes = filled.read_blob(asset.blob).await.unwrap();
         let image = image::load_from_memory(&bytes).unwrap().to_rgba8();
@@ -3379,6 +3614,7 @@ mod tests {
         assert_eq!(image.get_pixel(2, 0).0, [120, 120, 120, 255]);
 
         project.undo().await.unwrap();
+        assert!(project.snapshot().entity(artwork).is_err());
         assert_eq!(
             project
                 .snapshot()

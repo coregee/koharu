@@ -17,14 +17,16 @@ use koharu_ml::{
     lama::{InpaintRequest, LaMa},
     rorem_mixed::{DEFAULT_NEGATIVE_PROMPT, DEFAULT_PROMPT, RoremMixed, RoremMixedOptions},
 };
+#[cfg(test)]
+use koharu_scene::At;
 use koharu_scene::{
-    AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, EntityOrigin, Geometry, Origin,
+    AssetInput, AssetMetadata, AssetRole, BubbleRegion, EntityOrigin, Geometry, Origin,
     RasterLayer, RasterLayerKind, Region, RegionSpec,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{StageInput, StageProcessor, finish, generation};
+use super::{StageInput, StageProcessor, above_artwork, finish, generation};
 use crate::{InpaintingModel, ModelCell};
 
 const PRODUCER: &str = "dev.koharu.pipeline.inpainting";
@@ -357,7 +359,7 @@ impl Model {
             }
             entity
         } else {
-            let entity = edit.add_entity(page, At::Start)?;
+            let entity = edit.add_entity(page, above_artwork(&input.scene, page)?)?;
             edit.set(
                 entity,
                 &RasterLayer {

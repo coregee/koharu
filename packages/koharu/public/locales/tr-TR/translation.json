@@ -251,6 +251,7 @@
     "mainText": "Ana Metin",
     "sfxText": "SFX Metni",
     "kinds": {
+      "artwork": "Düzenlenebilir çizim",
       "bubble": "Konuşma balonu",
       "cleanup": "Temizleme",
       "dialogue": "Diyalog",
@@ -271,6 +272,7 @@
     "moveUp": "{{name}} öğesini yukarı taşı",
     "opacityLabel": "{{name}} opaklığı",
     "originalArtwork": "Orijinal çizim",
+    "editableArtwork": "Çizim",
     "regionShape": "Şekil",
     "regionShapeLabel": "{{name}} bölge şekli",
     "regionShapes": {

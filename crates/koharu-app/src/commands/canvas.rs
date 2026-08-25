@@ -355,14 +355,14 @@ pub(crate) async fn commit_fill(
     project: State<'_, CurrentProject>,
     canvas_channel: State<'_, CanvasChannel>,
 ) -> Result<LayerCommit, Error> {
-    let (commit, page, revision) = {
+    let (commit, page, revision, layer) = {
         let mut project = project.project.lock().await;
         let project = project.as_mut().context("no project is open")?;
         ensure_revision(project.snapshot().revision(), expected_revision)?;
         let page = project
             .active_page()
             .context("the project has no active page")?;
-        let commit = project
+        let (commit, layer) = project
             .apply_raster_fill(
                 page,
                 layer,
@@ -380,7 +380,7 @@ pub(crate) async fn commit_fill(
         } else {
             project.snapshot().revision()
         };
-        (commit, project.active_page(), revision)
+        (commit, project.active_page(), revision, layer)
     };
     if let Some(commit) = commit {
         desktop.synchronize(&commit.snapshot, page, &commit).await?;

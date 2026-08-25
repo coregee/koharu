@@ -75,6 +75,34 @@ const paintLayer: Layer = {
   kind: 'paint',
 }
 
+const originalArtworkLayer: Layer = {
+  type: 'artwork',
+  locked: true,
+  id: 'page',
+  parent: null,
+  geometry: {
+    points: [
+      { x: 0, y: 0 },
+      { x: 1000, y: 0 },
+      { x: 1000, y: 1000 },
+      { x: 0, y: 1000 },
+    ],
+  },
+  visibility: { visible: true, opacity: 1 },
+  image: 'original-image',
+}
+
+const artworkLayer: Layer = {
+  type: 'raster',
+  locked: false,
+  id: 'artwork',
+  parent: 'page',
+  visibility: { visible: true, opacity: 1 },
+  image: 'artwork-image',
+  name: 'Artwork',
+  kind: 'artwork',
+}
+
 let nextAnimationFrame = 1
 let animationFrames = new Map<number, FrameRequestCallback>()
 
@@ -243,6 +271,10 @@ describe('canvas interaction adapter', () => {
 
   it('previews brush input locally and sends only the durable paint commit to Rust', async () => {
     installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [originalArtworkLayer, artworkLayer, ...page.layers],
+    }))
     useKoharuStore.setState({ tool: 'draw', brush: { diameter: 48, color: '#FFFFFF' } })
     const commit = vi
       .spyOn(commands, 'commitPaint')
@@ -257,14 +289,14 @@ describe('canvas interaction adapter', () => {
     await waitFor(() => expect(commit).toHaveBeenCalledOnce())
     expect(canvas.beginStroke).toHaveBeenCalledWith({
       kind: 'paint',
-      layer: null,
+      layer: 'artwork',
       point: { x: 20, y: 20 },
       diameter: 48,
       color: [255, 255, 255, 255],
     })
     expect(canvas.extendStroke).toHaveBeenCalledWith(expect.arrayContaining([{ x: 45, y: 45 }]))
     expect(canvas.finishStroke).toHaveBeenCalledOnce()
-    expect(commit).toHaveBeenCalledWith(1, null, expect.arrayContaining([{ x: 45, y: 45 }]), {
+    expect(commit).toHaveBeenCalledWith(1, 'artwork', expect.arrayContaining([{ x: 45, y: 45 }]), {
       diameter: 48,
       color: [255, 255, 255, 255],
     })
@@ -845,43 +877,25 @@ describe('canvas interaction adapter', () => {
     )
   })
 
-  it('targets the original artwork with the eraser', async () => {
+  it('redirects original artwork erasing to the editable artwork layer', async () => {
     installProject()
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
       ...page,
-      layers: [
-        ...page.layers,
-        {
-          type: 'artwork',
-          locked: true,
-          id: 'page',
-          parent: null,
-          geometry: {
-            points: [
-              { x: 0, y: 0 },
-              { x: 1000, y: 0 },
-              { x: 1000, y: 1000 },
-              { x: 0, y: 1000 },
-            ],
-          },
-          visibility: { visible: true, opacity: 1 },
-          image: 'original-image',
-        },
-      ],
+      layers: [originalArtworkLayer, artworkLayer, ...page.layers],
     }))
     useKoharuStore.setState({ tool: 'eraser', selectedLayers: ['page'] })
     const commit = vi
       .spyOn(commands, 'commitErase')
-      .mockResolvedValue({ revision: 2, layer: 'page' })
+      .mockResolvedValue({ revision: 2, layer: 'artwork' })
     const surface = renderWorkspace()
 
     fireEvent.pointerDown(surface, { button: 0, pointerId: 13, clientX: 30, clientY: 40 })
     fireEvent.pointerUp(surface, { pointerId: 13, clientX: 30, clientY: 40 })
 
-    await waitFor(() => expect(commit).toHaveBeenCalledWith(1, 'page', expect.any(Array), 48))
+    await waitFor(() => expect(commit).toHaveBeenCalledWith(1, 'artwork', expect.any(Array), 48))
     expect(canvas.beginStroke).toHaveBeenCalledWith({
       kind: 'erase',
-      layer: 'page',
+      layer: 'artwork',
       point: { x: 20, y: 20 },
       diameter: 48,
     })

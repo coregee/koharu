@@ -1641,7 +1641,9 @@ function localizedLayerName(layer: Layer, index: number, t: TFunction): string {
     if (layer.role === 'sfx_text') return t('layers.sfxText')
     return layer.name
   }
-  if (layer.type === 'raster') return layer.name
+  if (layer.type === 'raster') {
+    return layer.kind === 'artwork' ? t('layers.editableArtwork') : layer.name
+  }
   if (layer.type === 'text') {
     const text = layer.content.translation?.text || layer.content.source?.text
     return text?.trim() || t('layers.textName', { index: index + 1 })

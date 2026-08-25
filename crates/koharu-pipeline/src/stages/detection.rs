@@ -29,7 +29,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{StageInput, StageProcessor, finish, generation};
+use super::{StageInput, StageProcessor, above_artwork, finish, generation};
 use crate::{DetectionModel, ModelCell};
 
 const MODEL_ID: &str = "mayocream/koharu-layout-rfdetr-seg-2xl-1152";
@@ -1418,7 +1418,7 @@ async fn write_mask(
     let segmentation = if let Some(segmentation) = segmentation {
         segmentation
     } else {
-        let segmentation = edit.add_entity(page, At::Start)?;
+        let segmentation = edit.add_entity(page, above_artwork(&input.scene, page)?)?;
         edit.set(
             segmentation,
             &RasterLayer {

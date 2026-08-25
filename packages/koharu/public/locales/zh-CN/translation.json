@@ -251,6 +251,7 @@
     "mainText": "主文本",
     "sfxText": "音效文本",
     "kinds": {
+      "artwork": "可编辑图稿",
       "bubble": "对话气泡",
       "cleanup": "清理",
       "dialogue": "对话",
@@ -271,6 +272,7 @@
     "moveUp": "上移 {{name}}",
     "opacityLabel": "{{name}} 不透明度",
     "originalArtwork": "原始图稿",
+    "editableArtwork": "图稿",
     "regionShape": "形状",
     "regionShapeLabel": "{{name}} 的区域形状",
     "regionShapes": {

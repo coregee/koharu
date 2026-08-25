@@ -251,6 +251,7 @@
     "mainText": "Основной текст",
     "sfxText": "Текст звуковых эффектов",
     "kinds": {
+      "artwork": "Редактируемое изображение",
       "bubble": "Речевой пузырь",
       "cleanup": "Очистка",
       "dialogue": "Диалог",
@@ -271,6 +272,7 @@
     "moveUp": "Переместить {{name}} вверх",
     "opacityLabel": "Непрозрачность {{name}}",
     "originalArtwork": "Исходное изображение",
+    "editableArtwork": "Изображение",
     "regionShape": "Форма",
     "regionShapeLabel": "Форма области {{name}}",
     "regionShapes": {

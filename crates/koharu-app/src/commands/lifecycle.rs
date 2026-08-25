@@ -1,6 +1,5 @@
 use anyhow::{Context as _, Result};
 use koharu_desktop::{CanvasState, Desktop};
-use koharu_scene::{AssetInput, AssetMetadata, AssetRole, At, PageDraft};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -421,34 +420,7 @@ pub(crate) async fn import_pages(
     let (commit, page) = {
         let mut project = project.project.lock().await;
         let project = project.as_mut().context("no project is open")?;
-        let source = AssetRole::new("source")?;
-        let patch = project.snapshot().patch(|edit| {
-            for imported in pages {
-                let page = edit.add_page(
-                    PageDraft::new(
-                        imported.name,
-                        f64::from(imported.width),
-                        f64::from(imported.height),
-                    ),
-                    At::End,
-                )?;
-                edit.set_asset(
-                    page,
-                    &source,
-                    AssetInput::new(
-                        imported.bytes,
-                        imported.format.to_mime_type(),
-                        AssetMetadata {
-                            width: Some(imported.width),
-                            height: Some(imported.height),
-                            attributes: Default::default(),
-                        },
-                    ),
-                )?;
-            }
-            Ok(())
-        })?;
-        let commit = project.session.commit(patch).await?;
+        let commit = project.add_imported_pages(pages).await?;
         project.record(vec![commit.revision]);
         project.reconcile_page();
         let page = project.active_page();

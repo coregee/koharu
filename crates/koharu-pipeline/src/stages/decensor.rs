@@ -13,11 +13,13 @@ use imageproc::{
     region_labelling::{Connectivity, connected_components},
 };
 use koharu_ml::decensor::Decensor;
+#[cfg(test)]
+use koharu_scene::At;
 use koharu_scene::{
-    AssetInput, AssetMetadata, AssetRole, At, Origin, RasterLayer, RasterLayerKind, Visibility,
+    AssetInput, AssetMetadata, AssetRole, Origin, RasterLayer, RasterLayerKind, Visibility,
 };
 
-use super::{StageInput, StageProcessor, finish};
+use super::{StageInput, StageProcessor, above_artwork, finish};
 use crate::ModelCell;
 
 const MODEL: &str = "diffusioncreampy-sdxl";
@@ -167,7 +169,7 @@ fn write_result(
         edit.observe_assets(entity)?;
         entity
     } else {
-        let entity = edit.add_entity(page, At::Start)?;
+        let entity = edit.add_entity(page, above_artwork(scene, page)?)?;
         edit.set(
             entity,
             &RasterLayer {

@@ -251,6 +251,7 @@
     "mainText": "Texto principal",
     "sfxText": "Texto de efeitos sonoros",
     "kinds": {
+      "artwork": "Arte editável",
       "bubble": "Balão de fala",
       "cleanup": "Limpeza",
       "dialogue": "Diálogo",
@@ -271,6 +272,7 @@
     "moveUp": "Mover {{name}} para cima",
     "opacityLabel": "Opacidade de {{name}}",
     "originalArtwork": "Arte original",
+    "editableArtwork": "Arte",
     "regionShape": "Forma",
     "regionShapeLabel": "Forma da região de {{name}}",
     "regionShapes": {

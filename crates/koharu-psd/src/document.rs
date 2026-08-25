@@ -107,7 +107,10 @@ pub(crate) async fn build(
         matches!(
             layer.kind(),
             LayerKind::Image(metadata)
-                if matches!(metadata.kind, ImageKind::Cleanup | ImageKind::Paint)
+                if matches!(
+                    metadata.kind,
+                    ImageKind::Artwork | ImageKind::Cleanup | ImageKind::Paint
+                )
         )
     });
     let mut layers = Vec::new();
@@ -150,8 +153,12 @@ pub(crate) async fn build(
             LayerKind::Image(image) => Some(image),
             LayerKind::Text(_) | LayerKind::Shape(_) => None,
         };
-        let raster =
-            image.is_some_and(|image| matches!(image.kind, ImageKind::Cleanup | ImageKind::Paint));
+        let raster = image.is_some_and(|image| {
+            matches!(
+                image.kind,
+                ImageKind::Artwork | ImageKind::Cleanup | ImageKind::Paint
+            )
+        });
         let ordinary_image = image.is_some_and(|image| image.kind == ImageKind::Embedded);
         if (raster && options.include_raster_layers) || ordinary_image {
             let cropped = frame

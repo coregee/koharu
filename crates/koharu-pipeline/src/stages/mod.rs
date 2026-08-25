@@ -8,12 +8,27 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use koharu_scene::{Edit, EntityId, Generation, Patch, ProducerId, Snapshot};
+use koharu_scene::{
+    At, Edit, EntityId, Generation, Patch, ProducerId, RasterLayer, RasterLayerKind, Snapshot,
+};
 
 pub use detection::KoharuLayoutRFDetrSeg2XLConfig;
 pub use inpainting::{Flux2KleinConfig, RoremMixedConfig};
 
 use crate::{Bounds, ImageCache, InpaintingMask, PipelineConfig, Stage};
+
+fn above_artwork(snapshot: &Snapshot, page: EntityId) -> Result<At> {
+    Ok(snapshot
+        .children(page)?
+        .find(|entity| {
+            snapshot
+                .component::<RasterLayer>(*entity)
+                .ok()
+                .flatten()
+                .is_some_and(|layer| layer.kind == RasterLayerKind::Artwork)
+        })
+        .map_or(At::Start, At::After))
+}
 
 #[derive(Clone)]
 pub(crate) struct StageInput {
@@ -177,6 +192,45 @@ mod tests {
                 "lama",
                 "diffusioncreampy-sdxl",
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn generated_rasters_are_inserted_above_editable_artwork() {
+        let mut session = koharu_scene::Session::memory().await.unwrap();
+        let mut page = None;
+        let mut artwork = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let page_id =
+                    edit.add_page(koharu_scene::PageDraft::new("page", 1.0, 1.0), At::End)?;
+                let artwork_id = edit.add_entity(page_id, At::Start)?;
+                edit.set(
+                    artwork_id,
+                    &RasterLayer {
+                        origin: koharu_scene::Origin::User,
+                        name: "Artwork".to_owned(),
+                        kind: RasterLayerKind::Artwork,
+                    },
+                )?;
+                page = Some(page_id);
+                artwork = Some(artwork_id);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let artwork = artwork.unwrap();
+        let mut edit = snapshot.edit();
+        let cleanup = edit
+            .add_entity(page, above_artwork(&snapshot, page).unwrap())
+            .unwrap();
+        let snapshot = snapshot.preview([&edit.finish().unwrap()]).unwrap();
+
+        assert_eq!(
+            snapshot.children(page).unwrap().collect::<Vec<_>>(),
+            [artwork, cleanup]
         );
     }
 

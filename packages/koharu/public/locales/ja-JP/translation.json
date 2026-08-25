@@ -251,6 +251,7 @@
     "mainText": "メインテキスト",
     "sfxText": "効果音テキスト",
     "kinds": {
+      "artwork": "編集可能なアートワーク",
       "bubble": "吹き出し",
       "cleanup": "クリーンアップ",
       "dialogue": "台詞",
@@ -271,6 +272,7 @@
     "moveUp": "{{name}}を上へ移動",
     "opacityLabel": "{{name}}の不透明度",
     "originalArtwork": "元のアートワーク",
+    "editableArtwork": "アートワーク",
     "regionShape": "形状",
     "regionShapeLabel": "{{name}}の領域形状",
     "regionShapes": {

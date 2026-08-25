@@ -251,6 +251,7 @@
     "mainText": "Texto principal",
     "sfxText": "Texto SFX",
     "kinds": {
+      "artwork": "Ilustración editable",
       "bubble": "Globo de diálogo",
       "cleanup": "Limpieza",
       "dialogue": "Diálogo",
@@ -271,6 +272,7 @@
     "moveUp": "Mover {{name}} arriba",
     "opacityLabel": "Opacidad de {{name}}",
     "originalArtwork": "Ilustración original",
+    "editableArtwork": "Ilustración",
     "regionShape": "Forma",
     "regionShapeLabel": "Forma de la región de {{name}}",
     "regionShapes": {

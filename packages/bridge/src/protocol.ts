@@ -488,7 +488,7 @@ export type Quantization = {
 	name: string,
 };
 
-export type RasterLayerKind = "cleanup" | "paint" | "censor" | "mosaic" | "segmentation";
+export type RasterLayerKind = "artwork" | "cleanup" | "paint" | "censor" | "mosaic" | "segmentation";
 
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
