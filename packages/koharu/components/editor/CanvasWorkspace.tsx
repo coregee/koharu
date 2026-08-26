@@ -128,7 +128,7 @@ export function CanvasWorkspace() {
   const [draft, setDraft] = useState<Frame | null>(null)
   const pendingShapeRef = useRef<PendingRasterShape | null>(null)
   const [pendingShape, setPendingShapeState] = useState<PendingRasterShape | null>(null)
-  const [inpaintPending, setInpaintPending] = useState(false)
+  const [repairPending, setRepairPending] = useState(false)
   const [hovered, setHovered] = useState<string | null>(null)
   const [cursor, setCursor] = useState<Point | null>(null)
   const colorSampling = useColorSampling()
@@ -178,6 +178,7 @@ export function CanvasWorkspace() {
     (selectedRaster && kinds.has(selectedRaster.kind) ? selectedRaster : undefined) ??
     [...rasterLayers].reverse().find((layer) => kinds.has(layer.kind))
   const activeRemovalRaster = contextualRaster(new Set(['segmentation']))
+  const activeRepairRaster = contextualRaster(new Set(['repair']))
   const activeBarCensorRaster = contextualRaster(new Set(['censor']))
   const activeMosaicCensorRaster = contextualRaster(new Set(['mosaic']))
   const activeDecensorEraseRaster = contextualRaster(new Set(['censor', 'mosaic']))
@@ -218,41 +219,63 @@ export function CanvasWorkspace() {
   const activePaintTarget =
     resolveArtwork(selectedImage) ?? resolveArtwork([...imageLayers].reverse().at(0))
   const brushMode: CanvasRasterMode =
-    toolMode === 'removal' ? 'removal' : toolMode === 'decensor' ? 'bar_censor' : 'paint'
+    toolMode === 'removal'
+      ? 'removal'
+      : toolMode === 'repair'
+        ? 'repair'
+        : toolMode === 'decensor'
+          ? 'bar_censor'
+          : 'paint'
   const brushTarget =
     toolMode === 'removal'
       ? activeRemovalRaster
-      : toolMode === 'decensor'
-        ? activeBarCensorRaster
-        : activePaintTarget
+      : toolMode === 'repair'
+        ? activeRepairRaster
+        : toolMode === 'decensor'
+          ? activeBarCensorRaster
+          : activePaintTarget
   const eraseTarget =
     toolMode === 'removal'
       ? activeRemovalRaster
-      : toolMode === 'decensor'
-        ? activeDecensorEraseRaster
-        : activePaintTarget
+      : toolMode === 'repair'
+        ? activeRepairRaster
+        : toolMode === 'decensor'
+          ? activeDecensorEraseRaster
+          : activePaintTarget
   const eraseMode: CanvasRasterMode =
     toolMode === 'removal'
       ? 'removal'
-      : toolMode === 'decensor'
-        ? eraseTarget?.type === 'raster' && eraseTarget.kind === 'mosaic'
-          ? 'mosaic_censor'
-          : 'bar_censor'
-        : 'paint'
+      : toolMode === 'repair'
+        ? 'repair'
+        : toolMode === 'decensor'
+          ? eraseTarget?.type === 'raster' && eraseTarget.kind === 'mosaic'
+            ? 'mosaic_censor'
+            : 'bar_censor'
+          : 'paint'
   const shapeMode: CanvasRasterMode =
-    toolMode === 'removal' ? 'removal' : toolMode === 'decensor' ? 'mosaic_censor' : 'paint'
+    toolMode === 'removal'
+      ? 'removal'
+      : toolMode === 'repair'
+        ? 'repair'
+        : toolMode === 'decensor'
+          ? 'mosaic_censor'
+          : 'paint'
   const shapeTarget =
     toolMode === 'removal'
       ? activeRemovalRaster
-      : toolMode === 'decensor'
-        ? activeMosaicCensorRaster
-        : activePaintTarget
+      : toolMode === 'repair'
+        ? activeRepairRaster
+        : toolMode === 'decensor'
+          ? activeMosaicCensorRaster
+          : activePaintTarget
   const contextualColor: [number, number, number, number] =
     toolMode === 'removal'
       ? [168, 85, 247, 255]
-      : toolMode === 'decensor'
-        ? [0, 255, 0, 180]
-        : hexToRgba(brush.color)
+      : toolMode === 'repair'
+        ? [14, 165, 233, 255]
+        : toolMode === 'decensor'
+          ? [0, 255, 0, 180]
+          : hexToRgba(brush.color)
 
   const setPendingShape = useCallback((value: PendingRasterShape | null) => {
     pendingShapeRef.current = value
@@ -268,28 +291,35 @@ export function CanvasWorkspace() {
     return pending
   }, [])
 
-  const rasterizePendingShape = useCallback(() => {
+  const commitPendingShape = useCallback(async () => {
     const pending = pendingShapeRef.current
-    if (!pending || commitPending.current) return
+    if (!pending || commitPending.current) return null
     setPendingShape(null)
     commitPending.current = true
-    void enqueue(() =>
-      call(
-        commands.commitRasterShape,
-        pending.revision,
-        pending.layer,
-        pending.mode,
-        pending.shape,
-        pending.color,
-      ),
-    )
-      .then((result) => {
-        selectLayers([result.layer])
-        return refresh(projectKey, pagesKey, pageKey)
-      })
-      .catch(() => undefined)
-      .finally(() => (commitPending.current = false))
+    try {
+      const result = await enqueue(() =>
+        call(
+          commands.commitRasterShape,
+          pending.revision,
+          pending.layer,
+          pending.mode,
+          pending.shape,
+          pending.color,
+        ),
+      )
+      selectLayers([result.layer])
+      await refresh(projectKey, pagesKey, pageKey)
+      return result
+    } catch {
+      return null
+    } finally {
+      commitPending.current = false
+    }
   }, [enqueue, selectLayers, setPendingShape])
+
+  const rasterizePendingShape = useCallback(() => {
+    void commitPendingShape()
+  }, [commitPendingShape])
 
   const beginShapeTransform = useCallback((_elements: TransformFrame[]) => undefined, [])
   const updateShapeTransform = useCallback(
@@ -303,29 +333,50 @@ export function CanvasWorkspace() {
   )
   const finishShapeTransform = useCallback(() => undefined, [])
 
-  const submitInpaint = useCallback(() => {
-    if (canvasRevision === null || !activeRemovalRaster || inpaintPending || processing) return
-    commitPending.current = true
-    setInpaintPending(true)
-    void enqueue(() => call(commands.commitInpaint, canvasRevision))
+  const submitRepair = useCallback(() => {
+    const pending = pendingShapeRef.current
+    if (
+      canvasRevision === null ||
+      (!activeRepairRaster && pending?.mode !== 'repair') ||
+      commitPending.current ||
+      repairPending ||
+      processing
+    )
+      return
+    setRepairPending(true)
+    void (async () => {
+      let revision = canvasRevision
+      let layer = activeRepairRaster?.id
+      if (pending?.mode === 'repair') {
+        const result = await commitPendingShape()
+        if (!result) return
+        revision = result.revision
+        layer = result.layer
+      }
+      if (!layer) return
+      commitPending.current = true
+      await enqueue(() => call(commands.repairInpaint, revision, layer))
+    })()
       .catch(() => undefined)
       .finally(() => {
         commitPending.current = false
-        setInpaintPending(false)
+        setRepairPending(false)
       })
-  }, [canvasRevision, activeRemovalRaster, enqueue, inpaintPending, processing])
+  }, [activeRepairRaster, canvasRevision, commitPendingShape, enqueue, processing, repairPending])
 
-  const resetRemovalMask = useCallback(() => {
-    if (canvasRevision === null || !activeRemovalRaster || commitPending.current) return
+  const resetRepairMask = useCallback(() => {
+    if (commitPending.current || repairPending || processing) return
+    setPendingShape(null)
+    if (!activeRepairRaster) return
     commitPending.current = true
-    void enqueue(() => call(commands.resetRemovalMask, canvasRevision, activeRemovalRaster.id))
+    void enqueue(() => call(commands.deleteLayers, [activeRepairRaster.id]))
       .then(() => {
         selectLayers([])
         return refresh(projectKey, pagesKey, pageKey)
       })
       .catch(() => undefined)
       .finally(() => (commitPending.current = false))
-  }, [activeRemovalRaster, canvasRevision, enqueue, selectLayers])
+  }, [activeRepairRaster, enqueue, processing, repairPending, selectLayers, setPendingShape])
 
   const transformUpdates = useFrameCommand((elements: TransformFrame[]) =>
     canvas?.updateTransform(elements),
@@ -557,7 +608,9 @@ export function CanvasWorkspace() {
       const target = event.target
       if (
         target instanceof Element &&
-        target.closest('[data-transform-body], [data-resize-handle], [data-rotate-handle]')
+        target.closest(
+          '[data-transform-body], [data-resize-handle], [data-rotate-handle], [data-repair-controls]',
+        )
       ) {
         return
       }
@@ -666,7 +719,7 @@ export function CanvasWorkspace() {
           'pan',
         ] as const
       ).find((action) => state.shortcuts[action] === key)
-      const nextMode = (['removal', 'decensor', 'paint'] as const).find(
+      const nextMode = (['removal', 'repair', 'decensor', 'paint'] as const).find(
         (action) => state.shortcuts[action] === key,
       )
       if (nextTool || nextMode) {
@@ -921,6 +974,7 @@ export function CanvasWorkspace() {
               canvasState.status !== 'ready' ||
               canvasRevision === null ||
               commitPending.current ||
+              (toolMode === 'repair' && processing) ||
               event.button > 1
             )
               return
@@ -1186,30 +1240,43 @@ export function CanvasWorkspace() {
               onShapeTransformEnd={finishShapeTransform}
             />
           )}
-          {page && canvasState.status === 'ready' && toolMode === 'removal' && (
+          {page && canvasState.status === 'ready' && toolMode === 'repair' && (
             <div
               data-canvas-control
+              data-repair-controls
               className='absolute right-3 bottom-3 z-20 flex items-center gap-3 rounded-xl border border-border bg-[var(--surface-floating)] px-3 py-2 shadow-[var(--shadow-toolrail)]'
             >
               <span className='text-xs text-muted-foreground'>
-                {t(activeRemovalRaster ? 'canvas.removalMaskReady' : 'canvas.removalMaskEmpty')}
+                {t(
+                  activeRepairRaster || pendingShape?.mode === 'repair'
+                    ? 'canvas.repairMaskReady'
+                    : 'canvas.repairMaskEmpty',
+                )}
               </span>
               <Button
                 type='button'
                 variant='ghost'
                 size='sm'
-                disabled={!activeRemovalRaster || inpaintPending}
-                onClick={resetRemovalMask}
+                disabled={
+                  (!activeRepairRaster && pendingShape?.mode !== 'repair') ||
+                  repairPending ||
+                  processing
+                }
+                onClick={resetRepairMask}
               >
                 {t('common.reset')}
               </Button>
               <Button
                 type='button'
                 size='sm'
-                disabled={!activeRemovalRaster || inpaintPending || processing}
-                onClick={submitInpaint}
+                disabled={
+                  (!activeRepairRaster && pendingShape?.mode !== 'repair') ||
+                  repairPending ||
+                  processing
+                }
+                onClick={submitRepair}
               >
-                {t('canvas.inpaintSelection')}
+                {t('canvas.repairSelection')}
               </Button>
             </div>
           )}

@@ -54,13 +54,13 @@
     "working": "正在工作…"
   },
   "canvas": {
+    "repairMaskEmpty": "塗抹要修復的區域",
+    "repairMaskReady": "修復遮罩已就緒",
+    "repairSelection": "修復",
     "empty": "請選擇頁面以開始。",
     "eraserRequiresLayer": "使用橡皮擦前，請為此模式選擇可編輯圖層。",
     "fit": "適應視窗",
     "fillRequiresImage": "使用填色前，請選擇可編輯的繪圖或影像圖層。",
-    "inpaintSelection": "修復選取範圍",
-    "removalMaskEmpty": "請繪製移除遮罩以繼續",
-    "removalMaskReady": "移除遮罩已就緒",
     "surface": "Koharu 畫布",
     "unavailable": "WebGPU 畫布無法使用"
   },
@@ -253,6 +253,7 @@
     "mainText": "主要文字",
     "sfxText": "音效文字",
     "kinds": {
+      "repair": "修復遮罩",
       "artwork": "可編輯圖稿",
       "bubble": "對話氣泡",
       "cleanup": "清理",
@@ -581,6 +582,7 @@
     "increaseBrushSize": "增加筆刷大小",
     "increaseFillTolerance": "增加填色容差",
     "modes": {
+      "repair": "修復",
       "decensor": "去除審查",
       "paint": "繪圖",
       "removal": "移除"

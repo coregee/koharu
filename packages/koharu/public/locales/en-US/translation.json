@@ -54,13 +54,13 @@
     "working": "Working..."
   },
   "canvas": {
+    "repairMaskEmpty": "Paint over the area to repair",
+    "repairMaskReady": "Repair mask ready",
+    "repairSelection": "Repair",
     "empty": "Select a page to begin.",
     "eraserRequiresLayer": "Select an editable layer for this mode before using the Eraser.",
     "fit": "Fit Window",
     "fillRequiresImage": "Select an editable paint or image layer before using Fill.",
-    "inpaintSelection": "Inpaint Selection",
-    "removalMaskEmpty": "Draw a removal mask to continue",
-    "removalMaskReady": "Removal mask ready",
     "surface": "Koharu canvas",
     "unavailable": "WebGPU canvas unavailable"
   },
@@ -259,6 +259,7 @@
     "mainText": "Main Text",
     "sfxText": "SFX Text",
     "kinds": {
+      "repair": "Repair mask",
       "artwork": "Editable artwork",
       "cleanup": "Cleanup",
       "dialogue": "Dialogue",
@@ -595,6 +596,7 @@
     "increaseBrushSize": "Increase brush size",
     "increaseFillTolerance": "Increase fill tolerance",
     "modes": {
+      "repair": "Repair",
       "decensor": "Decensor",
       "paint": "Paint",
       "removal": "Removal"

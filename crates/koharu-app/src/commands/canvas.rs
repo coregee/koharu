@@ -6,13 +6,13 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{
-    AppHandle, Cef, Manager as _, State,
+    AppHandle, Cef, State,
     ipc::{Channel, IpcResponse},
 };
 
 use super::{
-    ChannelExt as _, Error, processing,
-    processing::{JobChannel, JobId, Processing},
+    ChannelExt as _, Error,
+    processing::{self, JobChannel, JobId, Processing},
     project::{CurrentProject, Page, Project, RasterStrokeMode},
 };
 
@@ -27,6 +27,7 @@ pub struct Point {
 pub enum CanvasRasterMode {
     Paint,
     Removal,
+    Repair,
     BarCensor,
     MosaicCensor,
 }
@@ -432,74 +433,48 @@ pub(crate) async fn commit_transform(
 
 #[tracing::instrument(
     target = "koharu_metrics",
-    name = "removal_mask_reset",
+    name = "repair_requested",
     skip_all,
     fields(origin = "user")
 )]
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn reset_removal_mask(
+pub(crate) async fn repair_inpaint(
     expected_revision: Revision,
     layer: EntityId,
-    desktop: State<'_, Desktop>,
+    handle: AppHandle<Cef>,
     project: State<'_, CurrentProject>,
-    canvas_channel: State<'_, CanvasChannel>,
-) -> Result<Revision, Error> {
-    let (commit, page) = {
-        let mut project = project.project.lock().await;
-        let project = project.as_mut().context("no project is open")?;
+    processing: State<'_, Processing>,
+    job_channel: State<'_, JobChannel>,
+) -> Result<JobId, Error> {
+    let (snapshot, page, mask) = {
+        let project = project.project.lock().await;
+        let project = project.as_ref().context("no project is open")?;
         ensure_revision(project.snapshot().revision(), expected_revision)?;
         let page = project
             .active_page()
             .context("the project has no active page")?;
-        let commit = project.reset_removal_mask(page, layer).await?;
-        project.record_commit(&commit);
-        (commit, project.active_page())
+        let mask = project.repair_mask(page, layer).await?;
+        (project.snapshot(), page, mask)
     };
-    desktop.synchronize(&commit.snapshot, page, &commit).await?;
-    canvas_channel.channel.publish(desktop.canvas_state());
-    Ok(commit.revision)
-}
-
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "inpaint_requested",
-    skip_all,
-    fields(origin = "user")
-)]
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn commit_inpaint(
-    expected_revision: Revision,
-    handle: AppHandle<Cef>,
-    project: State<'_, CurrentProject>,
-) -> Result<JobId, Error> {
-    let page = {
-        let project = project.project.lock().await;
-        let project = project.as_ref().context("no project is open")?;
-        let snapshot = project.snapshot();
-        ensure_revision(snapshot.revision(), expected_revision)?;
-        project
-            .active_page()
-            .context("the project has no active page")?
-    };
-    Ok(processing::process(
-        handle.clone(),
+    processing::start_process(
+        handle,
+        snapshot,
         koharu_pipeline::Scope::Pages(vec![page]),
         koharu_pipeline::Operation::Only {
             stage: koharu_pipeline::Stage::Inpainting,
         },
-        handle.state::<CurrentProject>(),
-        handle.state::<Processing>(),
-        handle.state::<JobChannel>(),
+        Some(mask),
+        &processing,
+        &job_channel,
     )
-    .await?)
 }
 
 fn raster_style(mode: CanvasRasterMode, paint: [u8; 4]) -> (RasterLayerKind, [u8; 4]) {
     match mode {
         CanvasRasterMode::Paint => (RasterLayerKind::Paint, paint),
         CanvasRasterMode::Removal => (RasterLayerKind::Segmentation, [168, 85, 247, 255]),
+        CanvasRasterMode::Repair => (RasterLayerKind::Repair, [14, 165, 233, 255]),
         CanvasRasterMode::BarCensor => (RasterLayerKind::Censor, [0, 255, 0, 180]),
         CanvasRasterMode::MosaicCensor => (RasterLayerKind::Mosaic, [0, 255, 0, 180]),
     }

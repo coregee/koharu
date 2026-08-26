@@ -632,6 +632,8 @@ describe('greenfield editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Removal' }))
     fireEvent.click(screen.getByRole('button', { name: 'Oval' }))
     expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'removal', tool: 'oval' })
+    fireEvent.click(screen.getByRole('button', { name: 'Repair' }))
+    expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'repair', tool: 'oval' })
     fireEvent.click(screen.getByRole('button', { name: 'Decensor' }))
     expect(useKoharuStore.getState()).toMatchObject({ toolMode: 'decensor', tool: 'oval' })
     expect(screen.queryByRole('button', { name: 'Brush size: 48 pixels' })).not.toBeInTheDocument()

@@ -15,6 +15,7 @@ import {
   Sparkles,
   Square,
   Type,
+  WandSparkles,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -50,6 +51,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/t
 
 const modes = [
   ['removal', Sparkles],
+  ['repair', WandSparkles],
   ['decensor', ScanLine],
   ['paint', Palette],
 ] as const satisfies ReadonlyArray<readonly [ToolMode, typeof Brush]>

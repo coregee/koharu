@@ -54,13 +54,13 @@
     "working": "Trabalhando…"
   },
   "canvas": {
+    "repairMaskEmpty": "Pinte sobre a área que deseja reparar",
+    "repairMaskReady": "Máscara de reparo pronta",
+    "repairSelection": "Reparar",
     "empty": "Selecione uma página para começar.",
     "eraserRequiresLayer": "Selecione uma camada editável para este modo antes de usar a borracha.",
     "fit": "Ajustar à janela",
     "fillRequiresImage": "Selecione uma camada de pintura ou imagem editável antes de usar Preencher.",
-    "inpaintSelection": "Preencher seleção",
-    "removalMaskEmpty": "Desenhe uma máscara de remoção para continuar",
-    "removalMaskReady": "Máscara de remoção pronta",
     "surface": "Tela do Koharu",
     "unavailable": "A tela WebGPU não está disponível"
   },
@@ -253,6 +253,7 @@
     "mainText": "Texto principal",
     "sfxText": "Texto de efeitos sonoros",
     "kinds": {
+      "repair": "Máscara de reparo",
       "artwork": "Arte editável",
       "bubble": "Balão de fala",
       "cleanup": "Limpeza",
@@ -581,6 +582,7 @@
     "increaseBrushSize": "Aumentar tamanho do pincel",
     "increaseFillTolerance": "Aumentar tolerância do preenchimento",
     "modes": {
+      "repair": "Reparar",
       "decensor": "Remover censura",
       "paint": "Pintura",
       "removal": "Remoção"

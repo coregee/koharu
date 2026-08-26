@@ -21,7 +21,7 @@ use koharu_ml::{
 use koharu_scene::At;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, BubbleRegion, EntityOrigin, Geometry, Origin,
-    RasterLayer, RasterLayerKind, Region, RegionSpec,
+    RasterLayer, RasterLayerKind, Region, RegionSpec, RemovePolicy,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -194,6 +194,7 @@ impl Model {
         let original = prepared.original.clone();
         let cleanup = prepared.cleanup.take();
         let cleanup_entity = prepared.cleanup_entity;
+        let repair_layer = prepared.repair_layer;
         let (model_name, image) = match self {
             Self::LaMa(model) => {
                 let model = model.clone();
@@ -317,6 +318,10 @@ impl Model {
             edit.observe::<RasterLayer>(entity)?;
             edit.observe_assets(entity)?;
         }
+        if let Some(entity) = repair_layer {
+            edit.observe::<RasterLayer>(entity)?;
+            edit.observe_assets(entity)?;
+        }
         let image = image.to_rgba8();
         if image.dimensions() != original.dimensions() || image.dimensions() != mask.dimensions() {
             bail!("inpainted image dimensions do not match page {page}");
@@ -386,6 +391,9 @@ impl Model {
                 },
             ),
         )?;
+        if let Some(entity) = repair_layer {
+            edit.remove_entity(entity, RemovePolicy::Cascade)?;
+        }
         finish(edit)
     }
 }
@@ -446,6 +454,7 @@ struct InpaintInput {
     cleanup: Option<RgbaImage>,
     cleanup_attributes: BTreeMap<String, String>,
     segmentation_entities: Vec<koharu_scene::EntityId>,
+    repair_layer: Option<koharu_scene::EntityId>,
     mask_inputs: Option<String>,
     mask: GrayImage,
     text_mask: GrayImage,
@@ -513,8 +522,22 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
     } else {
         None
     };
+    let repair_layer = input
+        .inpainting_mask
+        .as_ref()
+        .and_then(|mask| mask.repair_layer);
+    if let Some(entity) = repair_layer {
+        if input.scene.parent(entity)? != Some(page)
+            || !input
+                .scene
+                .component::<RasterLayer>(entity)?
+                .is_some_and(|layer| layer.kind == RasterLayerKind::Repair)
+        {
+            bail!("the transient inpainting mask must be a repair layer on page {page}");
+        }
+    }
     if let Some(transient) = &input.inpainting_mask {
-        let layer = image::load_from_memory(&transient.png)?.to_luma8();
+        let layer = segmentation_mask(&image::load_from_memory(&transient.png)?);
         if layer.dimensions() != mask.dimensions() {
             bail!("inpainting mask dimensions do not match page {page}");
         }
@@ -566,6 +589,7 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
         cleanup,
         cleanup_attributes,
         segmentation_entities,
+        repair_layer,
         mask_inputs,
         mask,
         text_mask,
@@ -994,10 +1018,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn transient_inpainting_mask_replaces_persistent_page_masks() {
+    async fn transient_repair_mask_uses_current_cleanup_and_replaces_persistent_masks() {
         let mut session = koharu_scene::Session::memory().await.unwrap();
         let mut page = None;
+        let mut repair = None;
         let source = DynamicImage::new_rgb8(8, 8);
+        let mut cleanup = RgbaImage::new(8, 8);
+        cleanup.put_pixel(1, 2, Rgba([20, 180, 90, 255]));
         let persistent =
             DynamicImage::ImageRgba8(RgbaImage::from_pixel(8, 8, Rgba([168, 85, 247, 255])));
         let encode = |image: &DynamicImage| {
@@ -1017,6 +1044,28 @@ mod tests {
                     &AssetRole::new("source")?,
                     AssetInput::new(
                         encode(&source),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(8),
+                            height: Some(8),
+                            attributes: BTreeMap::new(),
+                        },
+                    ),
+                )?;
+                let cleanup_layer = edit.add_entity(id, At::Start)?;
+                edit.set(
+                    cleanup_layer,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Cleanup".to_owned(),
+                        kind: RasterLayerKind::Cleanup,
+                    },
+                )?;
+                edit.set_asset(
+                    cleanup_layer,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        encode(&DynamicImage::ImageRgba8(cleanup.clone())),
                         "image/png",
                         AssetMetadata {
                             width: Some(8),
@@ -1047,12 +1096,23 @@ mod tests {
                         },
                     ),
                 )?;
+                let repair_mask = edit.add_entity(id, At::Start)?;
+                edit.set(
+                    repair_mask,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Repair Mask".to_owned(),
+                        kind: RasterLayerKind::Repair,
+                    },
+                )?;
+                repair = Some(repair_mask);
                 page = Some(id);
                 Ok(())
             })
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
         let page = page.unwrap();
+        let repair = repair.unwrap();
         let mut transient = GrayImage::new(8, 8);
         transient.put_pixel(3, 4, Luma([255]));
         let input = StageInput::new(
@@ -1063,13 +1123,23 @@ mod tests {
             Arc::new(crate::ImageCache::default()),
             Some(crate::InpaintingMask {
                 page,
-                png: encode(&DynamicImage::ImageLuma8(transient)),
+                png: encode(&DynamicImage::ImageRgba8(RgbaImage::from_fn(
+                    8,
+                    8,
+                    |x, y| Rgba([168, 85, 247, transient.get_pixel(x, y)[0]]),
+                ))),
+                repair_layer: Some(repair),
             }),
         );
 
         let prepared = prepare(&input).await.unwrap();
         assert_eq!(prepared.mask.get_pixel(3, 4), &Luma([255]));
         assert_eq!(prepared.mask.get_pixel(0, 0), &Luma([0]));
+        assert_eq!(prepared.repair_layer, Some(repair));
+        assert_eq!(
+            prepared.image.to_rgba8().get_pixel(1, 2),
+            &Rgba([20, 180, 90, 255])
+        );
         assert!(prepared.text_mask.pixels().all(|pixel| pixel[0] == 0));
     }
 
@@ -1206,6 +1276,7 @@ mod tests {
             Some(crate::InpaintingMask {
                 page,
                 png: Arc::<[u8]>::from([]),
+                repair_layer: None,
             }),
         );
         let processor = Processor::new(InpaintingModel::LaMa {}, koharu_ml::Device::cpu()).unwrap();

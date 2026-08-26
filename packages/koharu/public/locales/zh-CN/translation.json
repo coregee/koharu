@@ -54,13 +54,13 @@
     "working": "正在工作…"
   },
   "canvas": {
+    "repairMaskEmpty": "涂抹要修复的区域",
+    "repairMaskReady": "修复蒙版已就绪",
+    "repairSelection": "修复",
     "empty": "请选择页面以开始。",
     "eraserRequiresLayer": "使用橡皮擦前，请为此模式选择可编辑图层。",
     "fit": "适应窗口",
     "fillRequiresImage": "使用填充前，请选择可编辑的绘画或图像图层。",
-    "inpaintSelection": "修复选区",
-    "removalMaskEmpty": "请绘制移除蒙版以继续",
-    "removalMaskReady": "移除蒙版已就绪",
     "surface": "Koharu 画布",
     "unavailable": "WebGPU 画布不可用"
   },
@@ -253,6 +253,7 @@
     "mainText": "主文本",
     "sfxText": "音效文本",
     "kinds": {
+      "repair": "修复蒙版",
       "artwork": "可编辑图稿",
       "bubble": "对话气泡",
       "cleanup": "清理",
@@ -581,6 +582,7 @@
     "increaseBrushSize": "增大画笔大小",
     "increaseFillTolerance": "增大填充容差",
     "modes": {
+      "repair": "修复",
       "decensor": "去除审查",
       "paint": "绘画",
       "removal": "移除"

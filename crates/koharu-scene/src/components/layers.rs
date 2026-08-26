@@ -54,6 +54,7 @@ pub enum RasterLayerKind {
     Censor,
     Mosaic,
     Segmentation,
+    Repair,
 }
 
 /// A full-page pixel layer composited above the immutable page source.

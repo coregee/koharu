@@ -96,8 +96,7 @@ export const commands = {
 	commitRasterErase: (expectedRevision: Revision, layer: EntityId, mode: CanvasRasterMode, points: Point[], diameter: number) => __TAURI_INVOKE<LayerCommit>("commit_raster_erase", { expectedRevision, layer, mode, points: points.map(i=>i), diameter }),
 	commitFill: (expectedRevision: Revision, layer: EntityId, point: Point, color: [number, number, number, number], tolerance: number) => __TAURI_INVOKE<LayerCommit>("commit_fill", { expectedRevision, layer, point, color, tolerance }),
 	commitTransform: (expectedRevision: Revision, elements: TransformFrame[]) => __TAURI_INVOKE<number | null>("commit_transform", { expectedRevision, elements }).then((v) => (v==null?v:v as typeof v)),
-	resetRemovalMask: (expectedRevision: Revision, layer: EntityId) => __TAURI_INVOKE<Revision>("reset_removal_mask", { expectedRevision, layer }),
-	commitInpaint: (expectedRevision: Revision) => __TAURI_INVOKE<JobId>("commit_inpaint", { expectedRevision }),
+	repairInpaint: (expectedRevision: Revision, layer: EntityId) => __TAURI_INVOKE<JobId>("repair_inpaint", { expectedRevision, layer }),
 };
 
 /* Types */
@@ -155,7 +154,7 @@ export type CanvasPagePreparation = {
 	page: Page,
 };
 
-export type CanvasRasterMode = "paint" | "removal" | "bar_censor" | "mosaic_censor";
+export type CanvasRasterMode = "paint" | "removal" | "repair" | "bar_censor" | "mosaic_censor";
 
 export type CanvasState = {
 	page: EntityId | null,
@@ -486,7 +485,7 @@ export type Quantization = {
 	name: string,
 };
 
-export type RasterLayerKind = "artwork" | "cleanup" | "paint" | "censor" | "mosaic" | "segmentation";
+export type RasterLayerKind = "artwork" | "cleanup" | "paint" | "censor" | "mosaic" | "segmentation" | "repair";
 
 export type RasterShape = { type: "oval"; frame: Frame } | { type: "rectangle"; frame: Frame };
 

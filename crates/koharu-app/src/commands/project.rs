@@ -2,6 +2,7 @@ use std::{
     collections::{HashSet, VecDeque},
     io::Cursor,
     path::PathBuf,
+    sync::Arc,
 };
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -1499,33 +1500,6 @@ impl Project {
         self.commit(patch).await
     }
 
-    pub(crate) async fn reset_removal_mask(
-        &mut self,
-        page: EntityId,
-        layer: EntityId,
-    ) -> Result<Commit> {
-        let snapshot = self.snapshot();
-        if Self::containing_page(&snapshot, layer)? != page {
-            bail!("the removal mask must belong to the active page");
-        }
-        if !snapshot
-            .component::<SceneRasterLayer>(layer)?
-            .is_some_and(|layer| layer.kind == RasterLayerKind::Segmentation)
-        {
-            bail!("only a segmentation layer can be reset as a removal mask");
-        }
-        if Self::consumed_raster_layers(&snapshot, page)?.contains(&layer) {
-            bail!("a consumed removal mask cannot be reset");
-        }
-        if Self::is_effectively_locked(&snapshot, layer)? {
-            bail!("a locked removal mask cannot be reset");
-        }
-        let generation = Self::segmentation_generation(&snapshot, layer)?;
-        let mut edit = generation.map_or_else(|| snapshot.edit(), |owner| snapshot.edit_as(owner));
-        edit.remove_entity(layer, RemovePolicy::Cascade)?;
-        self.commit(edit.finish()?).await
-    }
-
     #[tracing::instrument(level = "info", skip_all, fields(layer = %layer, parent = %parent))]
     pub(crate) async fn move_layer(
         &mut self,
@@ -1596,6 +1570,48 @@ impl Project {
             Ok(())
         })?;
         self.commit(patch).await
+    }
+
+    pub(crate) async fn repair_mask(
+        &self,
+        page: EntityId,
+        layer: EntityId,
+    ) -> Result<koharu_pipeline::InpaintingMask> {
+        let snapshot = self.snapshot();
+        if Self::containing_page(&snapshot, layer)? != page {
+            bail!("the repair mask must belong to the active page");
+        }
+        if !snapshot
+            .component::<SceneRasterLayer>(layer)?
+            .is_some_and(|layer| layer.kind == RasterLayerKind::Repair)
+        {
+            bail!("only a repair mask can be submitted for repair");
+        }
+        if Self::is_effectively_locked(&snapshot, layer)? {
+            bail!("a locked repair mask cannot be submitted");
+        }
+        let source = AssetRole::new("source")?;
+        let asset = snapshot
+            .asset(layer, &source)?
+            .context("the repair mask has no image")?;
+        let bytes = snapshot.read_blob(asset.blob).await?;
+        let mask = image::load_from_memory(&bytes)?.to_rgba8();
+        let page_value = snapshot.page(page)?.page()?;
+        let dimensions = (
+            page_value.width.round() as u32,
+            page_value.height.round() as u32,
+        );
+        if mask.dimensions() != dimensions {
+            bail!("repair mask dimensions must match the page");
+        }
+        if mask.pixels().all(|pixel| pixel[3] == 0) {
+            bail!("paint an area before running repair");
+        }
+        Ok(koharu_pipeline::InpaintingMask {
+            page,
+            png: Arc::from(bytes.as_ref()),
+            repair_layer: Some(layer),
+        })
     }
 
     pub(crate) async fn apply_raster_stroke(
@@ -1750,6 +1766,7 @@ impl Project {
             RasterLayerKind::Paint => "Paint",
             RasterLayerKind::Cleanup => "Cleanup",
             RasterLayerKind::Segmentation => "Segmentation",
+            RasterLayerKind::Repair => "Repair Mask",
         };
         let name = format!(
             "{layer_label} {}",
@@ -1796,7 +1813,10 @@ impl Project {
                         kind: created_layer_kind,
                     },
                 )?;
-                if created_layer_kind == RasterLayerKind::Segmentation {
+                if matches!(
+                    created_layer_kind,
+                    RasterLayerKind::Segmentation | RasterLayerKind::Repair
+                ) {
                     edit.set(
                         layer,
                         &SceneVisibility {
@@ -2451,9 +2471,10 @@ impl Project {
                 RasterLayerKind::Censor | RasterLayerKind::Mosaic => {
                     !Self::layer_visibility(snapshot, entity)?.visible
                 }
-                RasterLayerKind::Artwork | RasterLayerKind::Cleanup | RasterLayerKind::Paint => {
-                    false
-                }
+                RasterLayerKind::Artwork
+                | RasterLayerKind::Cleanup
+                | RasterLayerKind::Paint
+                | RasterLayerKind::Repair => false,
             };
             if is_consumed {
                 consumed.insert(entity);
@@ -3326,6 +3347,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn repair_masks_are_dedicated_visible_alpha_masks() {
+        let mut session = Session::memory().await.unwrap();
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                page = Some(edit.add_page(PageDraft::new("page", 20.0, 20.0), At::End)?);
+                Ok(())
+            })
+            .unwrap();
+        session.commit(patch).await.unwrap();
+        let page = page.unwrap();
+        let mut project = Project::new(session, "test".to_owned());
+
+        let (commit, layer) = project
+            .apply_raster_stroke(
+                page,
+                None,
+                RasterStrokeMode::Paint,
+                RasterLayerKind::Repair,
+                [14, 165, 233, 255],
+                4.0,
+                vec![ScenePoint { x: 10.0, y: 10.0 }],
+            )
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+
+        let snapshot = project.snapshot();
+        assert_eq!(
+            snapshot
+                .component::<SceneRasterLayer>(layer)
+                .unwrap()
+                .unwrap()
+                .name,
+            "Repair Mask 1"
+        );
+        assert_eq!(
+            snapshot
+                .component::<SceneVisibility>(layer)
+                .unwrap()
+                .unwrap()
+                .opacity,
+            0.45
+        );
+        let mask = project.repair_mask(page, layer).await.unwrap();
+        assert_eq!(mask.repair_layer, Some(layer));
+        let image = image::load_from_memory(&mask.png).unwrap().to_rgba8();
+        assert_eq!(image.dimensions(), (20, 20));
+        assert!(image.pixels().any(|pixel| pixel[3] > 0));
+    }
+
+    #[tokio::test]
     async fn original_erasing_creates_an_undoable_artwork_copy() {
         let mut session = Session::memory().await.unwrap();
         let mut page = None;
@@ -3618,15 +3692,6 @@ mod tests {
                 .origin,
             Origin::Generated(detector)
         );
-
-        let reset = project
-            .reset_removal_mask(page, segmentation)
-            .await
-            .unwrap();
-        project.record_commit(&reset);
-        assert!(project.snapshot().entity(segmentation).is_err());
-        project.undo().await.unwrap();
-        assert!(project.snapshot().entity(segmentation).is_ok());
     }
 
     #[tokio::test]

@@ -54,13 +54,13 @@
     "working": "Trabajando…"
   },
   "canvas": {
+    "repairMaskEmpty": "Pinta sobre el área que quieres reparar",
+    "repairMaskReady": "Máscara de reparación lista",
+    "repairSelection": "Reparar",
     "empty": "Selecciona una página para empezar.",
     "eraserRequiresLayer": "Selecciona una capa editable para este modo antes de usar el borrador.",
     "fit": "Ajustar a la ventana",
     "fillRequiresImage": "Selecciona una capa de pintura o imagen editable antes de usar Rellenar.",
-    "inpaintSelection": "Rellenar selección",
-    "removalMaskEmpty": "Dibuja una máscara de eliminación para continuar",
-    "removalMaskReady": "Máscara de eliminación lista",
     "surface": "Lienzo de Koharu",
     "unavailable": "El lienzo WebGPU no está disponible"
   },
@@ -253,6 +253,7 @@
     "mainText": "Texto principal",
     "sfxText": "Texto SFX",
     "kinds": {
+      "repair": "Máscara de reparación",
       "artwork": "Ilustración editable",
       "bubble": "Globo de diálogo",
       "cleanup": "Limpieza",
@@ -581,6 +582,7 @@
     "increaseBrushSize": "Aumentar tamaño del pincel",
     "increaseFillTolerance": "Aumentar tolerancia de relleno",
     "modes": {
+      "repair": "Reparar",
       "decensor": "Descensurar",
       "paint": "Pintura",
       "removal": "Eliminación"

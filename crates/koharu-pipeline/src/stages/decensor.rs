@@ -272,6 +272,7 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
             RasterLayerKind::Censor => {}
             RasterLayerKind::Mosaic => {}
             RasterLayerKind::Segmentation => {}
+            RasterLayerKind::Repair => {}
         }
     }
     Ok(Prepared {

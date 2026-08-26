@@ -14,6 +14,7 @@ use koharu_scene::EntityId;
 pub struct InpaintingMask {
     pub page: EntityId,
     pub png: Arc<[u8]>,
+    pub repair_layer: Option<EntityId>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Type)]

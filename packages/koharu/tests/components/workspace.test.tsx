@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CanvasWorkspace } from '@/components/editor/CanvasWorkspace'
@@ -114,6 +114,18 @@ const segmentationLayer: Layer = {
   image: 'segmentation-image',
   name: 'Text Segmentation',
   kind: 'segmentation',
+  consumed: false,
+}
+
+const repairLayer: Layer = {
+  type: 'raster',
+  locked: false,
+  id: 'repair',
+  parent: 'page',
+  visibility: { visible: true, opacity: 0.45 },
+  image: 'repair-image',
+  name: 'Repair Mask 1',
+  kind: 'repair',
   consumed: false,
 }
 
@@ -948,7 +960,7 @@ describe('canvas interaction adapter', () => {
     })
   })
 
-  it('edits the reusable removal mask before explicitly starting inpainting', async () => {
+  it('edits the reusable unconsumed removal mask', async () => {
     installProject()
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
       ...page,
@@ -958,7 +970,6 @@ describe('canvas interaction adapter', () => {
     const brushCommit = vi
       .spyOn(commands, 'commitRasterBrush')
       .mockResolvedValue({ revision: 2, layer: 'segmentation' })
-    const inpaint = vi.spyOn(commands, 'commitInpaint').mockResolvedValue('job')
     const surface = renderWorkspace()
 
     fireEvent.pointerDown(surface, { button: 0, pointerId: 12, clientX: 30, clientY: 40 })
@@ -976,11 +987,6 @@ describe('canvas interaction adapter', () => {
       ]),
       { diameter: 48, color: [168, 85, 247, 255] },
     )
-    expect(inpaint).not.toHaveBeenCalled()
-    expect(screen.getByText('Removal mask ready')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Inpaint Selection' }))
-    await waitFor(() => expect(inpaint).toHaveBeenCalledWith(1))
   })
 
   it('starts a new removal mask instead of editing one already consumed by inpainting', async () => {
@@ -1006,18 +1012,68 @@ describe('canvas interaction adapter', () => {
     expect(commit).toHaveBeenCalledWith(1, null, 'removal', expect.any(Array), expect.any(Object))
   })
 
-  it('resets the current unconsumed removal mask', async () => {
+  it('edits a dedicated repair mask', async () => {
     installProject()
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
       ...page,
-      layers: [...page.layers, segmentationLayer],
+      layers: [...page.layers, repairLayer],
     }))
-    useKoharuStore.setState({ toolMode: 'removal', tool: 'brush' })
-    const reset = vi.spyOn(commands, 'resetRemovalMask').mockResolvedValue(2)
-    renderWorkspace()
+    useKoharuStore.setState({ toolMode: 'repair', tool: 'brush' })
+    const commit = vi
+      .spyOn(commands, 'commitRasterBrush')
+      .mockResolvedValue({ revision: 2, layer: 'repair' })
+    const surface = renderWorkspace()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
-    await waitFor(() => expect(reset).toHaveBeenCalledWith(1, 'segmentation'))
+    expect(screen.getByText('Repair mask ready')).toBeInTheDocument()
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 28, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(surface, { pointerId: 28, clientX: 30, clientY: 40 })
+
+    await waitFor(() => expect(commit).toHaveBeenCalledOnce())
+    expect(commit).toHaveBeenCalledWith(1, 'repair', 'repair', expect.any(Array), {
+      diameter: 48,
+      color: [14, 165, 233, 255],
+    })
+  })
+
+  it('submits and resets a ready repair mask from the repair controls', async () => {
+    installProject()
+    queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+      ...page,
+      layers: [...page.layers, repairLayer],
+    }))
+    useKoharuStore.setState({ toolMode: 'repair', tool: 'brush' })
+    const repair = vi.spyOn(commands, 'repairInpaint').mockResolvedValue('job')
+    const reset = vi.spyOn(commands, 'deleteLayers').mockResolvedValue(null)
+    renderWorkspace()
+    const controls = screen.getByText('Repair mask ready').parentElement!
+
+    fireEvent.click(within(controls).getByRole('button', { name: 'Repair' }))
+    await waitFor(() => expect(repair).toHaveBeenCalledWith(1, 'repair'))
+    await waitFor(() =>
+      expect(within(controls).getByRole('button', { name: 'Reset' })).toBeEnabled(),
+    )
+    fireEvent.click(within(controls).getByRole('button', { name: 'Reset' }))
+    await waitFor(() => expect(reset).toHaveBeenCalledWith(['repair']))
+  })
+
+  it('rasterizes a pending repair shape before submitting it', async () => {
+    installProject()
+    useKoharuStore.setState({ toolMode: 'repair', tool: 'rectangle' })
+    const shape = vi.spyOn(commands, 'commitRasterShape').mockResolvedValue({
+      revision: 2,
+      layer: 'repair',
+    })
+    const repair = vi.spyOn(commands, 'repairInpaint').mockResolvedValue('job')
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 29, clientX: 30, clientY: 40 })
+    fireEvent.pointerMove(surface, { pointerId: 29, clientX: 70, clientY: 60 })
+    fireEvent.pointerUp(surface, { pointerId: 29, clientX: 70, clientY: 60 })
+
+    const controls = screen.getByText('Repair mask ready').parentElement!
+    fireEvent.click(within(controls).getByRole('button', { name: 'Repair' }))
+    await waitFor(() => expect(shape).toHaveBeenCalledOnce())
+    await waitFor(() => expect(repair).toHaveBeenCalledWith(2, 'repair'))
   })
 
   it('keeps shapes editable for dragging, resizing, and rotation until click-away', async () => {

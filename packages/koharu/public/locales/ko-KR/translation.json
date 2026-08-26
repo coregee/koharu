@@ -54,13 +54,13 @@
     "working": "작업 중…"
   },
   "canvas": {
+    "repairMaskEmpty": "복구할 영역을 칠하세요",
+    "repairMaskReady": "복구 마스크 준비됨",
+    "repairSelection": "복구",
     "empty": "시작할 페이지를 선택하세요.",
     "eraserRequiresLayer": "지우개를 사용하기 전에 이 모드에서 편집 가능한 레이어를 선택하세요.",
     "fit": "창에 맞춤",
     "fillRequiresImage": "채우기를 사용하기 전에 편집 가능한 페인트 또는 이미지 레이어를 선택하세요.",
-    "inpaintSelection": "선택 영역 인페인트",
-    "removalMaskEmpty": "계속하려면 제거 마스크를 그리세요",
-    "removalMaskReady": "제거 마스크 준비됨",
     "surface": "Koharu 캔버스",
     "unavailable": "WebGPU 캔버스를 사용할 수 없습니다"
   },
@@ -253,6 +253,7 @@
     "mainText": "메인 텍스트",
     "sfxText": "효과음 텍스트",
     "kinds": {
+      "repair": "복구 마스크",
       "artwork": "편집 가능한 아트워크",
       "bubble": "말풍선",
       "cleanup": "정리",
@@ -581,6 +582,7 @@
     "increaseBrushSize": "브러시 크기 늘리기",
     "increaseFillTolerance": "채우기 허용 오차 늘리기",
     "modes": {
+      "repair": "복구",
       "decensor": "검열 해제",
       "paint": "페인트",
       "removal": "제거"

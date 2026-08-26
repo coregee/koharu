@@ -97,7 +97,6 @@ pub enum JobState {
 pub(crate) struct Processing {
     pub(crate) stops: Mutex<HashMap<JobId, StopToken>>,
     pub(crate) jobs: Mutex<HashMap<JobId, Job>>,
-    pub(crate) inpainting_mask: Mutex<Option<koharu_pipeline::InpaintingMask>>,
 }
 
 #[derive(Default)]
@@ -123,6 +122,27 @@ pub(crate) async fn process(
         .as_ref()
         .context("no project is open")?
         .snapshot();
+    start_process(
+        handle,
+        snapshot,
+        scope,
+        operation,
+        None,
+        &processing,
+        &job_channel,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_process(
+    handle: AppHandle<Cef>,
+    snapshot: Snapshot,
+    scope: koharu_pipeline::Scope,
+    operation: koharu_pipeline::Operation,
+    inpainting_mask: Option<koharu_pipeline::InpaintingMask>,
+    processing: &Processing,
+    job_channel: &JobChannel,
+) -> std::result::Result<JobId, Error> {
     let id = JobId::new();
     let stop = StopToken::default();
     {
@@ -149,7 +169,6 @@ pub(crate) async fn process(
 
     let pipeline = handle.state::<koharu_pipeline::Pipeline>().inner().clone();
     let task_handle = handle.clone();
-    let inpainting_mask = processing.inpainting_mask.lock().take();
     drop(tokio::spawn(async move {
         let progress = Arc::new(Mutex::new(JobProgress::default()));
         let progress_handle = task_handle.clone();

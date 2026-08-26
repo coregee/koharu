@@ -26,7 +26,7 @@ export type CanvasTool =
   | 'rectangle'
   | 'eyedropper'
   | 'pan'
-export type ToolMode = 'removal' | 'decensor' | 'paint'
+export type ToolMode = 'removal' | 'repair' | 'decensor' | 'paint'
 export const MIN_BRUSH_DIAMETER = 1
 export const MAX_BRUSH_DIAMETER = 128
 export const MIN_FILL_TOLERANCE = 0
@@ -115,6 +115,7 @@ export const defaultShortcuts: Shortcuts = {
   eyedropper: 'i',
   pan: 'h',
   removal: 'j',
+  repair: 'k',
   decensor: 'c',
   paint: 'p',
   fit: '0',

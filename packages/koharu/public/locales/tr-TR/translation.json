@@ -54,13 +54,13 @@
     "working": "Çalışıyor…"
   },
   "canvas": {
+    "repairMaskEmpty": "Onarılacak alanı boyayın",
+    "repairMaskReady": "Onarım maskesi hazır",
+    "repairSelection": "Onar",
     "empty": "Başlamak için bir sayfa seçin.",
     "eraserRequiresLayer": "Silgiyi kullanmadan önce bu mod için düzenlenebilir bir katman seçin.",
     "fit": "Pencereye Sığdır",
     "fillRequiresImage": "Dolgu'yu kullanmadan önce düzenlenebilir bir boya veya görüntü katmanı seçin.",
-    "inpaintSelection": "Seçimi Onar",
-    "removalMaskEmpty": "Devam etmek için bir kaldırma maskesi çizin",
-    "removalMaskReady": "Kaldırma maskesi hazır",
     "surface": "Koharu tuvali",
     "unavailable": "WebGPU tuvali kullanılamıyor"
   },
@@ -253,6 +253,7 @@
     "mainText": "Ana Metin",
     "sfxText": "SFX Metni",
     "kinds": {
+      "repair": "Onarım maskesi",
       "artwork": "Düzenlenebilir çizim",
       "bubble": "Konuşma balonu",
       "cleanup": "Temizleme",
@@ -581,6 +582,7 @@
     "increaseBrushSize": "Fırça boyutunu artır",
     "increaseFillTolerance": "Dolgu toleransını artır",
     "modes": {
+      "repair": "Onar",
       "decensor": "Sansürü kaldır",
       "paint": "Boya",
       "removal": "Kaldırma"
