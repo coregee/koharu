@@ -19,7 +19,7 @@ use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, Origin, RasterLayer, RasterLayerKind, Visibility,
 };
 
-use super::{StageInput, StageProcessor, above_artwork, finish};
+use super::{CleanupOwner, StageInput, StageProcessor, above_cleanup, cleanup_target, finish};
 use crate::ModelCell;
 
 const MODEL: &str = "diffusioncreampy-sdxl";
@@ -169,7 +169,7 @@ fn write_result(
         edit.observe_assets(entity)?;
         entity
     } else {
-        let entity = edit.add_entity(page, above_artwork(scene, page)?)?;
+        let entity = edit.add_entity(page, above_cleanup(scene, page)?)?;
         edit.set(
             entity,
             &RasterLayer {
@@ -224,9 +224,24 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
         .await?
         .ok_or_else(|| anyhow!("page {} has no source image", input.page))?;
     let mut composite = original.to_rgba8();
-    let mut cleanup = None;
-    let mut cleanup_entity = None;
-    let mut cleanup_attributes = BTreeMap::new();
+    let cleanup_entity = cleanup_target(&input.scene, input.page, CleanupOwner::User)?;
+    let cleanup = if let Some(entity) = cleanup_entity {
+        input
+            .images
+            .get(&input.scene, entity, "source")
+            .await?
+            .map(|image| image.to_rgba8())
+    } else {
+        None
+    };
+    let cleanup_attributes = if let Some(entity) = cleanup_entity {
+        input
+            .scene
+            .asset(entity, &koharu_scene::AssetRole::new("source")?)?
+            .map_or_else(BTreeMap::new, |asset| asset.metadata.attributes)
+    } else {
+        BTreeMap::new()
+    };
     let mut mask_entities = Vec::new();
     let mut bar_mask = GrayImage::new(original.width(), original.height());
     let mut mosaic_mask = GrayImage::new(original.width(), original.height());
@@ -247,12 +262,6 @@ async fn prepare(input: &StageInput) -> Result<Prepared> {
             RasterLayerKind::Cleanup => {
                 let image = image.to_rgba8();
                 image::imageops::overlay(&mut composite, &image, 0, 0);
-                cleanup = Some(image);
-                cleanup_entity = Some(entity);
-                cleanup_attributes = input
-                    .scene
-                    .asset(entity, &AssetRole::new("source")?)?
-                    .map_or_else(BTreeMap::new, |asset| asset.metadata.attributes);
             }
             RasterLayerKind::Paint => {
                 image::imageops::overlay(&mut composite, &image.to_rgba8(), 0, 0);

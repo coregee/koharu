@@ -20,13 +20,16 @@ use koharu_ml::{
 #[cfg(test)]
 use koharu_scene::At;
 use koharu_scene::{
-    AssetInput, AssetMetadata, AssetRole, BubbleRegion, EntityOrigin, Geometry, Origin,
-    RasterLayer, RasterLayerKind, Region, RegionSpec, RemovePolicy,
+    AssetInput, AssetMetadata, AssetRole, BubbleRegion, Geometry, Origin, RasterLayer,
+    RasterLayerKind, Region, RegionSpec, RemovePolicy,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{StageInput, StageProcessor, above_artwork, finish, generation};
+use super::{
+    CleanupOwner, StageInput, StageProcessor, above_artwork, above_cleanup, cleanup_target, finish,
+    generation,
+};
 use crate::{INPAINTING_MASK_INPUTS_ATTRIBUTE, InpaintingModel, ModelCell};
 
 const PRODUCER: &str = "dev.koharu.pipeline.inpainting";
@@ -110,16 +113,10 @@ impl StageProcessor for Processor {
         }
         let source = AssetRole::new("source")?;
         let mask_inputs = persistent_mask_inputs(&input.scene, input.page)?;
-        let mut cleanup = None;
-        for entity in input.scene.children(input.page)? {
-            if let Some(layer) = input.scene.component::<RasterLayer>(entity)? {
-                if layer.kind == RasterLayerKind::Cleanup
-                    && input.scene.asset(entity, &source)?.is_some()
-                {
-                    cleanup = input.scene.asset(entity, &source)?;
-                }
-            }
-        }
+        let cleanup = cleanup_target(&input.scene, input.page, CleanupOwner::Generated(PRODUCER))?
+            .map(|entity| input.scene.asset(entity, &source))
+            .transpose()?
+            .flatten();
         Ok(cleanup.is_some_and(|asset| {
             mask_inputs.as_ref().is_none_or(|fingerprint| {
                 asset
@@ -186,18 +183,14 @@ impl Model {
     }
 
     async fn run(&self, input: StageInput) -> Result<koharu_scene::Patch> {
-        let mut prepared = prepare(&input).await?;
+        let prepared = prepare(&input).await?;
         if prepared.mask.as_raw().iter().all(|value| *value == 0) {
             return finish(input.scene.edit());
         }
-        let mask = prepared.mask.clone();
-        let original = prepared.original.clone();
-        let cleanup = prepared.cleanup.take();
-        let cleanup_entity = prepared.cleanup_entity;
-        let repair_layer = prepared.repair_layer;
         let (model_name, image) = match self {
             Self::LaMa(model) => {
                 let model = model.clone();
+                let inference = prepared.clone();
                 (
                     "lama",
                     tokio::task::spawn_blocking(move || -> Result<DynamicImage> {
@@ -205,10 +198,10 @@ impl Model {
                             .lock()
                             .map_err(|_| anyhow!("LaMa model lock is poisoned"))?;
                         inpaint_tiled(
-                            &prepared.image,
-                            &prepared.mask,
-                            &prepared.text_mask,
-                            &prepared.flat_fill_regions,
+                            &inference.image,
+                            &inference.mask,
+                            &inference.text_mask,
+                            &inference.flat_fill_regions,
                             |image, mask| {
                                 Ok(DynamicImage::ImageRgb8(model.inference(
                                     image,
@@ -224,6 +217,7 @@ impl Model {
             }
             Self::Aot(model) => {
                 let model = model.clone();
+                let inference = prepared.clone();
                 (
                     "aot-inpainting",
                     tokio::task::spawn_blocking(move || -> Result<DynamicImage> {
@@ -231,10 +225,10 @@ impl Model {
                             .lock()
                             .map_err(|_| anyhow!("AOT model lock is poisoned"))?;
                         inpaint_tiled(
-                            &prepared.image,
-                            &prepared.mask,
-                            &prepared.text_mask,
-                            &prepared.flat_fill_regions,
+                            &inference.image,
+                            &inference.mask,
+                            &inference.text_mask,
+                            &inference.flat_fill_regions,
                             |image, mask| {
                                 Ok(DynamicImage::ImageRgb8(model.inference(image, mask)?))
                             },
@@ -247,6 +241,7 @@ impl Model {
             Self::Flux { model, config } => {
                 let model = model.clone();
                 let config = config.clone();
+                let inference = prepared.clone();
                 (
                     "flux2-klein",
                     tokio::task::spawn_blocking(move || -> Result<DynamicImage> {
@@ -254,10 +249,10 @@ impl Model {
                             .lock()
                             .map_err(|_| anyhow!("FLUX model lock is poisoned"))?;
                         inpaint_tiled(
-                            &prepared.image,
-                            &prepared.mask,
-                            &prepared.text_mask,
-                            &prepared.flat_fill_regions,
+                            &inference.image,
+                            &inference.mask,
+                            &inference.text_mask,
+                            &inference.flat_fill_regions,
                             |image, mask| {
                                 model.inference(
                                     &config.prompt,
@@ -276,6 +271,7 @@ impl Model {
             Self::Rorem { model, config } => {
                 let model = model.clone();
                 let config = config.clone();
+                let inference = prepared.clone();
                 (
                     "rorem-mixed",
                     tokio::task::spawn_blocking(move || -> Result<DynamicImage> {
@@ -283,10 +279,10 @@ impl Model {
                             .lock()
                             .map_err(|_| anyhow!("RORem model lock is poisoned"))?;
                         inpaint_tiled(
-                            &prepared.image,
-                            &prepared.mask,
-                            &prepared.text_mask,
-                            &prepared.flat_fill_regions,
+                            &inference.image,
+                            &inference.mask,
+                            &inference.text_mask,
+                            &inference.flat_fill_regions,
                             |image, mask| {
                                 Ok(DynamicImage::ImageRgb8(model.inference(
                                     image,
@@ -303,99 +299,105 @@ impl Model {
                 )
             }
         };
-        let page = input.page;
-        let manual = input.inpainting_mask.is_some();
-        let mut edit = if manual {
-            input.scene.edit()
-        } else {
-            input.scene.edit_as(generation(PRODUCER, model_name)?)
-        };
-        edit.observe_assets(page)?;
-        for entity in &prepared.segmentation_entities {
-            edit.observe_assets(*entity)?;
-        }
-        if let Some(entity) = cleanup_entity {
-            edit.observe::<RasterLayer>(entity)?;
-            edit.observe_assets(entity)?;
-        }
-        if let Some(entity) = repair_layer {
-            edit.observe::<RasterLayer>(entity)?;
-            edit.observe_assets(entity)?;
-        }
-        let image = image.to_rgba8();
-        if image.dimensions() != original.dimensions() || image.dimensions() != mask.dimensions() {
-            bail!("inpainted image dimensions do not match page {page}");
-        }
-        let mut overlay = if manual {
-            cleanup.unwrap_or_else(|| RgbaImage::new(image.width(), image.height()))
-        } else {
-            RgbaImage::new(image.width(), image.height())
-        };
-        for (x, y, target) in overlay.enumerate_pixels_mut() {
-            if mask.get_pixel(x, y)[0] < 127 {
-                continue;
-            }
-            let generated = image.get_pixel(x, y);
-            // Keep the complete cleanup mask opaque. Transparent texels next to
-            // edited pixels let linear canvas sampling reveal the artwork below.
-            *target = Rgba([generated[0], generated[1], generated[2], 255]);
-        }
-        let mut bytes = Cursor::new(Vec::new());
-        let width = overlay.width();
-        let height = overlay.height();
-        DynamicImage::ImageRgba8(overlay).write_to(&mut bytes, ImageFormat::Png)?;
-        let mut attributes = prepared.cleanup_attributes;
-        if let Some(mask_inputs) = prepared.mask_inputs {
-            attributes.insert(INPAINTING_MASK_INPUTS_ATTRIBUTE.to_owned(), mask_inputs);
-        }
-        let cleanup_entity = if let Some(entity) = cleanup_entity {
-            if manual {
-                let mut layer = input
-                    .scene
-                    .component::<RasterLayer>(entity)?
-                    .context("cleanup entity has no raster layer component")?;
-                let generated = layer.origin != Origin::User
-                    || input
-                        .scene
-                        .component::<EntityOrigin>(entity)?
-                        .is_some_and(|origin| origin.origin != Origin::User);
-                if generated {
-                    edit.promote_entity_to_user(entity)?;
-                    layer.origin = Origin::User;
-                    edit.set(entity, &layer)?;
-                }
-            }
-            entity
-        } else {
-            let entity = edit.add_entity(page, above_artwork(&input.scene, page)?)?;
-            edit.set(
-                entity,
-                &RasterLayer {
-                    origin: Origin::User,
-                    name: "Cleanup".to_owned(),
-                    kind: RasterLayerKind::Cleanup,
-                },
-            )?;
-            entity
-        };
-        edit.set_asset(
-            cleanup_entity,
-            &AssetRole::new("source")?,
-            AssetInput::new(
-                Arc::<[u8]>::from(bytes.into_inner()),
-                "image/png",
-                AssetMetadata {
-                    width: Some(width),
-                    height: Some(height),
-                    attributes,
-                },
-            ),
-        )?;
-        if let Some(entity) = repair_layer {
-            edit.remove_entity(entity, RemovePolicy::Cascade)?;
-        }
-        finish(edit)
+        write_result(&input, prepared, model_name, image)
     }
+}
+
+fn write_result(
+    input: &StageInput,
+    prepared: InpaintInput,
+    model_name: &str,
+    image: DynamicImage,
+) -> Result<koharu_scene::Patch> {
+    let page = input.page;
+    let manual = input.inpainting_mask.is_some();
+    let (mut edit, layer_origin) = if manual {
+        (input.scene.edit(), Origin::User)
+    } else {
+        let generation = generation(PRODUCER, model_name)?;
+        (
+            input.scene.edit_as(generation.clone()),
+            Origin::Generated(generation),
+        )
+    };
+    edit.observe_assets(page)?;
+    for entity in &prepared.segmentation_entities {
+        edit.observe_assets(*entity)?;
+    }
+    if let Some(entity) = prepared.cleanup_entity {
+        edit.observe::<RasterLayer>(entity)?;
+        edit.observe_assets(entity)?;
+    }
+    if let Some(entity) = prepared.repair_layer {
+        edit.observe::<RasterLayer>(entity)?;
+        edit.observe_assets(entity)?;
+    }
+    let image = image.to_rgba8();
+    if image.dimensions() != prepared.original.dimensions()
+        || image.dimensions() != prepared.mask.dimensions()
+    {
+        bail!("inpainted image dimensions do not match page {page}");
+    }
+    let mut overlay = if manual {
+        prepared
+            .cleanup
+            .unwrap_or_else(|| RgbaImage::new(image.width(), image.height()))
+    } else {
+        RgbaImage::new(image.width(), image.height())
+    };
+    for (x, y, target) in overlay.enumerate_pixels_mut() {
+        if prepared.mask.get_pixel(x, y)[0] < 127 {
+            continue;
+        }
+        let generated = image.get_pixel(x, y);
+        // Keep the complete cleanup mask opaque. Transparent texels next to
+        // edited pixels let linear canvas sampling reveal the artwork below.
+        *target = Rgba([generated[0], generated[1], generated[2], 255]);
+    }
+    let mut bytes = Cursor::new(Vec::new());
+    let width = overlay.width();
+    let height = overlay.height();
+    DynamicImage::ImageRgba8(overlay).write_to(&mut bytes, ImageFormat::Png)?;
+    let mut attributes = prepared.cleanup_attributes;
+    if let Some(mask_inputs) = prepared.mask_inputs {
+        attributes.insert(INPAINTING_MASK_INPUTS_ATTRIBUTE.to_owned(), mask_inputs);
+    }
+    let cleanup_entity = if let Some(entity) = prepared.cleanup_entity {
+        entity
+    } else {
+        let at = if manual {
+            above_cleanup(&input.scene, page)?
+        } else {
+            above_artwork(&input.scene, page)?
+        };
+        let entity = edit.add_entity(page, at)?;
+        edit.set(
+            entity,
+            &RasterLayer {
+                origin: layer_origin,
+                name: "Cleanup".to_owned(),
+                kind: RasterLayerKind::Cleanup,
+            },
+        )?;
+        entity
+    };
+    edit.set_asset(
+        cleanup_entity,
+        &AssetRole::new("source")?,
+        AssetInput::new(
+            Arc::<[u8]>::from(bytes.into_inner()),
+            "image/png",
+            AssetMetadata {
+                width: Some(width),
+                height: Some(height),
+                attributes,
+            },
+        ),
+    )?;
+    if let Some(entity) = prepared.repair_layer {
+        edit.remove_entity(entity, RemovePolicy::Cascade)?;
+    }
+    finish(edit)
 }
 
 #[derive(Clone, Debug)]
@@ -447,6 +449,7 @@ fn flat_fill_regions(input: &StageInput, width: u32, height: u32) -> Result<Vec<
     Ok(regions)
 }
 
+#[derive(Clone)]
 struct InpaintInput {
     image: Arc<DynamicImage>,
     original: Arc<DynamicImage>,
@@ -468,14 +471,12 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
         .get(&input.scene, page, "source")
         .await?
         .ok_or_else(|| anyhow!("page {page} has no source image"))?;
-    let cleanup_entity = input.scene.children(page)?.find(|entity| {
-        input
-            .scene
-            .component::<RasterLayer>(*entity)
-            .ok()
-            .flatten()
-            .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
-    });
+    let cleanup_owner = if input.inpainting_mask.is_some() {
+        CleanupOwner::User
+    } else {
+        CleanupOwner::Generated(PRODUCER)
+    };
+    let cleanup_entity = cleanup_target(&input.scene, page, cleanup_owner)?;
     let cleanup = if let Some(entity) = cleanup_entity {
         input
             .images
@@ -500,13 +501,24 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
         bail!("cleanup layer dimensions do not match page {page}");
     }
     let source = if input.inpainting_mask.is_some() {
-        if let Some(cleanup) = cleanup.as_ref() {
-            let mut composite = original.to_rgba8();
-            image::imageops::overlay(&mut composite, cleanup, 0, 0);
-            Arc::new(DynamicImage::ImageRgba8(composite))
-        } else {
-            original.clone()
+        let mut composite = original.to_rgba8();
+        for entity in input.scene.children(page)? {
+            if !input
+                .scene
+                .component::<RasterLayer>(entity)?
+                .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
+            {
+                continue;
+            }
+            let Some(image) = input.images.get(&input.scene, entity, "source").await? else {
+                continue;
+            };
+            if image.dimensions() != original.dimensions() {
+                bail!("cleanup layer dimensions do not match page {page}");
+            }
+            image::imageops::overlay(&mut composite, &image.to_rgba8(), 0, 0);
         }
+        Arc::new(DynamicImage::ImageRgba8(composite))
     } else {
         original.clone()
     };
@@ -1231,34 +1243,43 @@ mod tests {
                     koharu_scene::PageDraft::new("page", 8.0, 8.0),
                     koharu_scene::At::End,
                 )?;
-                let cleanup = edit.add_entity(id, At::Start)?;
-                edit.set(
-                    cleanup,
-                    &RasterLayer {
-                        origin: Origin::User,
-                        name: "Cleanup".to_owned(),
-                        kind: RasterLayerKind::Cleanup,
-                    },
-                )?;
-                edit.set_asset(
-                    cleanup,
-                    &AssetRole::new("source")?,
-                    AssetInput::new(
-                        Arc::<[u8]>::from([0]),
-                        "image/png",
-                        AssetMetadata {
-                            width: Some(8),
-                            height: Some(8),
-                            attributes: BTreeMap::new(),
-                        },
-                    ),
-                )?;
                 page = Some(id);
                 Ok(())
             })
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
         let page = page.unwrap();
+        let owner = generation(PRODUCER, "lama").unwrap();
+        let mut edit = snapshot.edit_as(owner.clone());
+        let cleanup = edit.add_entity(page, At::Start).unwrap();
+        edit.set(
+            cleanup,
+            &RasterLayer {
+                origin: Origin::Generated(owner),
+                name: "Cleanup".to_owned(),
+                kind: RasterLayerKind::Cleanup,
+            },
+        )
+        .unwrap();
+        edit.set_asset(
+            cleanup,
+            &AssetRole::new("source").unwrap(),
+            AssetInput::new(
+                Arc::<[u8]>::from([0]),
+                "image/png",
+                AssetMetadata {
+                    width: Some(8),
+                    height: Some(8),
+                    attributes: BTreeMap::new(),
+                },
+            ),
+        )
+        .unwrap();
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
         let automatic = StageInput::new(
             snapshot.clone(),
             page,
@@ -1289,7 +1310,6 @@ mod tests {
     async fn automatic_inpainting_restarts_when_segmentation_is_available() {
         let mut session = koharu_scene::Session::memory().await.unwrap();
         let mut page = None;
-        let mut cleanup = None;
         let patch = session
             .snapshot()
             .patch(|edit| {
@@ -1297,39 +1317,66 @@ mod tests {
                     koharu_scene::PageDraft::new("page", 8.0, 8.0),
                     koharu_scene::At::End,
                 )?;
-                for kind in [RasterLayerKind::Cleanup, RasterLayerKind::Segmentation] {
-                    let layer = edit.add_entity(id, At::Start)?;
-                    if kind == RasterLayerKind::Cleanup {
-                        cleanup = Some(layer);
-                    }
-                    edit.set(
-                        layer,
-                        &RasterLayer {
-                            origin: Origin::User,
-                            name: format!("{kind:?}"),
-                            kind,
+                let segmentation = edit.add_entity(id, At::Start)?;
+                edit.set(
+                    segmentation,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Segmentation".to_owned(),
+                        kind: RasterLayerKind::Segmentation,
+                    },
+                )?;
+                edit.set_asset(
+                    segmentation,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        Arc::<[u8]>::from([0]),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(8),
+                            height: Some(8),
+                            attributes: BTreeMap::new(),
                         },
-                    )?;
-                    edit.set_asset(
-                        layer,
-                        &AssetRole::new("source")?,
-                        AssetInput::new(
-                            Arc::<[u8]>::from([0]),
-                            "image/png",
-                            AssetMetadata {
-                                width: Some(8),
-                                height: Some(8),
-                                attributes: BTreeMap::new(),
-                            },
-                        ),
-                    )?;
-                }
+                    ),
+                )?;
                 page = Some(id);
                 Ok(())
             })
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
         let page = page.unwrap();
+        let owner = generation(PRODUCER, "lama").unwrap();
+        let mut edit = snapshot.edit_as(owner.clone());
+        let layer = edit.add_entity(page, At::Start).unwrap();
+        let cleanup = layer;
+        edit.set(
+            layer,
+            &RasterLayer {
+                origin: Origin::Generated(owner),
+                name: "Cleanup".to_owned(),
+                kind: RasterLayerKind::Cleanup,
+            },
+        )
+        .unwrap();
+        edit.set_asset(
+            layer,
+            &AssetRole::new("source").unwrap(),
+            AssetInput::new(
+                Arc::<[u8]>::from([0]),
+                "image/png",
+                AssetMetadata {
+                    width: Some(8),
+                    height: Some(8),
+                    attributes: BTreeMap::new(),
+                },
+            ),
+        )
+        .unwrap();
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
         let input = StageInput::new(
             snapshot.clone(),
             page,
@@ -1343,27 +1390,25 @@ mod tests {
         assert!(!processor.skip(&input).unwrap());
 
         let fingerprint = persistent_mask_inputs(&snapshot, page).unwrap().unwrap();
-        let cleanup = cleanup.unwrap();
-        let patch = snapshot
-            .patch(|edit| {
-                edit.set_asset(
-                    cleanup,
-                    &AssetRole::new("source")?,
-                    AssetInput::new(
-                        Arc::<[u8]>::from([0]),
-                        "image/png",
-                        AssetMetadata {
-                            width: Some(8),
-                            height: Some(8),
-                            attributes: BTreeMap::from([(
-                                INPAINTING_MASK_INPUTS_ATTRIBUTE.to_owned(),
-                                fingerprint,
-                            )]),
-                        },
-                    ),
-                )
-            })
-            .unwrap();
+        let mut edit = snapshot.edit_as(generation(PRODUCER, "lama").unwrap());
+        edit.set_asset(
+            cleanup,
+            &AssetRole::new("source").unwrap(),
+            AssetInput::new(
+                Arc::<[u8]>::from([0]),
+                "image/png",
+                AssetMetadata {
+                    width: Some(8),
+                    height: Some(8),
+                    attributes: BTreeMap::from([(
+                        INPAINTING_MASK_INPUTS_ATTRIBUTE.to_owned(),
+                        fingerprint,
+                    )]),
+                },
+            ),
+        )
+        .unwrap();
+        let patch = edit.finish().unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
         let consumed = StageInput::new(
             snapshot,
@@ -1375,6 +1420,167 @@ mod tests {
         );
 
         assert!(processor.skip(&consumed).unwrap());
+    }
+
+    #[tokio::test]
+    async fn repair_and_automatic_inpainting_keep_distinct_cleanup_ownership() {
+        let mut session = koharu_scene::Session::memory().await.unwrap();
+        let encode = |image: &DynamicImage| {
+            let mut bytes = Cursor::new(Vec::new());
+            image.write_to(&mut bytes, ImageFormat::Png).unwrap();
+            Arc::<[u8]>::from(bytes.into_inner())
+        };
+        let mut page = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let id = edit.add_page(
+                    koharu_scene::PageDraft::new("page", 2.0, 2.0),
+                    koharu_scene::At::End,
+                )?;
+                edit.set_asset(
+                    id,
+                    &AssetRole::new("source")?,
+                    AssetInput::new(
+                        encode(&DynamicImage::new_rgb8(2, 2)),
+                        "image/png",
+                        AssetMetadata {
+                            width: Some(2),
+                            height: Some(2),
+                            attributes: BTreeMap::new(),
+                        },
+                    ),
+                )?;
+                page = Some(id);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let page = page.unwrap();
+
+        let automatic = StageInput::new(
+            snapshot,
+            page,
+            None,
+            None,
+            Arc::new(crate::ImageCache::default()),
+            None,
+        );
+        let mut prepared = prepare(&automatic).await.unwrap();
+        prepared.mask.fill(u8::MAX);
+        let patch = write_result(
+            &automatic,
+            prepared,
+            "lama",
+            DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, Rgb([200, 20, 30]))),
+        )
+        .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let generated = cleanup_target(&snapshot, page, CleanupOwner::Generated(PRODUCER))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            cleanup_target(&snapshot, page, CleanupOwner::User).unwrap(),
+            None
+        );
+
+        let mut edit = snapshot.edit();
+        let repair = edit.add_entity(page, At::End).unwrap();
+        edit.set(
+            repair,
+            &RasterLayer {
+                origin: Origin::User,
+                name: "Repair Mask".to_owned(),
+                kind: RasterLayerKind::Repair,
+            },
+        )
+        .unwrap();
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
+        let repair_mask =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 2, Rgba([168, 85, 247, u8::MAX])));
+        let repair_input = StageInput::new(
+            snapshot,
+            page,
+            None,
+            None,
+            Arc::new(crate::ImageCache::default()),
+            Some(crate::InpaintingMask {
+                page,
+                png: encode(&repair_mask),
+                repair_layer: Some(repair),
+            }),
+        );
+        let prepared = prepare(&repair_input).await.unwrap();
+        assert_eq!(
+            prepared.image.to_rgba8().get_pixel(0, 0),
+            &Rgba([200, 20, 30, u8::MAX])
+        );
+        let patch = write_result(
+            &repair_input,
+            prepared,
+            "lama",
+            DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, Rgb([20, 200, 30]))),
+        )
+        .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let user = cleanup_target(&snapshot, page, CleanupOwner::User)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            cleanup_target(&snapshot, page, CleanupOwner::Generated(PRODUCER)).unwrap(),
+            Some(generated)
+        );
+        assert!(matches!(
+            snapshot.entity(repair),
+            Err(koharu_scene::Error::EntityNotFound(_))
+        ));
+        let cleanups = snapshot
+            .children(page)
+            .unwrap()
+            .filter(|entity| {
+                snapshot
+                    .component::<RasterLayer>(*entity)
+                    .unwrap()
+                    .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(cleanups, [generated, user]);
+        let source = AssetRole::new("source").unwrap();
+        let user_blob = snapshot.asset(user, &source).unwrap().unwrap().blob;
+        let generated_blob = snapshot.asset(generated, &source).unwrap().unwrap().blob;
+
+        let automatic = StageInput::new(
+            snapshot,
+            page,
+            None,
+            None,
+            Arc::new(crate::ImageCache::default()),
+            None,
+        );
+        let mut prepared = prepare(&automatic).await.unwrap();
+        assert_eq!(prepared.cleanup_entity, Some(generated));
+        prepared.mask.fill(u8::MAX);
+        let patch = write_result(
+            &automatic,
+            prepared,
+            "lama",
+            DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, Rgb([20, 30, 200]))),
+        )
+        .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+
+        assert_eq!(
+            snapshot.asset(user, &source).unwrap().unwrap().blob,
+            user_blob
+        );
+        assert_ne!(
+            snapshot.asset(generated, &source).unwrap().unwrap().blob,
+            generated_blob
+        );
     }
 
     fn rectangle_region([left, top, right, bottom]: [u32; 4]) -> FlatFillRegion {

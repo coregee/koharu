@@ -9,7 +9,8 @@ use std::{collections::BTreeSet, sync::Arc};
 use anyhow::Result;
 use async_trait::async_trait;
 use koharu_scene::{
-    At, Edit, EntityId, Generation, Patch, ProducerId, RasterLayer, RasterLayerKind, Snapshot,
+    AssetRole, At, Edit, EntityId, EntityOrigin, Generation, Origin, Patch, ProducerId,
+    RasterLayer, RasterLayerKind, Snapshot,
 };
 
 pub use detection::KoharuLayoutRFDetrSeg2XLConfig;
@@ -28,6 +29,70 @@ fn above_artwork(snapshot: &Snapshot, page: EntityId) -> Result<At> {
                 .is_some_and(|layer| layer.kind == RasterLayerKind::Artwork)
         })
         .map_or(At::Start, At::After))
+}
+
+fn above_cleanup(snapshot: &Snapshot, page: EntityId) -> Result<At> {
+    let mut cleanup = None;
+    for entity in snapshot.children(page)? {
+        if snapshot
+            .component::<RasterLayer>(entity)?
+            .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
+        {
+            cleanup = Some(entity);
+        }
+    }
+    match cleanup {
+        Some(entity) => Ok(At::After(entity)),
+        None => above_artwork(snapshot, page),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CleanupOwner<'a> {
+    User,
+    Generated(&'a str),
+}
+
+impl CleanupOwner<'_> {
+    fn matches(self, origin: &Origin) -> bool {
+        match (self, origin) {
+            (Self::User, Origin::User) => true,
+            (Self::Generated(producer), Origin::Generated(generation)) => {
+                generation.producer.as_str() == producer
+            }
+            (Self::User | Self::Generated(_), _) => false,
+        }
+    }
+}
+
+fn cleanup_target(
+    snapshot: &Snapshot,
+    page: EntityId,
+    owner: CleanupOwner<'_>,
+) -> Result<Option<EntityId>> {
+    let source = AssetRole::new("source")?;
+    let mut target = None;
+    for entity in snapshot.children(page)? {
+        let Some(lifecycle) = snapshot.component::<EntityOrigin>(entity)? else {
+            continue;
+        };
+        let Some(layer) = snapshot.component::<RasterLayer>(entity)? else {
+            continue;
+        };
+        if layer.kind != RasterLayerKind::Cleanup
+            || !owner.matches(&lifecycle.origin)
+            || !owner.matches(&layer.origin)
+        {
+            continue;
+        }
+        let Some(asset) = snapshot.asset(entity, &source)? else {
+            continue;
+        };
+        if owner.matches(&asset.origin) {
+            target = Some(entity);
+        }
+    }
+    Ok(target)
 }
 
 #[derive(Clone)]
