@@ -71,9 +71,8 @@ impl Torch {
 
     pub(crate) fn device_backend(self, hardware: &Hardware) -> crate::Backend {
         match self {
-            Self::Cpu => hardware
-                .device()
-                .map_or(crate::Backend::Cpu, |device| device.backend.clone()),
+            Self::Cpu if hardware.supports_metal() => crate::Backend::Metal,
+            Self::Cpu => crate::Backend::Cpu,
             Self::Cuda => crate::Backend::Cuda,
             Self::Rocm => crate::Backend::Rocm,
         }

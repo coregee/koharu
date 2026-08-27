@@ -1,5 +1,5 @@
 use std::{
-    ffi::c_void,
+    ffi::{CStr, c_void},
     path::{Path, PathBuf},
 };
 
@@ -207,6 +207,10 @@ impl Rocm {
     pub(crate) async fn probe(self) -> Result<usize> {
         type GetDeviceCount = unsafe extern "C" fn(*mut i32) -> i32;
         type GetDeviceProperties = unsafe extern "C" fn(*mut c_void, i32) -> i32;
+        type GetErrorString = unsafe extern "C" fn(i32) -> *const std::ffi::c_char;
+        type SetDevice = unsafe extern "C" fn(i32) -> i32;
+        type Malloc = unsafe extern "C" fn(*mut *mut c_void, usize) -> i32;
+        type Free = unsafe extern "C" fn(*mut c_void) -> i32;
 
         #[repr(C, align(64))]
         struct Properties([u8; 64 * 1024]);
@@ -235,10 +239,28 @@ impl Rocm {
         let get_device_count = unsafe { *library.get::<GetDeviceCount>(b"hipGetDeviceCount\0")? };
         let get_device_properties =
             unsafe { *library.get::<GetDeviceProperties>(b"hipGetDevicePropertiesR0600\0")? };
+        let get_error_string = unsafe { *library.get::<GetErrorString>(b"hipGetErrorString\0")? };
+        let set_device = unsafe { *library.get::<SetDevice>(b"hipSetDevice\0")? };
+        let malloc = unsafe { *library.get::<Malloc>(b"hipMalloc\0")? };
+        let free = unsafe { *library.get::<Free>(b"hipFree\0")? };
+        let error = |status| {
+            let message = unsafe { get_error_string(status) };
+            if message.is_null() {
+                format!("status {status}")
+            } else {
+                format!(
+                    "status {status} ({})",
+                    unsafe { CStr::from_ptr(message) }.to_string_lossy()
+                )
+            }
+        };
         let mut count = 0;
         let status = unsafe { get_device_count(&mut count) };
         if status != 0 || !(0..=128).contains(&count) {
-            anyhow::bail!("bundled ROCm reported status {status} and {count} devices");
+            anyhow::bail!(
+                "bundled ROCm reported {} and {count} devices",
+                error(status)
+            );
         }
 
         let expected = self.to_string();
@@ -268,6 +290,29 @@ impl Rocm {
                 });
             if target != Some(expected.as_str()) {
                 continue;
+            }
+
+            let status = unsafe { set_device(index) };
+            if status != 0 {
+                anyhow::bail!(
+                    "bundled ROCm cannot select {self} device {index}: {}",
+                    error(status)
+                );
+            }
+            let mut allocation = std::ptr::null_mut();
+            let status = unsafe { malloc(&mut allocation, 1) };
+            if status != 0 || allocation.is_null() {
+                anyhow::bail!(
+                    "bundled ROCm cannot allocate on {self} device {index}: {}",
+                    error(status)
+                );
+            }
+            let status = unsafe { free(allocation) };
+            if status != 0 {
+                anyhow::bail!(
+                    "bundled ROCm cannot release an allocation on {self} device {index}: {}",
+                    error(status)
+                );
             }
             return Ok(index as usize);
         }

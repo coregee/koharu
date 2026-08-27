@@ -1187,12 +1187,31 @@ fn layer_norm(path: &nn::Path<'_>, hidden_dim: i64, eps: f64) -> nn::LayerNorm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::TryIntoDevice;
+
+    fn configure_runtime_store() {
+        if let Some(store) = std::env::var_os("KOHARU_RUNTIME_SMOKE_STORE") {
+            koharu_runtime::Store::configure(std::path::PathBuf::from(store)).unwrap();
+        }
+    }
 
     #[tokio::test]
     #[ignore = "requires the dynamically loaded LibTorch runtime"]
     async fn complete_checkpoint_tree_has_600_tensors() {
+        configure_runtime_store();
         crate::init().await.unwrap();
         let model = Model::new(Device::Cpu);
+        assert_eq!(model.var_store.variables().len(), 600);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the dynamically loaded native runtimes"]
+    async fn runtime_selected_device_constructs_the_checkpoint_tree() {
+        configure_runtime_store();
+        crate::init().await.unwrap();
+        let selected = crate::device(false);
+        eprintln!("selected Torch device: {}", selected.description);
+        let model = Model::new(selected.try_into_device().unwrap());
         assert_eq!(model.var_store.variables().len(), 600);
     }
 }

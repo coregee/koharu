@@ -91,14 +91,36 @@ mod tests {
 
     use super::KoharuLayoutRFDetrSeg2XL;
 
+    fn configure_runtime_store() {
+        if let Some(store) = std::env::var_os("KOHARU_RUNTIME_SMOKE_STORE") {
+            koharu_runtime::Store::configure(PathBuf::from(store)).unwrap();
+        }
+    }
+
+    fn fixture() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/fixtures/object_detection/1.jpg")
+    }
+
+    #[tokio::test]
+    #[ignore = "loads the checkpoint and native runtimes"]
+    async fn runtime_selected_device_completes_detection() -> Result<()> {
+        configure_runtime_store();
+        crate::init().await?;
+        let device = crate::device(false);
+        eprintln!("selected Torch device: {}", device.description);
+        let image = image::open(fixture())?;
+        let model = KoharuLayoutRFDetrSeg2XL::load(device).await?;
+        let result = model.inference(&image)?;
+
+        assert!(!result.detections.is_empty());
+        Ok(())
+    }
+
     #[tokio::test]
     #[ignore = "downloads the checkpoint and requires CUDA"]
     async fn checkpoint_matches_rfdetr_upstream_structured_output() -> Result<()> {
         crate::init().await?;
-        let image = image::open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/fixtures/object_detection/1.jpg"),
-        )?;
+        let image = image::open(fixture())?;
         let model = KoharuLayoutRFDetrSeg2XL::load(crate::Device::cuda(0)).await?;
         let result = model.inference(&image)?;
 

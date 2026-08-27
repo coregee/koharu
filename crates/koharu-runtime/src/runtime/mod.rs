@@ -51,6 +51,11 @@ pub enum Feature {
 /// A discovered, dependency-ordered runtime plan.
 #[derive(Debug)]
 pub struct Runtime {
+    candidates: Vec<RuntimeCandidate>,
+}
+
+#[derive(Debug)]
+struct RuntimeCandidate {
     plan: Plan,
     hardware: Hardware,
     devices: HashMap<Feature, Backend>,
@@ -81,16 +86,20 @@ impl Runtime {
     pub fn discover(features: impl IntoIterator<Item = Feature>) -> Result<Self> {
         let features = features.into_iter().collect::<Vec<_>>();
         let hardware = Hardware::discover();
+        let mut candidates = Vec::new();
         for candidate in hardware.candidates() {
             if let Some((plan, devices)) = Self::plan(&features, &candidate)? {
-                return Ok(Self {
+                candidates.push(RuntimeCandidate {
                     plan,
                     hardware: candidate,
                     devices,
                 });
             }
         }
-        anyhow::bail!("no device supports the requested runtime features")
+        if candidates.is_empty() {
+            anyhow::bail!("no device supports the requested runtime features")
+        }
+        Ok(Self { candidates })
     }
 
     fn plan(
@@ -129,8 +138,37 @@ impl Runtime {
     /// Installs and activates packages, then returns the selected feature devices.
     #[tracing::instrument(skip_all)]
     pub async fn initialize(self) -> Result<RuntimeDevices> {
+        let mut failures = Vec::new();
+        for candidate in self.candidates {
+            let rocm_index = match candidate.plan.preflight().await {
+                Ok(index) => index,
+                Err(error) => {
+                    let device = candidate
+                        .hardware
+                        .device()
+                        .map_or_else(|| "CPU".to_owned(), |device| device.description.clone());
+                    tracing::warn!(
+                        %device,
+                        %error,
+                        "runtime accelerator preflight failed; trying the next candidate"
+                    );
+                    failures.push(format!("{device}: {error:#}"));
+                    continue;
+                }
+            };
+            return candidate.initialize(rocm_index).await;
+        }
+        anyhow::bail!(
+            "no runtime candidate passed accelerator preflight: {}",
+            failures.join("; ")
+        )
+    }
+}
+
+impl RuntimeCandidate {
+    async fn initialize(self, rocm_index: Option<usize>) -> Result<RuntimeDevices> {
         let primary = self.hardware.device().cloned().unwrap_or_else(Device::cpu);
-        let primary = self.plan.initialize(primary).await?;
+        let primary = self.plan.initialize(primary, rocm_index).await?;
         let devices = self
             .devices
             .into_iter()
@@ -208,6 +246,36 @@ mod tests {
         assert_eq!(devices[&Feature::Torch], Backend::Rocm);
         assert_eq!(devices[&Feature::Llama], Backend::Rocm);
         assert_eq!(devices[&Feature::Diffusion], Backend::Rocm);
+    }
+
+    #[test]
+    fn cpu_torch_stays_on_cpu_for_a_vulkan_candidate() {
+        let hardware = Hardware {
+            devices: vec![Device::vulkan(0)],
+            candidates: vec![0],
+            selected: Some(0),
+        };
+        let (_, devices) = Runtime::plan(&[Feature::Torch], &hardware)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(devices[&Feature::Torch], Backend::Cpu);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an installed native runtime store"]
+    async fn installed_torch_runtime_selects_a_usable_candidate() {
+        let store = std::env::var_os("KOHARU_RUNTIME_SMOKE_STORE")
+            .expect("KOHARU_RUNTIME_SMOKE_STORE must name an installed runtime store");
+        crate::Store::configure(PathBuf::from(store)).unwrap();
+
+        let devices = Runtime::discover([Feature::Torch])
+            .unwrap()
+            .initialize()
+            .await
+            .unwrap();
+        let torch = devices.device(Feature::Torch).unwrap();
+        eprintln!("selected Torch device: {}", torch.description);
     }
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]

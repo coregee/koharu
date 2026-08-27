@@ -138,7 +138,25 @@ impl Plan {
         self.graph.update_edge(before, after, ());
     }
 
-    pub(crate) async fn initialize(&self, mut device: Device) -> Result<Device> {
+    pub(crate) async fn preflight(&self) -> Result<Option<usize>> {
+        let rocm = self
+            .graph
+            .node_weights()
+            .find_map(|component| match component {
+                Component::Rocm(rocm) => Some(*rocm),
+                _ => None,
+            });
+        match rocm {
+            Some(rocm) => Ok(Some(rocm.probe().await?)),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) async fn initialize(
+        &self,
+        mut device: Device,
+        rocm_index: Option<usize>,
+    ) -> Result<Device> {
         let order = toposort(&self.graph, None).map_err(|cycle| {
             anyhow!(
                 "runtime dependency cycle contains {}",
@@ -149,7 +167,10 @@ impl Plan {
             let component = self.graph[node];
             component.activate().await?;
             if let Component::Rocm(rocm) = component {
-                device.index = rocm.probe().await?;
+                device.index = match rocm_index {
+                    Some(index) => index,
+                    None => rocm.probe().await?,
+                };
                 device.name = format!("ROCm{}", device.index);
             }
         }

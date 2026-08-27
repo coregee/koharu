@@ -72,13 +72,16 @@ pub async fn init() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Returns the runtime-owned primary device selected for Torch models.
+/// Returns the runtime-owned device selected for Torch models.
 #[must_use]
 pub fn device(cpu: bool) -> Device {
     if cpu {
         Device::cpu()
     } else if let Some(devices) = READY.get() {
-        devices.primary().clone()
+        devices
+            .device(Feature::Torch)
+            .unwrap_or_else(|| devices.primary())
+            .clone()
     } else if let Some(device) = Hardware::discover().device() {
         device.clone()
     } else {
