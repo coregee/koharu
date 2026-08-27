@@ -190,21 +190,6 @@ impl Rocm {
             .context("ROCm device is unsupported")
     }
 
-    pub(crate) fn torch_family(self) -> Option<&'static str> {
-        match self {
-            Self::Gfx1100
-            | Self::Gfx1101
-            | Self::Gfx1102
-            | Self::Gfx1103
-            | Self::Gfx1150
-            | Self::Gfx1151
-            | Self::Gfx1152
-            | Self::Gfx1153 => Some("gfx11"),
-            Self::Gfx1200 | Self::Gfx1201 => Some("gfx12_0"),
-            _ => None,
-        }
-    }
-
     pub(crate) fn routes_ggml_through_vulkan(self, hardware: &Hardware) -> bool {
         // ROCm 7.14's Windows gfx1151 BLAS kernels fail native ggml workloads
         // after initialization. Vulkan keeps llama.cpp and stable-diffusion.cpp

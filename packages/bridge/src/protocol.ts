@@ -378,7 +378,7 @@ export type ModelSelection = {
 	context_window?: number | null,
 };
 
-export type OcrModel = { model: "paddleocr-vl-1.6" } | { model: "paddleocr-vl-manga" } | { model: "manga-ocr" } | { model: "baberu-ocr" };
+export type OcrModel = { model: "paddleocr-vl-1.6" } | { model: "paddleocr-vl-manga" } | { model: "manga-ocr" } | { model: "baberu-ocr" } | { model: "hayai-ocr" };
 
 export type OpenAiCompatibleConfig = {
 	base_url?: string | null,

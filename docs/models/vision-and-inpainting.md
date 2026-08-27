@@ -20,7 +20,8 @@ Current OCR choices are:
 - **PaddleOCR-VL 1.6** — the default general vision-language OCR path;
 - **PaddleOCR-VL Manga** — a PaddleOCR-VL checkpoint fine-tuned for Japanese manga regions;
 - **Manga OCR** — specialized for Japanese manga text;
-- **Baberu OCR** — an alternative manga-oriented recognizer.
+- **Baberu OCR** — an alternative manga-oriented recognizer;
+- **Hayai OCR** — a Chinese, Korean, Japanese, English manga-oriented recognizer.
 
 OCR runs on detected text regions. A recognizer cannot recover text that detection omitted, so inspect regions before treating an empty OCR result as a language-model problem.
 

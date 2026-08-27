@@ -850,23 +850,22 @@ impl CanvasState {
             .as_ref()
             .filter(|stroke| stroke.kind != StrokeKind::Erase)
         {
-            if stroke.kind == StrokeKind::Paint {
-                let opacity = f32::from(stroke.color[3]) / 255.0;
-                if opacity < 1.0 {
-                    vectors.push_layer(
-                        Fill::NonZero,
-                        Mix::Normal,
-                        opacity,
-                        Affine::IDENTITY,
-                        &page_rect,
-                    );
-                }
-                vectors.append(&stroke.preview, None);
-                if opacity < 1.0 {
-                    vectors.pop_layer();
-                }
-            } else {
-                vectors.append(&stroke.preview, None);
+            let opacity = match stroke.kind {
+                StrokeKind::Paint => f32::from(stroke.color[3]) / 255.0,
+                StrokeKind::Erase => 1.0,
+            };
+            if opacity < 1.0 {
+                vectors.push_layer(
+                    Fill::NonZero,
+                    Mix::Normal,
+                    opacity,
+                    Affine::IDENTITY,
+                    &page_rect,
+                );
+            }
+            vectors.append(&stroke.preview, None);
+            if opacity < 1.0 {
+                vectors.pop_layer();
             }
             vectors_pending = true;
         }
