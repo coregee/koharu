@@ -65,6 +65,11 @@
     "unavailable": "WebGPU キャンバスを利用できません"
   },
   "colorPicker": {
+    "savedColors": "保存した色",
+    "saveColor": "現在の色を保存",
+    "emptyPalette": "＋で色を保存すると、ここから再利用できます。",
+    "applyColor": "{{color}} を適用",
+    "removeColor": "{{color}} を削除",
     "brushColor": "ブラシカラー",
     "hexCode": "16進カラーコード",
     "sampleCanvas": "キャンバスから色を選択",

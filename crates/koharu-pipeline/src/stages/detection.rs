@@ -1730,8 +1730,18 @@ fn non_maximum_suppression(detections: &mut Vec<KoharuLayoutDetection>, threshol
     let mut kept = Vec::with_capacity(detections.len());
     for candidate in detections.drain(..) {
         let suppressed = kept.iter().any(|existing: &KoharuLayoutDetection| {
-            existing.label == candidate.label
-                && intersection_over_union(existing.bbox, candidate.bbox) >= threshold
+            same_detection_kind(&existing.label, &candidate.label)
+                && intersection_area(existing.bbox, candidate.bbox) > 0.0
+                && (intersection_over_union(existing.bbox, candidate.bbox) >= threshold
+                    || (collapsible_label(&candidate.label)
+                        && existing.area > 0
+                        && candidate.area > 0
+                        && valid_mask(&existing.mask)
+                        && valid_mask(&candidate.mask)
+                        && mask_containment(&existing.mask, &candidate.mask, candidate.bbox)
+                            >= DUPLICATE_MASK_CONTAINMENT_THRESHOLD
+                        && mask_containment(&candidate.mask, &existing.mask, existing.bbox)
+                            >= DUPLICATE_MASK_CONTAINMENT_THRESHOLD))
         });
         if !suppressed {
             kept.push(candidate);
@@ -1758,7 +1768,7 @@ fn collapse_nested_detections(detections: &mut Vec<KoharuLayoutDetection>) {
         for child in 0..detections.len() {
             if child == parent
                 || collapsed[child]
-                || detections[child].label != detections[parent].label
+                || !same_detection_kind(&detections[child].label, &detections[parent].label)
                 || parent_area <= area(detections[child].bbox)
                 || containment(detections[parent].bbox, detections[child].bbox)
                     < DUPLICATE_BOUNDS_CONTAINMENT_THRESHOLD
@@ -1789,6 +1799,12 @@ fn collapse_nested_detections(detections: &mut Vec<KoharuLayoutDetection>) {
         index += 1;
         keep
     });
+}
+
+// Text and sound-effect labels compete for the same text instance; containers do not.
+fn same_detection_kind(left: &str, right: &str) -> bool {
+    left == right
+        || (matches!(left, "text" | "onomatopoeia") && matches!(right, "text" | "onomatopoeia"))
 }
 
 fn collapsible_label(label: &str) -> bool {
@@ -2671,6 +2687,47 @@ mod tests {
                 .iter()
                 .any(|detection| detection.label == "bubble")
         );
+    }
+
+    #[test]
+    fn nms_removes_competing_text_labels_but_keeps_containers() {
+        let mut detections = vec![
+            detection("onomatopoeia", 0.95, [0.0, 0.0, 100.0, 100.0]),
+            detection("text", 0.8, [5.0, 5.0, 105.0, 105.0]),
+            detection("bubble", 0.7, [0.0, 0.0, 100.0, 100.0]),
+            detection("text", 0.6, [200.0, 0.0, 250.0, 50.0]),
+        ];
+        non_maximum_suppression(&mut detections, 0.5);
+        assert_eq!(
+            detections
+                .iter()
+                .map(|d| d.label.as_str())
+                .collect::<Vec<_>>(),
+            ["onomatopoeia", "bubble", "text"]
+        );
+    }
+
+    #[test]
+    fn nms_uses_matching_masks_when_boxes_disagree() {
+        let first = filled_detection("text", 0.9, [20.0, 20.0, 40.0, 40.0]);
+        let mut second = first.clone();
+        second.score = 0.8;
+        second.bbox = [0.0, 0.0, 80.0, 80.0];
+        let mut detections = vec![first, second];
+        non_maximum_suppression(&mut detections, 0.5);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].score, 0.9);
+    }
+
+    #[test]
+    fn nested_competing_text_labels_collapse_into_the_complete_block() {
+        let mut detections = vec![
+            filled_detection("text", 0.7, [0.0, 0.0, 100.0, 100.0]),
+            filled_detection("onomatopoeia", 0.9, [20.0, 20.0, 40.0, 40.0]),
+        ];
+        collapse_nested_detections(&mut detections);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].label, "text");
     }
 
     #[test]

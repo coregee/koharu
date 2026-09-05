@@ -65,6 +65,11 @@
     "unavailable": "WebGPU 畫布無法使用"
   },
   "colorPicker": {
+    "savedColors": "已儲存的顏色",
+    "saveColor": "儲存目前顏色",
+    "emptyPalette": "點擊 + 儲存顏色，以便在此重複使用。",
+    "applyColor": "套用 {{color}}",
+    "removeColor": "移除 {{color}}",
     "brushColor": "筆刷顏色",
     "hexCode": "十六進位色彩代碼",
     "sampleCanvas": "從畫布選取色彩",

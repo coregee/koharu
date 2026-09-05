@@ -65,6 +65,11 @@
     "unavailable": "WebGPU 캔버스를 사용할 수 없습니다"
   },
   "colorPicker": {
+    "savedColors": "저장된 색상",
+    "saveColor": "현재 색상 저장",
+    "emptyPalette": "+로 색상을 저장하여 여기서 다시 사용하세요.",
+    "applyColor": "{{color}} 적용",
+    "removeColor": "{{color}} 삭제",
     "brushColor": "브러시 색상",
     "hexCode": "16진수 색상 코드",
     "sampleCanvas": "캔버스에서 색상 선택",

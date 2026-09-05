@@ -65,6 +65,11 @@
     "unavailable": "WebGPU canvas unavailable"
   },
   "colorPicker": {
+    "savedColors": "Saved colors",
+    "saveColor": "Save current color",
+    "emptyPalette": "Save a color with + to reuse it here.",
+    "applyColor": "Apply {{color}}",
+    "removeColor": "Remove {{color}}",
     "brushColor": "Brush color",
     "hexCode": "Hex color code",
     "sampleCanvas": "Pick color from canvas",

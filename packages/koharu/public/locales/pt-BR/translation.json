@@ -65,6 +65,11 @@
     "unavailable": "A tela WebGPU não está disponível"
   },
   "colorPicker": {
+    "savedColors": "Cores salvas",
+    "saveColor": "Salvar cor atual",
+    "emptyPalette": "Salve uma cor com + para reutilizá-la aqui.",
+    "applyColor": "Aplicar {{color}}",
+    "removeColor": "Remover {{color}}",
     "brushColor": "Cor do pincel",
     "hexCode": "Código hexadecimal da cor",
     "sampleCanvas": "Escolher cor da tela",

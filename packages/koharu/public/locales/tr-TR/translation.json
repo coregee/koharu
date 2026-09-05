@@ -65,6 +65,11 @@
     "unavailable": "WebGPU tuvali kullanılamıyor"
   },
   "colorPicker": {
+    "savedColors": "Kaydedilen renkler",
+    "saveColor": "Geçerli rengi kaydet",
+    "emptyPalette": "Burada tekrar kullanmak için + ile bir renk kaydedin.",
+    "applyColor": "{{color}} uygula",
+    "removeColor": "{{color}} kaldır",
     "brushColor": "Fırça rengi",
     "hexCode": "Onaltılık renk kodu",
     "sampleCanvas": "Tuvalden renk seç",

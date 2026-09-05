@@ -23,6 +23,7 @@ import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
 import { ProviderPreferences } from '@/components/preferences/ProviderPreferences'
 import { SettingsPage } from '@/components/preferences/SettingsPage'
+import { useColorPalette } from '@/lib/color-palette'
 import {
   fontsKey,
   pageKey,
@@ -709,40 +710,48 @@ describe('greenfield editor', () => {
     )
   })
 
-  it('applies text color only to the highlighted translation range', async () => {
-    const user = userEvent.setup()
-    installProject()
-    const setTypography = vi.spyOn(commands, 'setTypography').mockResolvedValue(null)
-    render(<Inspector />)
-    const translation = screen.getByTestId('edit-translation-element') as HTMLTextAreaElement
-    translation.focus()
-    translation.setSelectionRange(1, 4)
-    fireEvent.select(translation)
+  it.each(['hex', 'palette'])(
+    'applies %s text color only to the highlighted translation range',
+    async (source) => {
+      const user = userEvent.setup()
+      installProject()
+      const setTypography = vi.spyOn(commands, 'setTypography').mockResolvedValue(null)
+      render(<Inspector />)
+      const translation = screen.getByTestId('edit-translation-element') as HTMLTextAreaElement
+      translation.focus()
+      translation.setSelectionRange(1, 4)
+      fireEvent.select(translation)
 
-    await user.click(screen.getByRole('button', { name: 'Text color' }))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Hex color code' }), {
-      target: { value: '#FF0000' },
-    })
+      await user.click(screen.getByRole('button', { name: 'Text color' }))
+      if (source === 'palette') {
+        act(() => useColorPalette.getState().save('#FF0000'))
+        await user.click(screen.getByRole('button', { name: 'Apply #FF0000' }))
+      } else {
+        fireEvent.change(screen.getByRole('textbox', { name: 'Hex color code' }), {
+          target: { value: '#FF0000' },
+        })
+      }
 
-    await waitFor(() =>
-      expect(setTypography).toHaveBeenCalledWith([
-        expect.objectContaining({
-          layer: 'element',
-          typography: expect.objectContaining({
-            color: [0, 0, 0, 255],
-            style_ranges: [
-              {
-                start: 1,
-                end: 4,
-                color: [255, 0, 0, 255],
-                stroke_color: null,
-              },
-            ],
+      await waitFor(() =>
+        expect(setTypography).toHaveBeenCalledWith([
+          expect.objectContaining({
+            layer: 'element',
+            typography: expect.objectContaining({
+              color: [0, 0, 0, 255],
+              style_ranges: [
+                {
+                  start: 1,
+                  end: 4,
+                  color: [255, 0, 0, 255],
+                  stroke_color: null,
+                },
+              ],
+            }),
           }),
-        }),
-      ]),
-    )
-  })
+        ]),
+      )
+    },
+  )
 
   it('sets paragraph spacing for the selected text layer', async () => {
     installProject()

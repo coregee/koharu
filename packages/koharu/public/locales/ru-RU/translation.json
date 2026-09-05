@@ -65,6 +65,11 @@
     "unavailable": "Холст WebGPU недоступен"
   },
   "colorPicker": {
+    "savedColors": "Сохранённые цвета",
+    "saveColor": "Сохранить текущий цвет",
+    "emptyPalette": "Сохраните цвет с помощью + для повторного использования.",
+    "applyColor": "Применить {{color}}",
+    "removeColor": "Удалить {{color}}",
     "brushColor": "Цвет кисти",
     "hexCode": "Шестнадцатеричный код цвета",
     "sampleCanvas": "Выбрать цвет с холста",

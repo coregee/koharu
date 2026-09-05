@@ -65,6 +65,11 @@
     "unavailable": "El lienzo WebGPU no está disponible"
   },
   "colorPicker": {
+    "savedColors": "Colores guardados",
+    "saveColor": "Guardar color actual",
+    "emptyPalette": "Guarda un color con + para reutilizarlo aquí.",
+    "applyColor": "Aplicar {{color}}",
+    "removeColor": "Eliminar {{color}}",
     "brushColor": "Color del pincel",
     "hexCode": "Código de color hexadecimal",
     "sampleCanvas": "Elegir un color del lienzo",
