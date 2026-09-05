@@ -1,3 +1,42 @@
+## [0.81.7](https://github.com/koharu-rs/koharu/compare/0.81.6..0.81.7) - 2026-09-05
+
+### 🐛 Bug Fixes
+
+- *(app)* Remove ineffective hide-chrome-bubbles flag - ([5e317b6](https://github.com/koharu-rs/koharu/commit/5e317b6255faf2802b5a7e3a58a2719f0e0a86c5))
+
+### ⚙️ Miscellaneous Tasks
+
+- Remove summary GHA - ([3a0c6a3](https://github.com/koharu-rs/koharu/commit/3a0c6a366d5355dee7a19cc905f28d84afa6e4b8))
+
+
+## [0.81.6](https://github.com/koharu-rs/koharu/compare/0.81.5..0.81.6) - 2026-09-04
+
+### 🐛 Bug Fixes
+
+- *(app)* Pass Linux CEF switches correctly - ([24bda3a](https://github.com/koharu-rs/koharu/commit/24bda3a5cc9d47ed45b0d118cbf0711c3b46effe))
+
+
+## [0.81.5](https://github.com/koharu-rs/koharu/compare/0.81.4..0.81.5) - 2026-09-03
+
+### 🐛 Bug Fixes
+
+- *(updater)* Install Windows updates quietly - ([e2df1f6](https://github.com/koharu-rs/koharu/commit/e2df1f60ad3850b79d78b224dc698de6c2d82c8b))
+
+
+## [0.81.4](https://github.com/koharu-rs/koharu/compare/0.81.3..0.81.4) - 2026-09-03
+
+### 🐛 Bug Fixes
+
+- *(translator)* Recover model responses the JSON repair layer rejects ([#1022](https://github.com/koharu-rs/koharu/issues/1022)) - ([e6d330c](https://github.com/koharu-rs/koharu/commit/e6d330c83a76ed3efa1f7ab15988f81544df8219))
+
+
+## [0.81.3](https://github.com/koharu-rs/koharu/compare/0.81.2..0.81.3) - 2026-09-03
+
+### 🐛 Bug Fixes
+
+- *(ci)* Remove AppImage bundle target ([#1035](https://github.com/koharu-rs/koharu/issues/1035)) ([#1037](https://github.com/koharu-rs/koharu/issues/1037)) - ([859ae68](https://github.com/koharu-rs/koharu/commit/859ae68a6c012afe349bedffc616e38a929b8f19))
+
+
 ## [0.81.2](https://github.com/koharu-rs/koharu/compare/0.81.1..0.81.2) - 2026-09-03
 
 ### 🐛 Bug Fixes
