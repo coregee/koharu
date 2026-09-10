@@ -6,16 +6,13 @@ use strum::EnumProperty;
 use crate::{
     Backend, Hardware, Store, download,
     runtime::{
-        DiscoverablePackage, Package, RuntimePackage,
-        graph::Component,
-        loader,
-        packages::{Cuda, Rocm},
+        DiscoverablePackage, Package, RuntimePackage, graph::Component, loader, packages::Cuda,
         sealed,
     },
     source::extract,
 };
 
-const RELEASE: &str = "master-841-6b3edaa.2";
+const RELEASE: &str = "master-849-d04e895.1";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, strum::Display, strum::EnumProperty)]
 pub(crate) enum Diffusion {
@@ -139,7 +136,7 @@ impl DiscoverablePackage for Diffusion {
             if hardware.supports_cuda() {
                 return Some(Self::WindowsCuda);
             }
-            if let Ok(rocm) = Rocm::discover(hardware) {
+            if let Ok(rocm) = hardware.rocm_target() {
                 if rocm.routes_ggml_through_vulkan(hardware) {
                     return Some(Self::WindowsVulkan);
                 }
@@ -176,9 +173,7 @@ impl RuntimePackage for Diffusion {
                 Component::Cuda(Cuda::Runtime13),
                 Component::Cuda(Cuda::Blas13),
             ]),
-            Self::WindowsHip | Self::LinuxHip => {
-                Ok(vec![Component::Rocm(Rocm::discover(hardware)?)])
-            }
+            Self::WindowsHip | Self::LinuxHip => Ok(vec![Component::Rocm(hardware.rocm_target()?)]),
             Self::WindowsVulkan | Self::LinuxVulkan | Self::MacosMetal => Ok(Vec::new()),
         }
     }

@@ -6,9 +6,10 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{
-    AppHandle, Cef, State,
+    AppHandle, State,
     ipc::{Channel, IpcResponse},
 };
+use tauri_runtime_cef::CefRuntime;
 
 use super::{
     ChannelExt as _, Error,
@@ -442,7 +443,7 @@ pub(crate) async fn commit_transform(
 pub(crate) async fn repair_inpaint(
     expected_revision: Revision,
     layer: EntityId,
-    handle: AppHandle<Cef>,
+    handle: AppHandle<CefRuntime>,
     project: State<'_, CurrentProject>,
     processing: State<'_, Processing>,
     job_channel: State<'_, JobChannel>,

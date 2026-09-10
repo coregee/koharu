@@ -1,0 +1,48 @@
+---
+title: 'Configure translation'
+description: 'Set translation languages, project prompt, context, quantization, and generation.'
+icon: 'language'
+---
+
+Choose output settings in the processing selector or **Settings → Translation**. Koharu captures them when a run starts; edits affect later runs. Provider connections and credentials are read for each request.
+
+## Language and instructions
+
+Choose the source language, target language, and concise instructions from the Translate dropdown or **Settings -> Translation**. Leave the source language on auto-detect when the provider supports it. Instructions guide names, terminology, tone, pronouns, formatting, or text that should remain untranslated. The translation settings also provide a project-specific prompt template. Test changes on several pages and correct OCR first.
+
+LFM 2.5 and Ministral 3 support a limited set of target languages, and a run fails when their target is unsupported. Other local models accept every target language Koharu offers.
+
+## Page context
+
+Speech and narration are translated together in text-layer order. Every segment includes its role and a stable numeric ID, and the provider must return exactly one translation for each input ID. Sound effects use a separate, context-free pass.
+
+Earlier pages are included as reference context. Koharu prefers their target-language translations and retains source OCR alongside them for terminology mapping; untranslated entries still contribute their OCR text. A single-bubble retry also includes speech and narration before that bubble on the current page.
+
+Koharu uses a model's reported context window when its catalog provides one, with a conservative fallback for models that do not report it. The context-window setting can override that value. Koharu always reserves the configured percentage for the response and removes the oldest context entries first when the prompt would exceed the remaining input budget. Requests remain independent: prior reasoning output is neither stored nor sent to later pages.
+
+## Local quantization
+
+GGUF models may offer multiple quantizations. Smaller files need less download space and memory, usually at a quality cost. Larger files can be slower or exceed available memory. Hosted providers control their own serving precision.
+
+## Generation controls
+
+| Control                               | What to adjust                                           |
+| ------------------------------------- | -------------------------------------------------------- |
+| Temperature, top P, top K, min P      | Sampling and randomness                                  |
+| Repeat, frequency, presence penalties | Repetition behavior                                      |
+| Maximum output tokens                 | Response length budget                                   |
+| Reasoning                             | Additional reasoning for supported models                |
+| Vision                                | Whether a supported model receives the source page image |
+
+<Tip>
+  Start with provider defaults and change one variable at a time. High randomness tends to make
+  names and terminology less consistent.
+</Tip>
+
+Reasoning can increase latency and token use. Reasoning and vision are dropped silently for a model that does not support them; other unsupported options may be ignored or rejected by a provider or model.
+
+## Text and vision inputs
+
+Text-only requests send semantic source text. With **Vision**, a capable model also receives the source page image. A custom OpenAI-compatible server is assumed to accept images, so turn **Vision** off if it does not support image messages.
+
+Generated translations remain editable project data. [Review the wording and page layout](/en/guides/review) before export.

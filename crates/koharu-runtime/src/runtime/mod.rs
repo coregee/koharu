@@ -179,7 +179,7 @@ impl RuntimeCandidate {
                     Some(Device::cpu())
                 } else {
                     self.hardware
-                        .devices()
+                        .devices
                         .iter()
                         .find(|device| device.backend == backend)
                         .cloned()

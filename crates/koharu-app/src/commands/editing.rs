@@ -3,7 +3,8 @@ use koharu_desktop::{CanvasState, Desktop, Frame};
 use koharu_scene::{EntityId, RegionShapeKind};
 use serde::Deserialize;
 use specta::Type;
-use tauri::{Cef, State, WebviewWindow};
+use tauri::{State, WebviewWindow};
+use tauri_runtime_cef::CefRuntime;
 
 use super::{
     ChannelExt as _, Error,
@@ -416,7 +417,7 @@ pub(crate) async fn set_layer_locked(
 #[specta::specta]
 pub(crate) async fn add_image_layer(
     page: EntityId,
-    window: WebviewWindow<Cef>,
+    window: WebviewWindow<CefRuntime>,
     desktop: State<'_, Desktop>,
     project: State<'_, CurrentProject>,
     canvas_channel: State<'_, CanvasChannel>,

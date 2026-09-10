@@ -87,7 +87,7 @@ beforeEach(() => {
     selectedPages: [],
     toolMode: 'paint',
     tool: 'select',
-    brush: { diameter: 48, color: '#111111' },
+    brush: { diameter: 48, color: '#FFFFFF' },
     fillTolerance: 32,
     inspector: 'copy',
     processingScope: 'page',
