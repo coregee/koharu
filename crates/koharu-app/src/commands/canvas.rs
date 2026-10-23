@@ -151,12 +151,6 @@ pub(crate) async fn get_canvas_page_resource(
     ))
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "text_box_added",
-    skip_all,
-    fields(origin = "user", entity_count = 1_u64)
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn add_text_box(
@@ -183,12 +177,6 @@ pub(crate) async fn add_text_box(
     })
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "raster_brush_committed",
-    skip_all,
-    fields(origin = "user", mode = ?mode, point_count = points.len(), size = f64::from(brush.diameter)),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn commit_raster_brush(
@@ -217,12 +205,6 @@ pub(crate) async fn commit_raster_brush(
     .await
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "raster_shape_committed",
-    skip_all,
-    fields(origin = "user", mode = ?mode, shape = ?shape),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn commit_raster_shape(
@@ -266,12 +248,6 @@ pub(crate) async fn commit_raster_shape(
     .await
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "raster_erase_committed",
-    skip_all,
-    fields(origin = "user", mode = ?mode, point_count = points.len(), size = f64::from(diameter)),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn commit_raster_erase(
@@ -300,12 +276,6 @@ pub(crate) async fn commit_raster_erase(
     .await
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "fill_committed",
-    skip_all,
-    fields(origin = "user", tolerance = tolerance),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn commit_fill(
@@ -400,12 +370,6 @@ async fn commit_raster_edit(
     })
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "transform_committed",
-    skip_all,
-    fields(origin = "user", entity_count = elements.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn commit_transform(
@@ -432,12 +396,6 @@ pub(crate) async fn commit_transform(
     Ok(Some(commit.revision))
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "repair_requested",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn repair_inpaint(

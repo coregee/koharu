@@ -77,12 +77,40 @@ export function layerFrame(layer: Layer): Frame | null {
     layer.type === 'artwork'
       ? layer.geometry
       : null
-  return geometryFrame(geometry)
+  return geometryFrame(geometry, layer.type === 'text' ? layer.angle_degrees : null)
 }
 
-export function geometryFrame(geometry: Geometry | null | undefined): Frame | null {
+export function geometryFrame(
+  geometry: Geometry | null | undefined,
+  angleDegrees: number | null = null,
+): Frame | null {
   const points = geometry?.points
   if (!points?.length || points.some((point) => !finite(point.x, point.y))) return null
+  if (angleDegrees !== null) {
+    if (!finite(angleDegrees)) return null
+    const angle = (angleDegrees * Math.PI) / 180
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const xs = points.map((point) => point.x * cos + point.y * sin)
+    const ys = points.map((point) => -point.x * sin + point.y * cos)
+    const left = Math.min(...xs)
+    const top = Math.min(...ys)
+    const right = Math.max(...xs)
+    const bottom = Math.max(...ys)
+    const width = right - left
+    const height = bottom - top
+    const centerX = (left + right) / 2
+    const centerY = (top + bottom) / 2
+    return width > minimumFrameSize && height > minimumFrameSize
+      ? {
+          x: centerX * cos - centerY * sin - width / 2,
+          y: centerX * sin + centerY * cos - height / 2,
+          width,
+          height,
+          angle_degrees: angleDegrees,
+        }
+      : null
+  }
   if (points.length === 4) {
     const [topLeft, topRight, bottomRight, bottomLeft] = points
     const top: [number, number] = [topRight.x - topLeft.x, topRight.y - topLeft.y]
@@ -152,6 +180,31 @@ export function hitTestLayers(
     if (frame && frameContains(frame, point)) return layer
   }
   return null
+}
+
+export function frameInsideRect(
+  frame: Frame,
+  rect: { x: number; y: number; width: number; height: number },
+): boolean {
+  const centerX = frame.x + frame.width * 0.5
+  const centerY = frame.y + frame.height * 0.5
+  const angle = (frame.angle_degrees * Math.PI) / 180
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+
+  const corners = [
+    { x: -frame.width * 0.5, y: -frame.height * 0.5 },
+    { x: frame.width * 0.5, y: -frame.height * 0.5 },
+    { x: frame.width * 0.5, y: frame.height * 0.5 },
+    { x: -frame.width * 0.5, y: frame.height * 0.5 },
+  ]
+
+  return corners.every((corner) => {
+    const x = centerX + corner.x * cos - corner.y * sin
+    const y = centerY + corner.x * sin + corner.y * cos
+
+    return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+  })
 }
 
 export function frameContains(frame: Frame, point: Point): boolean {

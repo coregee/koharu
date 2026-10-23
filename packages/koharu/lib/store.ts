@@ -13,6 +13,7 @@ import type {
   Stage,
   StartupState,
   ModelResources,
+  PageSize,
 } from '@koharu/bridge/protocol'
 import { toast } from '@koharu/ui/components/toast'
 
@@ -28,7 +29,12 @@ export type CanvasTool =
   | 'pan'
 export type ToolMode = 'removal' | 'repair' | 'decensor' | 'paint'
 export const MIN_BRUSH_DIAMETER = 1
-export const MAX_BRUSH_DIAMETER = 128
+export function maxBrushDiameter(size: PageSize): number {
+  // Assume that for all sizes below 2048 width, 128 is sufficient.
+  // For anything above, scale by percentage greater than 2048 width.
+  return Math.round(Math.max(size.width / 2048, 1.0) * 128)
+}
+
 export const MIN_FILL_TOLERANCE = 0
 export const MAX_FILL_TOLERANCE = 255
 export function isBrushTool(tool: CanvasTool): boolean {
@@ -143,7 +149,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   brush: { diameter: 48, color: '#FFFFFF' },
   fillTolerance: 32,
   inspector: 'copy',
-  processingScope: 'page',
+  processingScope: 'selected-pages',
   processingStages: [...pipelineStages],
   settingsOpen: false,
   shortcuts: defaultShortcuts,

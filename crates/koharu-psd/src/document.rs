@@ -252,9 +252,8 @@ async fn rasterize(
     options: RasterOptions,
 ) -> Result<Raster, PsdExportError> {
     let frame = frame.raster_frame()?;
-    tokio::task::spawn_blocking(move || rasterizer.rasterize(&frame, options))
+    tokio_rayon::spawn(move || rasterizer.rasterize(&frame, options))
         .await
-        .map_err(|error| PsdExportError::Task(error.to_string()))?
         .map_err(PsdExportError::Rasterizer)
 }
 
@@ -275,9 +274,7 @@ async fn read_image(
     };
     let bytes = snapshot.read_blob(asset.blob).await?;
     Ok(Some(
-        tokio::task::spawn_blocking(move || image::load_from_memory(&bytes))
-            .await
-            .map_err(|error| PsdExportError::Task(error.to_string()))??,
+        tokio_rayon::spawn(move || image::load_from_memory(&bytes)).await?,
     ))
 }
 

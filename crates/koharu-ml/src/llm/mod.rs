@@ -44,9 +44,7 @@ impl Llm {
     ) -> Result<Self> {
         let model_path = model_path.into();
         let device = crate::device_for_feature(device, Feature::Llama);
-        let model = tokio::task::spawn_blocking(move || Model::new(&device, model_path, options))
-            .await
-            .context("LLM loading task panicked")??;
+        let model = tokio_rayon::spawn(move || Model::new(&device, model_path, options)).await?;
         Ok(Self { model })
     }
 

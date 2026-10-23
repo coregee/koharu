@@ -347,6 +347,7 @@ mod tests {
             &TextLayout {
                 origin: Origin::User,
                 kind: TextLayoutKind::Paragraph,
+                angle_degrees: None,
             },
         )?;
         Ok(content)

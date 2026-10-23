@@ -28,7 +28,7 @@ import {
   Type,
   Unlock,
 } from 'lucide-react'
-import { useEffect, useId, useMemo, useRef, useState, type DragEvent } from 'react'
+import { type DragEvent, type MouseEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ColorWell } from '@/components/controls/ColorWell'
@@ -695,6 +695,7 @@ function LayersInspector() {
     edge: 'before' | 'after'
   } | null>(null)
   const [addingImage, setAddingImage] = useState(false)
+  const anchor = useRef<EntityId | null>(null)
 
   useEffect(() => {
     setExpandedLayer(selected.length === 1 ? (selected[0] ?? null) : null)
@@ -787,13 +788,41 @@ function LayersInspector() {
       })
       .catch(() => undefined)
 
-  const selectLayer = (layer: EntityId) => {
-    if (selected.length === 1 && selected[0] === layer) {
-      setExpandedLayer((current) => (current === layer ? null : layer))
+  // Modifier semantics mirror the page rail: ctrl/meta toggles, shift selects a display range.
+  const selectLayer = (layer: EntityId, additive: boolean, range: boolean) => {
+    if (!additive && !range) {
+      anchor.current = layer
+      if (selected.length === 1 && selected[0] === layer) {
+        setExpandedLayer((current) => (current === layer ? null : layer))
+        return
+      }
+      selectLayers([layer])
+      setExpandedLayer(layer)
       return
     }
-    selectLayers([layer])
-    setExpandedLayer(layer)
+    const order = layers.map((row) => row.layer.id)
+    const anchorIndex = anchor.current ? order.indexOf(anchor.current) : -1
+    if (range && anchorIndex >= 0) {
+      const targetIndex = order.indexOf(layer)
+      const span = layers
+        .slice(Math.min(anchorIndex, targetIndex), Math.max(anchorIndex, targetIndex) + 1)
+        .filter(
+          (row) => row.layer.type !== 'artwork' && !effectiveLayerLocked(page.layers, row.layer),
+        )
+        .map((row) => row.layer.id)
+      selectLayers(additive ? [...selected, ...span] : span)
+      return
+    }
+    anchor.current = layer
+    if (!additive) {
+      selectLayers([layer])
+      return
+    }
+    selectLayers(
+      selected.includes(layer)
+        ? selected.filter((selectedLayer) => selectedLayer !== layer)
+        : [...selected, layer],
+    )
   }
 
   const toggleGroup = (group: EntityId) => {
@@ -868,7 +897,9 @@ function LayersInspector() {
                 childrenExpanded={!isGroupLayer(layer) || !collapsedGroups.has(layer.id)}
                 locked={locked}
                 lockable={layer.type !== 'artwork' && (!locked || layer.locked)}
-                onSelect={() => selectLayer(layer.id)}
+                onSelect={(event) =>
+                  selectLayer(layer.id, event.ctrlKey || event.metaKey, event.shiftKey)
+                }
                 onToggleChildren={isGroupLayer(layer) ? () => toggleGroup(layer.id) : undefined}
                 onToggle={() =>
                   void call(commands.setVisibility, [layer.id], !layer.visibility.visible, null)
@@ -998,7 +1029,7 @@ function LayerRow({
   childrenExpanded: boolean
   locked: boolean
   lockable: boolean
-  onSelect: () => void
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void
   onToggleChildren?: () => void
   onToggle: () => void
   onLockToggle: () => void

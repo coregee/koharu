@@ -229,6 +229,7 @@ pub enum Layer {
         parent: Option<EntityId>,
         locked: bool,
         geometry: Option<Geometry>,
+        angle_degrees: Option<f32>,
         visibility: LayerVisibility,
         content: Box<TextContent>,
         typography: Option<Typography>,
@@ -681,6 +682,7 @@ impl Project {
                 &SceneTextLayout {
                     origin: Origin::User,
                     kind: TextLayoutKind::Paragraph,
+                    angle_degrees: Some(frame.angle_degrees),
                 },
             )?;
             layer = Some(added_layer);
@@ -1024,8 +1026,9 @@ impl Project {
                 if Self::is_effectively_locked(&snapshot, update.layer)? {
                     bail!("locked layers cannot change geometry");
                 }
-                let content = snapshot
-                    .component::<SceneTextLayout>(update.layer)?
+                let layout = snapshot.component::<SceneTextLayout>(update.layer)?;
+                let content = layout
+                    .as_ref()
                     .map(|_| Self::text_content(&snapshot, update.layer))
                     .transpose()?;
                 if update.points.is_none() {
@@ -1038,14 +1041,19 @@ impl Project {
                         bail!("only automatically placed text can reset its geometry");
                     }
                 }
-                Ok((update, content))
+                Ok((update, content, layout))
             })
             .collect::<Result<Vec<_>>>()?;
         let patch = snapshot.patch(|edit| {
-            for (update, content) in updates {
+            for (update, content, mut layout) in updates {
                 edit.promote_entity_to_user(update.layer)?;
                 if let Some(content) = content {
                     edit.promote_entity_to_user(content)?;
+                }
+                if let Some(layout) = layout.as_mut() {
+                    layout.origin = Origin::User;
+                    layout.angle_degrees = None;
+                    edit.set(update.layer, layout)?;
                 }
                 match update.points {
                     Some(points) => edit.set(
@@ -1539,33 +1547,43 @@ impl Project {
 
     pub(crate) async fn set_geometries(
         &mut self,
-        geometries: impl IntoIterator<Item = (EntityId, SceneGeometry)>,
+        geometries: impl IntoIterator<Item = (EntityId, SceneGeometry, f32)>,
     ) -> Result<Commit> {
         let snapshot = self.snapshot();
         let geometries = geometries
             .into_iter()
-            .map(|(element, geometry)| {
+            .map(|(element, geometry, angle_degrees)| {
                 if !Self::is_transformable_layer(&snapshot, element)? {
                     bail!("only text and image layers can change geometry");
                 }
                 if Self::is_effectively_locked(&snapshot, element)? {
                     bail!("locked layers cannot change geometry");
                 }
-                let content = snapshot
+                let layout = snapshot
                     .component::<SceneTextLayout>(element)?
+                    .map(|mut layout| {
+                        layout.origin = Origin::User;
+                        layout.angle_degrees = Some(angle_degrees);
+                        layout
+                    });
+                let content = layout
+                    .as_ref()
                     .map(|_| Self::text_content(&snapshot, element))
                     .transpose()?;
-                Ok((element, geometry, content))
+                Ok((element, geometry, content, layout))
             })
             .collect::<Result<Vec<_>>>()?;
         let patch = snapshot.patch(|edit| {
-            for (element, mut geometry, content) in geometries {
+            for (element, mut geometry, content, layout) in geometries {
                 edit.promote_entity_to_user(element)?;
                 if let Some(content) = content {
                     edit.promote_entity_to_user(content)?;
                 }
                 geometry.origin = Origin::User;
                 edit.set(element, &geometry)?;
+                if let Some(layout) = layout {
+                    edit.set(element, &layout)?;
+                }
             }
             Ok(())
         })?;
@@ -2202,6 +2220,7 @@ impl Project {
                 geometry: snapshot
                     .component::<SceneGeometry>(layer)?
                     .map(Self::geometry_view),
+                angle_degrees: layout.angle_degrees,
                 visibility,
                 content: Box::new(TextContent {
                     id: content.id(),
@@ -3019,6 +3038,7 @@ mod tests {
                             ScenePoint { x: 0.0, y: 350.0 },
                         ],
                     },
+                    0.0,
                 )])
                 .await
                 .is_err()
@@ -3460,7 +3480,11 @@ mod tests {
             .await
             .unwrap();
         project
-            .set_geometries([(layer, SceneGeometry::rectangle(20.0, 30.0, 50.0, 100.0))])
+            .set_geometries([(
+                layer,
+                SceneGeometry::rectangle(20.0, 30.0, 50.0, 100.0),
+                0.0,
+            )])
             .await
             .unwrap();
         let original_blob = project

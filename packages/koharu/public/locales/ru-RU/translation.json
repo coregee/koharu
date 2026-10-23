@@ -13,6 +13,7 @@
     "downloadingFiles_other": "Скачивание файлов: {{count}}",
     "modelDownload": "Скачивание модели",
     "pageProgress": "Страницы {{completed}}/{{total}}",
+    "pageLabel": "Страница {{number}}: {{label}}",
     "processing": "Обработка",
     "processingFailed": "Ошибка обработки.",
     "stop": "Остановить",
@@ -219,13 +220,16 @@
     "width": "Ширина"
   },
   "languages": {
+    "ar": "العربية",
     "en-US": "English",
     "es-ES": "Español",
+    "fr-FR": "Français",
     "ja-JP": "日本語",
     "ko-KR": "한국어",
     "pt-BR": "Português brasileiro",
     "ru-RU": "Русский",
     "tr-TR": "Türkçe",
+    "wuu": "吴语",
     "zh-CN": "简体中文",
     "zh-TW": "繁體中文"
   },
@@ -312,13 +316,12 @@
     "delete": "Удалить выбранное",
     "discord": "Discord",
     "edit": "Правка",
-    "exportPng": "Экспорт PNG…",
-    "exportPsd": "Экспорт PSD…",
+    "export": "Экспорт проекта",
     "file": "Файл",
     "fit": "Вписать в окно",
     "github": "GitHub",
     "help": "Справка",
-    "importPages": "Импортировать страницы…",
+    "import": "Импортировать страницы",
     "process": "Обработка",
     "paste": "Вставить",
     "processLayers": "Обработать выбранные слои",
@@ -366,7 +369,8 @@
     "pages": "Страницы",
     "rename": "Переименовать",
     "renameDescription": "Выберите новое имя для страницы.",
-    "renameTitle": "Переименовать страницу"
+    "renameTitle": "Переименовать страницу",
+    "selected": "Выбрано: {{count}}"
   },
   "outputPicker": {
     "instructions": "Инструкции по переводу",
@@ -389,7 +393,6 @@
     "translation": "Переводит исходный текст на целевой язык."
   },
   "providerDescriptions": {
-    "atlas-cloud": "Языковые модели, размещённые в Atlas.",
     "caiyun": "API перевода Caiyun.",
     "claude": "Модели Anthropic Claude.",
     "deepl": "API перевода DeepL.",

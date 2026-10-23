@@ -255,12 +255,6 @@ pub(crate) async fn list_projects(
     Ok(library.list()?)
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "project_created",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn create_project(
@@ -273,12 +267,6 @@ pub(crate) async fn create_project(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "project_opened",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn open_project(
@@ -291,12 +279,6 @@ pub(crate) async fn open_project(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "project_closed",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn close_project(handle: AppHandle<CefRuntime>) -> std::result::Result<(), Error> {
@@ -304,12 +286,6 @@ pub(crate) async fn close_project(handle: AppHandle<CefRuntime>) -> std::result:
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "project_deleted",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn delete_project(
@@ -329,7 +305,7 @@ pub(crate) async fn delete_project(
     let library = handle.state::<ProjectLibrary>().inner().clone();
     tokio::task::spawn_blocking(move || library.delete(&name))
         .await
-        .context("project deletion worker stopped unexpectedly")??;
+        .context("project deletion task failed")??;
     Ok(())
 }
 
@@ -355,15 +331,9 @@ async fn close_current_project(handle: &AppHandle<CefRuntime>) -> Result<()> {
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "import",
-    skip_all,
-    fields(origin = "user", method = ?source),
-)]
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn import_pages(
+pub(crate) async fn import(
     source: PageImportSource,
     window: WebviewWindow<CefRuntime>,
     desktop: State<'_, Desktop>,
@@ -413,10 +383,7 @@ pub(crate) async fn import_pages(
     if files.is_empty() {
         return Err(anyhow::anyhow!("no supported images were found in the selection").into());
     }
-    let pages = tokio::task::spawn_blocking(move || import::import(files))
-        .await
-        .context("page import worker stopped unexpectedly")??;
-    let page_count = pages.len();
+    let pages = tokio_rayon::spawn(move || import::import(files)).await?;
 
     let (commit, page) = {
         let mut project = project.project.lock().await;
@@ -430,16 +397,9 @@ pub(crate) async fn import_pages(
     desktop.synchronize(&commit.snapshot, page, &commit).await?;
     let canvas = desktop.canvas_state();
     canvas_channel.channel.publish(canvas);
-    tracing::info!(target: "koharu_metrics", metric = "page_imported", page_count);
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "page_selected",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn select_page(

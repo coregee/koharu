@@ -36,12 +36,6 @@ pub struct TypographyUpdate {
     pub typography: Typography,
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "page_renamed",
-    skip_all,
-    fields(origin = "user", character_count = label.chars().count(), empty = label.is_empty()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn rename_page(
@@ -76,12 +70,6 @@ pub(crate) async fn set_translation_system_prompt(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "pages_deleted",
-    skip_all,
-    fields(origin = "user", entity_count = pages.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn delete_pages(
@@ -103,12 +91,6 @@ pub(crate) async fn delete_pages(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "page_moved",
-    skip_all,
-    fields(origin = "user", page_number = index + 1),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn move_page(
@@ -130,12 +112,6 @@ pub(crate) async fn move_page(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "source_text_edited",
-    skip_all,
-    fields(origin = "user", character_count = text.chars().count(), empty = text.is_empty()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_source_text(
@@ -157,12 +133,6 @@ pub(crate) async fn set_source_text(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "text_classification_edited",
-    skip_all,
-    fields(origin = "user", classification = ?classification),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_text_classification(
@@ -186,16 +156,6 @@ pub(crate) async fn set_text_classification(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "translation_edited",
-    skip_all,
-    fields(
-        origin = "user",
-        character_count = text.as_ref().map_or(0, |text| text.chars().count()),
-        empty = text.as_ref().is_none_or(String::is_empty),
-    ),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_translation(
@@ -217,12 +177,6 @@ pub(crate) async fn set_translation(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "typography_edited",
-    skip_all,
-    fields(origin = "user", entity_count = updates.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_typography(
@@ -243,12 +197,6 @@ pub(crate) async fn set_typography(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "geometry_edited",
-    skip_all,
-    fields(origin = "user", entity_count = updates.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_geometry(
@@ -269,12 +217,6 @@ pub(crate) async fn set_geometry(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "region_geometry_edited",
-    skip_all,
-    fields(origin = "user", region = %region),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_region_geometry(
@@ -296,12 +238,6 @@ pub(crate) async fn set_region_geometry(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "ocr_inclusion_edited",
-    skip_all,
-    fields(origin = "user", included)
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_ocr_inclusion(
@@ -323,12 +259,6 @@ pub(crate) async fn set_ocr_inclusion(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "region_shape_edited",
-    skip_all,
-    fields(origin = "user", region = %region, shape = ?shape),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_region_shape(
@@ -350,12 +280,6 @@ pub(crate) async fn set_region_shape(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "visibility_edited",
-    skip_all,
-    fields(origin = "user", entity_count = layers.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_visibility(
@@ -378,12 +302,6 @@ pub(crate) async fn set_visibility(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "layer_lock_edited",
-    skip_all,
-    fields(origin = "user", entity_count = layers.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_layer_locked(
@@ -407,12 +325,6 @@ pub(crate) async fn set_layer_locked(
     Ok(view)
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "image_layer_added",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn add_image_layer(
@@ -450,12 +362,6 @@ pub(crate) async fn add_image_layer(
     Ok(Some(view))
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "bubble_layer_added",
-    skip_all,
-    fields(origin = "user", shape = ?shape)
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn add_bubble_layer(
@@ -478,12 +384,6 @@ pub(crate) async fn add_bubble_layer(
     Ok(AddedLayer { page: view, layer })
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "bubble_style_edited",
-    skip_all,
-    fields(origin = "user", layer = %layer)
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_bubble_style(
@@ -507,12 +407,6 @@ pub(crate) async fn set_bubble_style(
     Ok(view)
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "layers_copied",
-    skip_all,
-    fields(origin = "user", entity_count = layers.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn copy_layers(
@@ -525,12 +419,6 @@ pub(crate) async fn copy_layers(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "layers_pasted",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn paste_layers(
@@ -551,12 +439,6 @@ pub(crate) async fn paste_layers(
     Ok(pasted)
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "layers_deleted",
-    skip_all,
-    fields(origin = "user", entity_count = layers.len()),
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn delete_layers(
@@ -577,12 +459,6 @@ pub(crate) async fn delete_layers(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "layer_moved",
-    skip_all,
-    fields(origin = "user", entity_count = 1_u64)
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn move_layer(
@@ -609,12 +485,6 @@ pub(crate) async fn move_layer(
     Ok(view)
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "undo",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn undo(
@@ -634,12 +504,6 @@ pub(crate) async fn undo(
     Ok(())
 }
 
-#[tracing::instrument(
-    target = "koharu_metrics",
-    name = "redo",
-    skip_all,
-    fields(origin = "user")
-)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn redo(

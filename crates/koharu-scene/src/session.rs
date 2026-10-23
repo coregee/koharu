@@ -277,6 +277,7 @@ mod tests {
                         &TextLayout {
                             origin: Origin::User,
                             kind: TextLayoutKind::Paragraph,
+                            angle_degrees: None,
                         },
                     )?;
                     created = Some((page, layer));
